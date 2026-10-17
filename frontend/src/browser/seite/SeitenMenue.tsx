@@ -35,6 +35,7 @@ import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 import { useAnsicht } from '../entwickler/werkzeuge'
 import { useAnSingra } from '../services/anSingra'
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
+import { kopiereSauberenLink } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
 import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
@@ -104,7 +105,6 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
       tun()
     },
   })
-  const kopieren = (text: string) => void navigator.clipboard.writeText(text).catch(() => null)
 
   const items: ActionMenuItem[] = []
   if (menue.link) {
@@ -114,7 +114,9 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
         neuerTab(link, { nach: tab.id, privat: tab.privat, hintergrund: true }),
       ),
       eigen('link-privat', t('browser.menue.linkPrivat'), <VenetianMask />, () => neuerTab(link, { privat: true })),
-      eigen('link-kopieren', t('browser.menue.linkKopieren'), <Link2 />, () => kopieren(link)),
+      eigen('link-kopieren', t('browser.menue.linkKopieren'), <Link2 />, () => {
+        void kopiereSauberenLink(link, t('browser.adresse.linkBereinigtKopiert'))
+      }),
       ...nativEintrag('saveLinkAs'),
     )
   }
@@ -125,7 +127,9 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
         neuerTab(bild, { nach: tab.id, privat: tab.privat, hintergrund: true }), items.length > 0),
       ...nativEintrag('saveImageAs'),
       ...nativEintrag('copyImage'),
-      eigen('bild-adresse', t('browser.menue.bildAdresse'), <Link2 />, () => kopieren(bild)),
+      eigen('bild-adresse', t('browser.menue.bildAdresse'), <Link2 />, () => {
+        void kopiereSauberenLink(bild, t('browser.adresse.linkBereinigtKopiert'))
+      }),
     )
   }
   const bearbeiten = ['cut', 'copy', 'paste', 'pasteAndMatchStyle', 'selectAll'].flatMap((n, i) => nativEintrag(n, i === 0 && items.length > 0))

@@ -40,12 +40,19 @@ pub mod android;
 pub use ereignis::{melden, Antwort, DownloadStand, MenueEintrag, TabEreignis, EREIGNIS};
 pub use weg::{erweiterungen_setzen, extern_oeffnen, externes_protokoll, id_pruefen, navigation_erlaubt, vorab, weg, ziel_pruefen, Vorab, Weg};
 
-#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Rahmen {
     pub x: f64,
     pub y: f64,
     pub breite: f64,
     pub hoehe: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct SplitZustand {
+    pub sekundaer_id: String,
+    pub primaer_rahmen: Rahmen,
+    pub sekundaer_rahmen: Rahmen,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +65,7 @@ pub struct TabDaten {
 pub struct Zustand {
     pub tabs: HashMap<String, TabDaten>,
     pub aktiv: Option<String>,
+    pub split: Option<SplitZustand>,
     pub rahmen: Rahmen,
     /// Die Oberfläche legt gerade etwas über den Inhaltsbereich (Dialog,
     /// Vorschlagsliste). Native Webviews liegen immer oben, deshalb muss der
@@ -76,6 +84,7 @@ impl Default for Zustand {
         Self {
             tabs: HashMap::new(),
             aktiv: None,
+            split: None,
             rahmen: Rahmen { x: 0.0, y: 0.0, breite: 800.0, hoehe: 600.0 },
             verdeckt: false,
             vollbild: None,
@@ -90,7 +99,16 @@ impl Zustand {
         if let Some(v) = &self.vollbild {
             return v == id;
         }
-        !self.verdeckt && self.aktiv.as_deref() == Some(id)
+        if self.verdeckt {
+            return false;
+        }
+        if self.aktiv.as_deref() == Some(id) {
+            return true;
+        }
+        if let Some(s) = &self.split {
+            return s.sekundaer_id == id;
+        }
+        false
     }
 
     /// Legt `id` nach vorne; der bisherige vordere Tab gilt ab `jetzt` als verborgen.
@@ -114,12 +132,28 @@ pub fn tab_laden(
     id: String,
     url: String,
     privat: bool,
+    workspace: Option<String>,
 ) -> Result<(), String> {
     id_pruefen(&id)?;
     let ziel = ziel_pruefen(&url)?;
     crate::schild::schutz_dienst::bereit()?;
     eintragen(&tabs, &id, privat);
-    plattform::laden(&app, &tabs, &id, ziel, privat)
+    plattform::laden(&app, &tabs, &id, ziel, privat, workspace.as_deref())
+}
+
+#[tauri::command(async)]
+pub fn tab_verwerfen(app: AppHandle, id: String) -> Result<(), String> {
+    id_pruefen(&id)?;
+    #[cfg(windows)]
+    {
+        desktop::tab_verwerfen(&app, &id);
+    }
+    #[cfg(target_os = "android")]
+    {
+        let _ = app;
+        let _ = id;
+    }
+    Ok(())
 }
 
 /// Merkt sich einen Tab, bevor seine Webview entsteht.
@@ -236,11 +270,65 @@ pub fn tab_aktion(app: AppHandle, id: String, aktion: String) -> Result<(), Stri
     plattform::aktion(&app, &id, &aktion)
 }
 
+/// Löscht alle Spuren der aktuellen Seite (Cookies, LocalStorage, Cache) und lädt sie neu.
+#[tauri::command(async)]
+pub fn tab_seite_zuruecksetzen(app: AppHandle, id: String) -> Result<(), String> {
+    id_pruefen(&id)?;
+    #[cfg(windows)]
+    {
+        desktop::seite_zuruecksetzen(&app, &id)
+    }
+    #[cfg(not(windows))]
+    {
+        plattform::aktion(&app, &id, "neu_laden")
+    }
+}
+
 /// Wo der Inhaltsbereich im Fenster liegt (logische Pixel).
 #[tauri::command(async)]
 pub fn tabs_rahmen(app: AppHandle, tabs: State<'_, Tabs>, rahmen: Rahmen) -> Result<(), String> {
     tabs.0.lock().unwrap().rahmen = rahmen;
     plattform::rahmen_anwenden(&app, &tabs);
+    Ok(())
+}
+
+/// Teilt den Anzeigebereich für zwei Webviews gleichzeitig (Desktop & Mobile).
+#[tauri::command(async)]
+pub fn tabs_split_setzen(
+    app: AppHandle,
+    tabs: State<'_, Tabs>,
+    primaer_id: String,
+    primaer_rahmen: Rahmen,
+    sekundaer_id: String,
+    sekundaer_rahmen: Rahmen,
+) -> Result<(), String> {
+    id_pruefen(&primaer_id)?;
+    id_pruefen(&sekundaer_id)?;
+    {
+        let mut z = tabs.0.lock().unwrap();
+        z.aktiv = Some(primaer_id.clone());
+        z.tabs.entry(primaer_id.clone()).or_insert(TabDaten { privat: false, verborgen_seit: None });
+        z.tabs.entry(sekundaer_id.clone()).or_insert(TabDaten { privat: false, verborgen_seit: None });
+        z.split = Some(SplitZustand {
+            sekundaer_id,
+            primaer_rahmen,
+            sekundaer_rahmen,
+        });
+    }
+    plattform::rahmen_anwenden(&app, &tabs);
+    plattform::sichtbarkeit(&app, &tabs);
+    Ok(())
+}
+
+/// Hebt die geteilte Ansicht auf und stellt den Vollmodus für den aktiven Tab wieder her.
+#[tauri::command(async)]
+pub fn tabs_split_aufheben(app: AppHandle, tabs: State<'_, Tabs>) -> Result<(), String> {
+    {
+        let mut z = tabs.0.lock().unwrap();
+        z.split = None;
+    }
+    plattform::rahmen_anwenden(&app, &tabs);
+    plattform::sichtbarkeit(&app, &tabs);
     Ok(())
 }
 

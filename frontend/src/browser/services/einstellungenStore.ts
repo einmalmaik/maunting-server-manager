@@ -10,7 +10,18 @@ import { ablage, passend } from './ablage'
 import { wirksameSuche, type SuchmaschinenId } from './searchEngines'
 import { istGekoppelt, useSitzung } from './sitzung'
 
-export type Hintergrund = 'schlicht' | 'nacht' | 'wald' | 'tiefsee' | 'eigen'
+export type Hintergrund =
+  | 'schlicht'
+  | 'nacht'
+  | 'wald'
+  | 'tiefsee'
+  | 'wechsel'
+  | 'erde'
+  | 'sonnensystem'
+  | 'bergwald'
+  | 'ozean'
+  | 'feld'
+  | 'eigen'
 
 /** Ein eigenes Bild liegt als data:-URI im localStorage; größer passt dort nicht sicher hinein. */
 export const EIGENES_BILD_MAX_BYTES = 3 * 1024 * 1024
@@ -31,6 +42,9 @@ export type Ausblendbar = Leistenziel | Knopf
  * als Leiste links oder rechts, oder als kleine Symbole oben.
  */
 export type Leistenort = 'menue' | 'links' | 'rechts' | 'oben'
+
+/** Ausrichtung der Tabs: standardmäßig vertikal mit Baumstruktur, oder klassisch horizontal oben. */
+export type TabAusrichtung = 'vertikal' | 'horizontal'
 
 /** Eine Kachel der Startseite. */
 export interface Schnellzugriff {
@@ -70,6 +84,7 @@ interface EinstellungenZustand {
   suchRegion: string | null
   searxngUrl: string | null
   hintergrund: Hintergrund
+  hintergrundBlur: number
   eigenesBild: string | null
   /** Was der Nutzer ausgeblendet hat: Einträge und Knöpfe. */
   ausgeblendet: Ausblendbar[]
@@ -108,6 +123,10 @@ interface EinstellungenZustand {
   widgetAngeboten: boolean
   /** Unter Windows kurz nach dem Start bei GitHub nach einer neuen Version fragen. */
   updatesSuchen: boolean
+  tabAusrichtung: TabAusrichtung
+  vertikaleTabsEingeklappt: boolean
+  /** Beim Kopieren von URLs Tracking-Parameter automatisch entfernen. */
+  cleanCopy: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -136,7 +155,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       suchmaschine: null,
       suchRegion: null,
       searxngUrl: null,
-      hintergrund: 'schlicht',
+      hintergrund: 'wechsel',
+      hintergrundBlur: 30,
       eigenesBild: null,
       ausgeblendet: [],
       leiste: 'menue',
@@ -159,6 +179,9 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schlafAusnahmen: [],
       widgetAngeboten: false,
       updatesSuchen: true,
+      tabAusrichtung: 'vertikal',
+      vertikaleTabsEingeklappt: false,
+      cleanCopy: true,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>

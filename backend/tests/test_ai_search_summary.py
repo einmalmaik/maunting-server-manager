@@ -297,7 +297,7 @@ async def test_folgefrage_schreibt_um_sucht_zweimal_und_oeffnet_zwei_seiten(db, 
 
     ge_scrapet: list[str] = []
 
-    def fake_scrape(url: str, max_chars: int = 3500):
+    def fake_scrape(url: str, max_chars: int = 3500, *args, **kwargs):
         ge_scrapet.append(url)
         return {"title": "Seite", "url": url, "content": "Voller Seiteninhalt"}
 
@@ -349,7 +349,7 @@ async def test_vertiefung_behaelt_alte_treffer_und_trennt_abschnitte(db, monkeyp
     monkeypatch.setattr(
         ai_search_summary_service.ai_web_search_service,
         "scrape_url",
-        lambda url, max_chars=3500: {"title": "S", "url": url, "content": ""},
+        lambda url, max_chars=3500, *args, **kwargs: {"title": "S", "url": url, "content": ""},
     )
 
     gesehen: dict = {}
@@ -393,7 +393,7 @@ async def test_kaputtes_umschreiben_faellt_auf_woertliche_suche_zurueck(db, monk
     monkeypatch.setattr(
         ai_search_summary_service.ai_web_search_service,
         "scrape_url",
-        lambda url, max_chars=3500: {"title": "S", "url": url, "content": ""},
+        lambda url, max_chars=3500, *args, **kwargs: {"title": "S", "url": url, "content": ""},
     )
 
     # Umschreiben liefert kein JSON, die Antwort danach läuft normal
@@ -489,4 +489,170 @@ def test_browser_suche_konfig_route(db, monkeypatch) -> None:
     assert daten["modell"] == "test-model"
     assert daten["denkstufen"] == ["minimal", "low"]
     assert daten["max_denkstufe"] == "low"
+
+
+def test_baue_suchkontext_mit_volltext() -> None:
+    treffer = [
+        {
+            "index": 1,
+            "titel": "Witcher 4 News",
+            "url": "https://example.com/w4",
+            "inhalt": "Kurzes Snippet",
+            "volltext": "Das Spiel wird auf Basis der Unreal Engine 5 entwickelt. Release nicht vor 2026.",
+        }
+    ]
+    kontext = ai_search_summary_service.baue_suchkontext(treffer)
+    assert "[1] Witcher 4 News" in kontext
+    assert "Auszug: Kurzes Snippet" in kontext
+    assert "Volltext-Auszug: Das Spiel wird auf Basis der Unreal Engine 5 entwickelt" in kontext
+
+
+@pytest.mark.asyncio
+async def test_stream_suchzusammenfassung_scrapes_initial_top_results(db, monkeypatch) -> None:
+    user, _ = _nutzer_mit_anbieter(db)
+    monkeypatch.setattr("services.permission_service.has_global_permission", lambda _db, _u, _k: True)
+
+    scraped_urls = []
+
+    def fake_scrape_parallel(urls, max_chars=2500, limit=4):
+        scraped_urls.extend(urls)
+        return {u: f"Extrahierter Volltext fuer {u}" for u in urls}
+
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "scrape_top_urls_parallel",
+        fake_scrape_parallel,
+    )
+
+    gesehen: dict = {}
+
+    async def fake_stream(*args, **kwargs) -> AsyncIterator[StreamChunk]:
+        gesehen["messages"] = kwargs.get("messages", [])
+        yield StreamChunk(kind="content", text="Antwort basierend auf Volltext.")
+
+    monkeypatch.setattr(ai_search_summary_service, "stream_chat_completion", fake_stream)
+
+    treffer = [
+        {"index": 1, "titel": "Witcher 4 Info", "url": "https://example.com/1", "inhalt": "Snippet 1"},
+        {"index": 2, "titel": "CDPR Ankündigung", "url": "https://example.com/2", "inhalt": "Snippet 2"},
+    ]
+
+    events = await _ereignisse_sammeln(
+        ai_search_summary_service,
+        db=db,
+        user=user,
+        q="Wann kommt The Witcher 4 raus?",
+        treffer=treffer,
+        verlauf=[],
+    )
+    assert "done" in _ereignis_typen(events)
+    assert "https://example.com/1" in scraped_urls
+    assert "https://example.com/2" in scraped_urls
+
+    nutzer_msg = [m for m in gesehen["messages"] if m["role"] == "user"][0]["content"]
+    assert "Volltext-Auszug: Extrahierter Volltext fuer https://example.com/1" in nutzer_msg
+
+
+@pytest.mark.asyncio
+async def test_stream_suchzusammenfassung_followup_preserves_fulltext(db, monkeypatch) -> None:
+    user, _ = _nutzer_mit_anbieter(db)
+    monkeypatch.setattr("services.permission_service.has_global_permission", lambda _db, _u, _k: True)
+
+    async def fake_umschreiben(*args, **kwargs):
+        return {"suchanfragen": ["Witcher 4 Release"], "themenwechsel": False}
+
+    monkeypatch.setattr(
+        ai_search_summary_service,
+        "suchanfragen_umschreiben",
+        fake_umschreiben,
+    )
+
+    def fake_searx_treffer(query, limit=5):
+        return [{
+            "title": "Frische News",
+            "url": "https://example.com/frisch",
+            "snippet": "Neuer Snippet-Text",
+        }]
+
+    monkeypatch.setattr(ai_search_summary_service.ai_web_search_service, "searxng_treffer", fake_searx_treffer)
+    monkeypatch.setattr(
+        ai_search_summary_service.ai_web_search_service,
+        "scrape_url",
+        lambda url, max_chars=3500, *args, **kwargs: {"title": "Frische News", "url": url, "content": "Volltext ueber 1000 Zeichen: " + ("Detail " * 150)},
+    )
+
+    gesehen: dict = {}
+
+    async def fake_stream(*args, **kwargs) -> AsyncIterator[StreamChunk]:
+        gesehen["messages"] = kwargs.get("messages", [])
+        yield StreamChunk(kind="content", text="Antwort basierend auf Volltext.")
+
+    monkeypatch.setattr(ai_search_summary_service, "stream_chat_completion", fake_stream)
+
+    treffer = [{"index": 1, "titel": "Alte News", "url": "https://example.com/alt", "inhalt": "Alt"}]
+    verlauf = [{"role": "user", "content": "Erste Frage"}, {"role": "assistant", "content": "Erste Antwort"}]
+
+    events = await _ereignisse_sammeln(
+        ai_search_summary_service,
+        db=db,
+        user=user,
+        q="Gibt es schon einen Trailer?",
+        treffer=treffer,
+        verlauf=verlauf,
+    )
+    assert "done" in _ereignis_typen(events)
+    nutzer_msg = [m for m in gesehen["messages"] if m["role"] == "user"][0]["content"]
+    assert "Volltext-Auszug: Volltext ueber 1000 Zeichen:" in nutzer_msg
+
+
+def test_erkenne_deep_dive_quellen() -> None:
+    treffer = [
+        {"index": 1, "titel": "Tom's Hardware RTX 5090", "url": "https://www.tomshardware.com/gpu/5090"},
+        {"index": 2, "titel": "Heise Online Benchmark", "url": "https://www.heise.de/news/benchmarks"},
+        {"index": 3, "titel": "ComputerBase Test", "url": "https://www.computerbase.de/artikel"},
+    ]
+    # 1. Direkte Indizes [1] oder [2]
+    q1 = ai_search_summary_service.erkenne_deep_dive_quellen("Lies bitte Quelle [2] genauer.", treffer)
+    assert len(q1) == 1
+    assert q1[0]["index"] == 2
+
+    # 2. Textuelle Referenzen ("erste Quelle")
+    q2 = ai_search_summary_service.erkenne_deep_dive_quellen("Was steht in der ersten Quelle zu Benchmarks?", treffer)
+    assert len(q2) == 1
+    assert q2[0]["index"] == 1
+
+    # 3. Domain-Bezug
+    q3 = ai_search_summary_service.erkenne_deep_dive_quellen("Was berichtet heise ueber die Ergebnisse?", treffer)
+    assert len(q3) == 1
+    assert q3[0]["index"] == 2
+
+    # 4. Allgemeine Detailanfrage -> Top 2 Quellen
+    q4 = ai_search_summary_service.erkenne_deep_dive_quellen("Zeige mir die genauen FPS und Benchmarks im Detail", treffer)
+    assert len(q4) == 2
+    assert [t["index"] for t in q4] == [1, 2]
+
+    # 5. Keine Detailanfrage
+    q5 = ai_search_summary_service.erkenne_deep_dive_quellen("Danke fuer die Antwort!", treffer)
+    assert len(q5) == 0
+
+
+def test_baue_suchkontext_deep_dive() -> None:
+    normaler_text = "Standard " * 400
+    deep_text = "Benchmark Tabellenwerte " * 500
+
+    treffer = [
+        {"index": 1, "titel": "Normaler Treffer", "url": "https://example.com/1", "inhalt": "Auszug", "volltext": normaler_text, "deep": False},
+        {"index": 2, "titel": "Deep Treffer", "url": "https://example.com/2", "inhalt": "Auszug", "volltext": deep_text, "deep": True},
+    ]
+
+    kontext = ai_search_summary_service.baue_suchkontext(treffer)
+    assert "[1] Normaler Treffer" in kontext
+    assert "Volltext-Auszug:" in kontext
+    assert len(kontext.split("[2]")[0]) < 3000
+
+    assert "[2] Deep Treffer" in kontext
+    assert "Volltext-Auszug (Deep-Dive):" in kontext
+    assert len(kontext.split("[2]")[1]) > 5000
+
+
 

@@ -6,7 +6,7 @@ import { geraeteArt } from '@/desktop/geraeteArt'
 import { SidebarDownloadBadge } from './SidebarDownloadBadge'
 
 /**
- * Hinweis auf den Maunting Secure Browser (MSB) fuer Windows und Android.
+ * Hinweis auf Maunting Pontis fuer Windows und Android.
  *
  * Steht ueber dem MSS-Download.
  * Wer das Panel bereits im MSB benutzt (geraeteArt() === 'browser'), sieht den
@@ -40,7 +40,7 @@ export function BrowserDownloadBadge() {
     ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
     : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
 
-  const titleText = isAndroid ? 'MSB Mobile' : 'MSB Browser'
+  const titleText = isAndroid ? 'Pontis Mobile' : 'Maunting Pontis'
   const subtext = isAndroid
     ? t('browserBadge.androidLabel')
     : t('browserBadge.label')

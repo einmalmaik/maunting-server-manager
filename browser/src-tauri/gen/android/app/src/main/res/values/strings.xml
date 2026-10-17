@@ -1,6 +1,6 @@
 <resources>
-    <string name="app_name">"Maunting Secure Browser"</string>
-    <string name="main_activity_title">"Maunting Secure Browser"</string>
+    <string name="app_name">"Maunting Pontis"</string>
+    <string name="main_activity_title">"Maunting Pontis"</string>
     <string name="webview_zu_alt">The Android System WebView on this phone is too old (version %1$d). The browser needs a newer version so that pages cannot read the app\'s storage. Update \"Android System WebView\" in the Play Store, then open the browser again.</string>
     <string name="webview_aktualisieren">Update WebView</string>
     <string name="widget_name">Browser search</string>

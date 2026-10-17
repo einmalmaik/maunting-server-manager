@@ -404,5 +404,37 @@ describe('zurueckGehen und Verlauf', () => {
 
     delete antworten.fenster_start_info
   })
+
+  it('splitPositionSetzen konfiguriert Primär- und Sekundär-Tab und Richtung deterministisch', () => {
+    useTabsStore.setState({
+      tabs: [
+        { ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'https://youtube.com', nativDa: false },
+        { ...useTabsStore.getState().tabs[0], id: 'tab-2', url: 'https://wikipedia.org', nativDa: false },
+      ],
+      aktivId: 'tab-1',
+      split: null,
+    })
+
+    // 1. Initialer Split: tab-1 links, tab-2 rechts
+    useTabsStore.getState().splitPositionSetzen('tab-1', 'tab-2', 'horizontal', 0.5)
+    let s = useTabsStore.getState()
+    expect(s.aktivId).toBe('tab-1')
+    expect(s.split?.sekundaerId).toBe('tab-2')
+    expect(s.split?.richtung).toBe('horizontal')
+
+    // 2. Repositionierung: tab-2 (vorher rechts) nach oben schieben (tab-2 primär oben, tab-1 sekundär unten)
+    useTabsStore.getState().splitPositionSetzen('tab-2', 'tab-1', 'vertikal', 0.5)
+    s = useTabsStore.getState()
+    expect(s.aktivId).toBe('tab-2')
+    expect(s.split?.sekundaerId).toBe('tab-1')
+    expect(s.split?.richtung).toBe('vertikal')
+
+    // 3. Repositionierung: tab-2 nach unten schieben (tab-1 primär oben, tab-2 sekundär unten)
+    useTabsStore.getState().splitPositionSetzen('tab-1', 'tab-2', 'vertikal', 0.5)
+    s = useTabsStore.getState()
+    expect(s.aktivId).toBe('tab-1')
+    expect(s.split?.sekundaerId).toBe('tab-2')
+    expect(s.split?.richtung).toBe('vertikal')
+  })
 })
 

@@ -36,6 +36,8 @@ pub struct Konfig {
     pub download_fragen: bool,
     /// Cookies, Cache und Website-Daten beim Schließen löschen.
     pub vergessen_beim_schliessen: bool,
+    /// Hardwarebeschleunigung (GPU) für Webseiten und Oberfläche nutzen.
+    pub hardwarebeschleunigung: bool,
 }
 
 impl Default for Konfig {
@@ -48,6 +50,7 @@ impl Default for Konfig {
             download_ordner: None,
             download_fragen: false,
             vergessen_beim_schliessen: false,
+            hardwarebeschleunigung: true,
         }
     }
 }

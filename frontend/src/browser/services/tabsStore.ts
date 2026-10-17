@@ -25,6 +25,9 @@ import { ereignisAnwenden } from './tabEreignis'
 import { istUnterfenster, setzeUnterfenster, tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
+import { useWorkspacesStore } from './workspacesStore'
+import { useLesemodusStore } from './lesemodusStore'
+import { artikelExtrahieren } from './lesemodusService'
 
 interface Geschlossen {
   url: string
@@ -37,11 +40,22 @@ export interface NeuerTabOptionen {
   privat?: boolean
   hintergrund?: boolean
   nach?: string
+  elternId?: string | null
   id?: string
   nativDa?: boolean
   anIndex?: number
   titel?: string
   favicon?: string | null
+  workspaceId?: string
+}
+
+export type SplitRichtung = 'horizontal' | 'vertikal'
+
+export interface SplitInfo {
+  sekundaerId: string
+  richtung: SplitRichtung
+  anteil: number // 0.2 bis 0.8, Standard 0.5
+  aktiveHaelfte: 'primaer' | 'sekundaer'
 }
 
 export interface TabsZustand {
@@ -49,6 +63,7 @@ export interface TabsZustand {
   aktivId: string
   verlaufIds: string[]
   geschlossen: Geschlossen[]
+  split: SplitInfo | null
 
   neuerTab: (url?: string, optionen?: NeuerTabOptionen) => string
   schliessen: (id: string) => void
@@ -68,7 +83,29 @@ export interface TabsZustand {
   stummSchalten: (id: string) => void
   wiederherstellen: () => void
   wechseln: (richtung: 1 | -1) => void
-  verschieben: (id: string, nachIndex: number) => void
+  verschieben: (id: string, nachIndex: number, neueElternId?: string | null) => void
+  /** Verschiebt einen Tab (und optional Kind-Tabs) in einen anderen Arbeitsbereich. */
+  verschiebeTabInWorkspace: (tabId: string, zielWorkspaceId: string) => void
+  /** Schaltet das Ein-/Ausklappen eines Eltern-Tabs in der Baumstruktur um. */
+  baumUmschalten: (id: string) => void
+  /** Setzt oder löst die Eltern-Kind-Beziehung eines Tabs in der Baumstruktur. */
+  setzeElternTab: (id: string, elternId: string | null) => void
+  /** Aktiviert die geteilte Ansicht mit einem zweiten Tab (Desktop & Mobile). */
+  splitAktivieren: (sekundaerId: string, richtung?: SplitRichtung, anteil?: number) => void
+  /** Hebt die geteilte Ansicht auf. */
+  splitBeenden: () => void
+  /** Ändert das Breiten- oder Höhenverhältnis (20 % bis 80 %). */
+  splitAnteilAendern: (anteil: number) => void
+  /** Wechselt zwischen horizontaler (nebeneinander) und vertikaler (übereinander) Teilung. */
+  splitRichtungUmschalten: () => void
+  /** Tauscht primären und sekundären Tab. */
+  splitTauschen: () => void
+  /** Setzt Primär- und Sekundär-Tab sowie Richtung und Anteil direkt und deterministisch. */
+  splitPositionSetzen: (primaerId: string, sekundaerId: string, richtung: SplitRichtung, anteil?: number) => void
+  /** Setzt den Tastatur- und Omnibox-Fokus auf eine Hälfte der geteilten Ansicht. */
+  splitFokusSetzen: (haelfte: 'primaer' | 'sekundaer') => void
+  /** Schaltet den puristischen Lesemodus für einen Tab oder den aktiven Tab um. */
+  lesemodusUmschalten: (id?: string) => Promise<void>
   ereignis: (e: TabEreignis) => void
   /** Nach dem Start: Rust kennt noch keine Webview, die Oberfläche schon Tabs. */
   hochfahren: () => Promise<void>
@@ -117,7 +154,7 @@ export const useTabsStore = create<TabsZustand>()(
           if (tab.nativDa) void nativ.tabSchliessen(id)
           // Von einer Webseite in die MSM-Suche führt Zurück auf die Seite.
           const vorher = !rueck && interneSeite(url)?.seite === 'suche' && istWebseite(tab.url) ? tab.url : null
-          aendern(id, { ...leererTab(id, tab.privat), url, vorher })
+          aendern(id, { ...leererTab(id, tab.privat, tab.workspaceId), url, vorher })
           zeigen(id)
           return
         }
@@ -126,7 +163,7 @@ export const useTabsStore = create<TabsZustand>()(
         const vorher = rueck ? null : interneSeite(tab.url)?.seite === 'suche' ? tab.url : tab.nativDa ? tab.vorher : null
         aendern(id, { url, laedt: true, abgestuerzt: false, fehler: null, nativDa: true, ruhe: null, vorher })
         void nativ
-          .tabLaden(id, url, tab.privat)
+          .tabLaden(id, url, tab.privat, tab.workspaceId)
           .then(() => zeigen(id))
           // Steht der Jugendschutz noch nicht, lädt Rust nichts und sagt es.
           .catch((e) => aendern(id, { laedt: false, ...(e === SCHUTZ_NICHT_BEREIT ? { fehler: e } : {}) }))
@@ -137,6 +174,7 @@ export const useTabsStore = create<TabsZustand>()(
         aktivId: START_ID,
         verlaufIds: [],
         geschlossen: [],
+        split: null,
 
         bildsuche: (bild) => {
           const id = get().neuerTab()
@@ -151,13 +189,20 @@ export const useTabsStore = create<TabsZustand>()(
         neuerTab: (url, optionen = {}) => {
           const id = optionen.id ?? neueTabId()
           const effektiveUrl = url || (optionen.nativDa ? 'about:blank' : '')
+          const elternId = optionen.elternId !== undefined ? optionen.elternId : (optionen.nach ?? null)
+          const workspaceId =
+            optionen.workspaceId ??
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
           const tab: Tab = {
-            ...leererTab(id, optionen.privat ?? false),
+            ...leererTab(id, optionen.privat ?? false, workspaceId),
             url: effektiveUrl,
             titel: optionen.titel || (effektiveUrl ? (interneSeite(effektiveUrl) ? '' : effektiveUrl) : ''),
             favicon: optionen.favicon ?? null,
             laedt: Boolean(optionen.nativDa && effektiveUrl),
             nativDa: optionen.nativDa ?? false,
+            elternId,
+            workspaceId,
           }
           set((s) => {
             let einfuegeIndex = s.tabs.length
@@ -165,7 +210,13 @@ export const useTabsStore = create<TabsZustand>()(
               einfuegeIndex = Math.max(0, Math.min(optionen.anIndex, s.tabs.length))
             } else if (optionen.nach) {
               const nachIndex = s.tabs.findIndex((t) => t.id === optionen.nach)
-              if (nachIndex >= 0) einfuegeIndex = nachIndex + 1
+              if (nachIndex >= 0) {
+                let letzterIndex = nachIndex
+                while (letzterIndex + 1 < s.tabs.length && s.tabs[letzterIndex + 1].elternId === optionen.nach) {
+                  letzterIndex++
+                }
+                einfuegeIndex = letzterIndex + 1
+              }
             }
             const tabs = [...s.tabs]
             tabs.splice(einfuegeIndex, 0, tab)
@@ -194,7 +245,11 @@ export const useTabsStore = create<TabsZustand>()(
         },
 
         schliessen: (id) => {
-          const { tabs, aktivId, verlaufIds } = get()
+          const { tabs, aktivId, verlaufIds, split } = get()
+          if (split && (split.sekundaerId === id || aktivId === id)) {
+            void nativ.tabsSplitAufheben().catch(() => null)
+            set({ split: null })
+          }
           const index = tabs.findIndex((t) => t.id === id)
           if (index < 0) return
           const tab = tabs[index]
@@ -203,7 +258,8 @@ export const useTabsStore = create<TabsZustand>()(
           entwicklerTabWeg(id)
           useFormulare.getState().tabWeg(id)
           useUebersetzung.getState().seiteWeg(id)
-          const rest = tabs.filter((t) => t.id !== id)
+          // Kind-Tabs an den übergeordneten Eltern-Tab vererben
+          const rest = tabs.filter((t) => t.id !== id).map((t) => (t.elternId === id ? { ...t, elternId: tab.elternId } : t))
           const restVerlauf = verlaufIds.filter((v) => v !== id)
           if (tab.privat && !rest.some((t) => t.privat)) {
             // Die private Sitzung ist zu (Android leert ihr Profil): keine ihrer Seiten lässt sich zurückholen.
@@ -236,7 +292,42 @@ export const useTabsStore = create<TabsZustand>()(
         aktivieren: (id) => {
           const tab = finden(id)
           if (!tab) return
-          const { aktivId, verlaufIds } = get()
+          const { aktivId, verlaufIds, split } = get()
+          if (split) {
+            if (id === split.sekundaerId) {
+              set((s) => ({ split: s.split ? { ...s.split, aktiveHaelfte: 'sekundaer' } : null }))
+              return
+            } else if (id === aktivId) {
+              set((s) => ({ split: s.split ? { ...s.split, aktiveHaelfte: 'primaer' } : null }))
+              return
+            } else {
+              // Ein dritter Tab wurde angeklickt: Ersetze die aktuell fokussierte Hälfte des Splits
+              if (split.aktiveHaelfte === 'sekundaer') {
+                set((s) => ({
+                  split: s.split ? { ...s.split, sekundaerId: id } : null,
+                  verlaufIds: [...verlaufIds.filter((v) => v !== id), id],
+                }))
+                const seite = !!tab.url && !istIntern(tab.url)
+                if (seite && !tab.nativDa) {
+                  void nativ.tabLaden(tab.id, tab.url, tab.privat, tab.workspaceId).catch(() => null)
+                  aendern(tab.id, { nativDa: true })
+                }
+                return
+              } else {
+                set({
+                  aktivId: id,
+                  verlaufIds: [...verlaufIds.filter((v) => v !== aktivId), aktivId],
+                })
+                const seite = !!tab.url && !istIntern(tab.url)
+                if (seite && !tab.nativDa) {
+                  laden(id, tab.url)
+                  return
+                }
+                zeigen(id)
+                return
+              }
+            }
+          }
           if (aktivId !== id) {
             set({ aktivId: id, verlaufIds: [...verlaufIds.filter((v) => v !== aktivId), aktivId] })
           } else {
@@ -251,27 +342,35 @@ export const useTabsStore = create<TabsZustand>()(
           zeigen(id)
         },
 
-        eingeben: (eingabe, id = get().aktivId) => {
+        eingeben: (eingabe, id) => {
+          const s = get()
+          const zielId = id ?? (s.split && s.split.aktiveHaelfte === 'sekundaer' ? s.split.sekundaerId : s.aktivId)
           const intern = interneSeite(eingabe.trim())
           if (intern) {
             // Die Suche behält ihren Begriff, samt Schreibweise.
-            laden(id, intern.seite === 'suche' ? eingabe.trim() : interneAdresse(intern.seite, intern.teil))
+            laden(zielId, intern.seite === 'suche' ? eingabe.trim() : interneAdresse(intern.seite, intern.teil))
             return
           }
           const { searxngUrl } = useEinstellungenStore.getState()
           const ziel = baueZielUrl(eingabe, wirksameSucheJetzt(), searxngUrl ?? undefined)
           if (!ziel) return
-          laden(id, ziel)
+          laden(zielId, ziel)
         },
 
-        oeffnen: (url, id = get().aktivId) => laden(id, url),
+        oeffnen: (url, id) => {
+          const s = get()
+          const zielId = id ?? (s.split && s.split.aktiveHaelfte === 'sekundaer' ? s.split.sekundaerId : s.aktivId)
+          laden(zielId, url)
+        },
 
-        startseite: (id = get().aktivId) => {
-          const tab = finden(id)
+        startseite: (id) => {
+          const s = get()
+          const zielId = id ?? (s.split && s.split.aktiveHaelfte === 'sekundaer' ? s.split.sekundaerId : s.aktivId)
+          const tab = finden(zielId)
           if (!tab) return
-          if (tab.nativDa) void nativ.tabSchliessen(id)
-          aendern(id, { ...leererTab(id, tab.privat) })
-          zeigen(id)
+          if (tab.nativDa) void nativ.tabSchliessen(zielId)
+          aendern(zielId, { ...leererTab(zielId, tab.privat) })
+          zeigen(zielId)
         },
 
         einstellungen: (teil) => {
@@ -288,18 +387,20 @@ export const useTabsStore = create<TabsZustand>()(
           else get().neuerTab(adresse)
         },
 
-        aktion: (aktion, id = get().aktivId) => {
-          const tab = finden(id)
-          if (aktion === 'zurueck' && tab && !tab.zurueck && tab.vorher) {
-            laden(id, tab.vorher, true)
+        aktion: (akt, id) => {
+          const s = get()
+          const zielId = id ?? (s.split && s.split.aktiveHaelfte === 'sekundaer' ? s.split.sekundaerId : s.aktivId)
+          const tab = finden(zielId)
+          if (akt === 'zurueck' && tab && !tab.zurueck && tab.vorher) {
+            laden(zielId, tab.vorher, true)
             return
           }
           if (!tab?.nativDa) return
-          if (aktion === 'neu_laden' && (tab.abgestuerzt || tab.fehler)) {
-            laden(id, tab.url)
+          if (akt === 'neu_laden' && (tab.abgestuerzt || tab.fehler)) {
+            laden(zielId, tab.url)
             return
           }
-          void nativ.tabAktion(id, aktion)
+          void nativ.tabAktion(zielId, akt)
         },
 
         zurueckGehen: () => {
@@ -362,15 +463,188 @@ export const useTabsStore = create<TabsZustand>()(
           if (ziel) get().aktivieren(ziel.id)
         },
 
-        verschieben: (id, nachIndex) => {
+        verschieben: (id, nachIndex, neueElternId) => {
           set((s) => {
             const tabs = [...s.tabs]
             const von = tabs.findIndex((t) => t.id === id)
             if (von < 0) return s
             const [tab] = tabs.splice(von, 1)
+            if (neueElternId !== undefined) {
+              tab.elternId = neueElternId
+            }
             tabs.splice(Math.max(0, Math.min(nachIndex, tabs.length)), 0, tab)
             return { tabs }
           })
+        },
+
+        verschiebeTabInWorkspace: (tabId, zielWorkspaceId) => {
+          const tab = finden(tabId)
+          if (!tab || (tab.workspaceId ?? 'standard') === zielWorkspaceId) return
+
+          set((s) => ({
+            tabs: s.tabs.map((t) =>
+              t.id === tabId || t.elternId === tabId ? { ...t, workspaceId: zielWorkspaceId } : t
+            ),
+          }))
+
+          const aktiverWs =
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
+
+          if (zielWorkspaceId !== aktiverWs) {
+            if (tab.nativDa && !tab.ton) {
+              void nativ.tabVerwerfen(tab.id)
+              aendern(tab.id, { nativDa: false, ruhe: 'verworfen' })
+            }
+            if (get().aktivId === tabId) {
+              const uebrige = get().tabs.filter((t) => (t.workspaceId ?? 'standard') === aktiverWs && t.id !== tabId)
+              if (uebrige.length > 0) {
+                get().aktivieren(uebrige[0].id)
+              } else {
+                get().neuerTab('', { workspaceId: aktiverWs })
+              }
+            }
+          }
+        },
+
+        baumUmschalten: (id) =>
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, baumEingeklappt: !t.baumEingeklappt } : t)),
+          })),
+
+        setzeElternTab: (id, elternId) => {
+          if (id === elternId) return
+          set((s) => ({
+            tabs: s.tabs.map((t) => (t.id === id ? { ...t, elternId } : t)),
+          }))
+        },
+
+        splitAktivieren: (sekundaerId, richtung, anteil = 0.5) => {
+          const { aktivId, tabs } = get()
+          if (sekundaerId === aktivId) return
+          const sek = tabs.find((t) => t.id === sekundaerId)
+          if (!sek) return
+
+          // Standard-Richtung adaptiv ermitteln:
+          // Hochformat (Höhe > Breite) -> 'vertikal'
+          // Querformat / Tablet / Desktop -> 'horizontal'
+          const breite = typeof window !== 'undefined' ? window.innerWidth : 1200
+          const hoehe = typeof window !== 'undefined' ? window.innerHeight : 800
+          const gewaehlteRichtung: SplitRichtung = richtung ?? (hoehe > breite ? 'vertikal' : 'horizontal')
+
+          const clampedAnteil = Math.max(0.2, Math.min(0.8, anteil))
+          set({
+            split: {
+              sekundaerId,
+              richtung: gewaehlteRichtung,
+              anteil: clampedAnteil,
+              aktiveHaelfte: 'primaer',
+            },
+          })
+
+          if (sek.url && !istIntern(sek.url) && !sek.nativDa) {
+            void nativ.tabLaden(sek.id, sek.url, sek.privat, sek.workspaceId).catch(() => null)
+            aendern(sek.id, { nativDa: true })
+          }
+          const prim = tabs.find((t) => t.id === aktivId)
+          if (prim && prim.url && !istIntern(prim.url) && !prim.nativDa) {
+            void nativ.tabLaden(prim.id, prim.url, prim.privat, prim.workspaceId).catch(() => null)
+            aendern(prim.id, { nativDa: true })
+          }
+        },
+
+        splitBeenden: () => {
+          void nativ.tabsSplitAufheben().catch(() => null)
+          set({ split: null })
+        },
+
+        splitAnteilAendern: (anteil) => {
+          const s = get().split
+          if (!s) return
+          const clamped = Math.max(0.2, Math.min(0.8, Math.round(anteil * 100) / 100))
+          set({ split: { ...s, anteil: clamped } })
+        },
+
+        splitRichtungUmschalten: () => {
+          const s = get().split
+          if (!s) return
+          set({ split: { ...s, richtung: s.richtung === 'horizontal' ? 'vertikal' : 'horizontal' } })
+        },
+
+        splitTauschen: () => {
+          const { split, aktivId, tabs } = get()
+          if (!split) return
+          const neueAktivId = split.sekundaerId
+          const neueSekundaerId = aktivId
+          set({
+            aktivId: neueAktivId,
+            split: {
+              ...split,
+              sekundaerId: neueSekundaerId,
+              aktiveHaelfte: split.aktiveHaelfte === 'primaer' ? 'sekundaer' : 'primaer',
+            },
+          })
+          const neuerAktiv = tabs.find((t) => t.id === neueAktivId)
+          if (neuerAktiv && neuerAktiv.url && !istIntern(neuerAktiv.url) && !neuerAktiv.nativDa) {
+            void nativ.tabLaden(neuerAktiv.id, neuerAktiv.url, neuerAktiv.privat, neuerAktiv.workspaceId).catch(() => null)
+            aendern(neuerAktiv.id, { nativDa: true })
+          }
+        },
+
+        splitPositionSetzen: (primaerId, sekundaerId, richtung, anteil = 0.5) => {
+          const { tabs } = get()
+          if (!primaerId || !sekundaerId || primaerId === sekundaerId) return
+          const prim = tabs.find((t) => t.id === primaerId)
+          const sek = tabs.find((t) => t.id === sekundaerId)
+          if (!prim || !sek) return
+
+          const clampedAnteil = Math.max(0.2, Math.min(0.8, anteil))
+          set((s) => ({
+            aktivId: primaerId,
+            verlaufIds: [...s.verlaufIds.filter((v) => v !== primaerId), primaerId],
+            split: {
+              sekundaerId,
+              richtung,
+              anteil: clampedAnteil,
+              aktiveHaelfte: 'primaer',
+            },
+          }))
+
+          if (prim.url && !istIntern(prim.url) && !prim.nativDa) {
+            void nativ.tabLaden(prim.id, prim.url, prim.privat, prim.workspaceId).catch(() => null)
+            aendern(prim.id, { nativDa: true })
+          }
+          if (sek.url && !istIntern(sek.url) && !sek.nativDa) {
+            void nativ.tabLaden(sek.id, sek.url, sek.privat, sek.workspaceId).catch(() => null)
+            aendern(sek.id, { nativDa: true })
+          }
+        },
+
+        splitFokusSetzen: (haelfte) => {
+          const s = get().split
+          if (!s || s.aktiveHaelfte === haelfte) return
+          set({ split: { ...s, aktiveHaelfte: haelfte } })
+        },
+
+        lesemodusUmschalten: async (id) => {
+          const zielId = id ?? get().aktivId
+          const tab = finden(zielId)
+          if (!tab || !istWebseite(tab.url)) return
+          const naechsterZustand = !tab.lesemodus
+          aendern(zielId, { lesemodus: naechsterZustand })
+          zeigen(zielId)
+          if (naechsterZustand) {
+            const cacheKey = `${zielId}:${tab.url}`
+            const imCache = useLesemodusStore.getState().artikelAusCache(cacheKey)
+            if (!imCache) {
+              try {
+                const artikel = await artikelExtrahieren(zielId, tab.url)
+                useLesemodusStore.getState().artikelCachen(cacheKey, artikel)
+              } catch (err) {
+                console.warn('Lesemodus-Extraktion fehlgeschlagen:', err)
+              }
+            }
+          }
         },
 
         ereignis: (e) =>
@@ -420,7 +694,22 @@ export const useTabsStore = create<TabsZustand>()(
           } else {
             set((s) => ({ tabs: s.tabs.map((t) => ({ ...t, nativDa: false, laedt: false })) }))
           }
-          get().aktivieren(get().aktivId)
+          const aktiverWs =
+            (typeof window !== 'undefined' ? useWorkspacesStore.getState()?.aktiverWorkspaceId : undefined) ??
+            'standard'
+          const tabsDesAktiven = get().tabs.filter((t) => (t.workspaceId ?? 'standard') === aktiverWs)
+          const gemerkt =
+            typeof window !== 'undefined'
+              ? useWorkspacesStore.getState()?.letzterTabJeWorkspace?.[aktiverWs]
+              : undefined
+          const zielAktiv =
+            tabsDesAktiven.find((t) => t.id === gemerkt)?.id ??
+            tabsDesAktiven.find((t) => t.id === get().aktivId)?.id ??
+            tabsDesAktiven[0]?.id ??
+            get().aktivId
+          if (zielAktiv) {
+            get().aktivieren(zielAktiv)
+          }
         },
       }
     },
@@ -429,7 +718,24 @@ export const useTabsStore = create<TabsZustand>()(
 )
 
 export function useAktiverTab(): Tab | undefined {
-  return useTabsStore((s) => s.tabs.find((t) => t.id === s.aktivId))
+  return useTabsStore((s) => {
+    const split = s.split
+    if (split && split.aktiveHaelfte === 'sekundaer') {
+      return s.tabs.find((t) => t.id === split.sekundaerId) ?? s.tabs.find((t) => t.id === s.aktivId)
+    }
+    return s.tabs.find((t) => t.id === s.aktivId)
+  })
+}
+
+export function useSplitZustand() {
+  return useTabsStore((s) => {
+    const split = s.split
+    return {
+      split,
+      primaerTab: s.tabs.find((t) => t.id === s.aktivId),
+      sekundaerTab: split ? s.tabs.find((t) => t.id === split.sekundaerId) : undefined,
+    }
+  })
 }
 
 /** Eine Seite aus einer Liste oder Kachel: im vorderen Tab, mit Strg oder mittlerer Taste in einem neuen. */

@@ -1,5 +1,5 @@
 /**
- * Lokales On-Device Whisper-Tiny für die Maunting Secure Browser Sprachsuche.
+ * Lokales On-Device Whisper-Tiny für die Maunting Pontis Sprachsuche.
  *
  * Verarbeitet die Spracheingabe vollständig lokal im Browser via WebGPU / WebAssembly (WASM)
  * über Hugging Face Transformers.js (@huggingface/transformers) und onnxruntime-web.

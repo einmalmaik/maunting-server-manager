@@ -269,6 +269,8 @@ def _anzeigeeintrag(call, wert, fehlgeschlagen: str | None) -> dict:
         eintrag["geo_camera"] = wert
     if call.name == "web_search" and isinstance(wert, dict) and isinstance(wert.get("results"), list):
         eintrag["web_results"] = wert["results"]
+    if call.name == "read_web_page" and isinstance(wert, dict):
+        eintrag["web_page"] = {"url": wert.get("url"), "title": wert.get("title")}
     return eintrag
 
 
@@ -530,6 +532,10 @@ def _gueltige_spekulative_argumente(call) -> bool:
             return False
         server_id = argumente.get("server_id")
         return server_id is None or (isinstance(server_id, int) and not isinstance(server_id, bool) and server_id > 0)
+    if call.name == "read_web_page":
+        if set(argumente) - {"url", "deep", "server_id"}:
+            return False
+        return isinstance(argumente.get("url"), str) and bool(argumente["url"].strip())
     if call.name == "analyze_region":
         return (
             set(argumente) <= {"location", "camera"}

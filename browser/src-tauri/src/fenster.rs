@@ -79,6 +79,9 @@ pub fn fenster_aktion(app: AppHandle, aktion: String) -> Result<(), String> {
             }
         }
         "schliessen" => fenster.close(),
+        "neustarten" => {
+            tauri::process::restart(&app.env());
+        }
         _ => return Err("Unbekannte Fensteraktion".into()),
     }
     .map_err(|e| e.to_string())

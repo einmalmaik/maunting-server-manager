@@ -71,7 +71,8 @@ class SuchTrefferInhalt(BaseModel):
     index: StrictInt = Field(default=1, ge=1, le=50)
     titel: Annotated[str, StringConstraints(strip_whitespace=True, max_length=500)] = ""
     url: Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] = ""
-    inhalt: Annotated[str, StringConstraints(strip_whitespace=True, max_length=4000)] = ""
+    inhalt: Annotated[str, StringConstraints(strip_whitespace=True, max_length=8000)] = ""
+    volltext: Annotated[str, StringConstraints(strip_whitespace=True, max_length=12000)] = ""
 
 
 class SuchVerlaufEintrag(BaseModel):

@@ -40,11 +40,13 @@ export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
     const tabs = s.tabs
       .filter((t) => !t.privat)
       .map((t) => ({
-        ...leererTab(t.id),
+        ...leererTab(t.id, false, t.workspaceId),
         // Zu lang (eine Seite kann das): beim nächsten Start nur die Herkunft.
         url: t.url.length > ADRESSE_MAX ? herkunftVon(t.url) : t.url,
         titel: kurzerTitel(t.titel),
         favicon: t.favicon && t.favicon.length <= FAVICON_MAX ? t.favicon : null,
+        workspaceId: t.workspaceId,
+        elternId: t.elternId,
       }))
     const aktivId = tabs.some((t) => t.id === s.aktivId) ? s.aktivId : tabs[0]?.id
     return { tabs, aktivId }
@@ -58,7 +60,19 @@ export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
     // schreibt, mit dem richtigen Typ; der Rest kommt aus dem leeren Tab.
     const tabs = (Array.isArray(g.tabs) ? g.tabs : [])
       .filter((t): t is { id: string } => typeof t?.id === 'string' && /^tab-[A-Za-z0-9-]{1,40}$/.test(t.id))
-      .map((t) => ({ ...leererTab(t.id), ...passend({ url: '', titel: '', favicon: null as string | null }, t) }))
+      .map((t) => ({
+        ...leererTab(t.id),
+        ...passend(
+          {
+            url: '',
+            titel: '',
+            favicon: null as string | null,
+            workspaceId: 'standard',
+            elternId: null as string | null,
+          },
+          t
+        ),
+      }))
     const aktivId = tabs.find((t) => t.id === g.aktivId)?.id
     return aktivId ? { ...aktuell, tabs, aktivId } : aktuell
   },

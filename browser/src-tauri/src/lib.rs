@@ -46,7 +46,7 @@ pub fn run() {
     let mut kontext = tauri::generate_context!();
     #[cfg(all(debug_assertions, desktop))]
     {
-        let name = "Maunting Secure Browser Dev";
+        let name = "Maunting Pontis Dev";
         kontext.config_mut().identifier = "com.mauntingstudios.secure-browser.dev".into();
         kontext.config_mut().product_name = Some(name.into());
         kontext.package_info_mut().name = name.into();
@@ -98,6 +98,18 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle();
             let konfig = konfig::laden(handle);
+            #[cfg(windows)]
+            if !konfig.hardwarebeschleunigung {
+                let curr = std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").unwrap_or_default();
+                if !curr.contains("--disable-gpu") {
+                    let neu = if curr.is_empty() {
+                        "--disable-gpu".to_string()
+                    } else {
+                        format!("{curr} --disable-gpu")
+                    };
+                    std::env::set_var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", neu);
+                }
+            }
             browserdaten::beim_start(handle, konfig.vergessen_beim_schliessen);
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
@@ -159,8 +171,12 @@ pub fn run() {
             tabs::tab_aktivieren,
             tabs::tab_schliessen,
             tabs::tab_auslagern,
+            tabs::tab_verwerfen,
             tabs::tab_aktion,
+            tabs::tab_seite_zuruecksetzen,
             tabs::tabs_rahmen,
+            tabs::tabs_split_setzen,
+            tabs::tabs_split_aufheben,
             tabs::tabs_verdecken,
             tabs::tab_standbild,
             tabs::tab_antworten,

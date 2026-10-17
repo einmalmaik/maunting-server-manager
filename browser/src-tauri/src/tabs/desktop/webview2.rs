@@ -337,6 +337,7 @@ pub(crate) fn kuerzel(taste: u32, strg: bool, umschalt: bool, alt: bool) -> Opti
     const F3: u32 = 0x72;
     const F6: u32 = 0x75;
     const F7: u32 = 0x76;
+    const F9: u32 = 0x78;
     const F12: u32 = 0x7B;
     const KOMMA: u32 = 0xBC;
     let buchstabe = char::from_u32(taste).filter(|c| c.is_ascii_uppercase());
@@ -353,11 +354,21 @@ pub(crate) fn kuerzel(taste: u32, strg: bool, umschalt: bool, alt: bool) -> Opti
         (true, false, false, None, TAB) => Some("naechster_tab"),
         (true, true, false, None, TAB) => Some("voriger_tab"),
         (false, false, true, Some('S'), _) => Some("singra"),
+        (false, false, true, _, 0x31) => Some("workspace_1"),
+        (false, false, true, _, 0x32) => Some("workspace_2"),
+        (false, false, true, _, 0x33) => Some("workspace_3"),
+        (false, false, true, _, 0x34) => Some("workspace_4"),
+        (false, false, true, _, 0x35) => Some("workspace_5"),
+        (false, false, true, _, 0x36) => Some("workspace_6"),
+        (false, false, true, _, 0x37) => Some("workspace_7"),
+        (false, false, true, _, 0x38) => Some("workspace_8"),
+        (false, false, true, _, 0x39) => Some("workspace_9"),
         (true, false, false, Some('F'), _) => Some("suchen"),
         (true, false, false, Some('G'), _) | (false, false, false, None, F3) => Some("weitersuchen"),
         (true, true, false, Some('G'), _) | (false, true, false, None, F3) => Some("zuruecksuchen"),
         (true, false, false, Some('P'), _) => Some("drucken"),
         (true, true, false, Some('I' | 'J' | 'C'), _) | (false, false, false, None, F12) => Some("entwickler"),
+        (false, false, false, None, F9) => Some("lesemodus"),
         (false, false, false, None, F7) => Some("still"),
         (true, false, false, None, KOMMA) => Some("einstellungen"),
         _ => None,
@@ -482,12 +493,16 @@ mod tests {
         assert_eq!(kuerzel(0x09, true, false, false), Some("naechster_tab"));
         assert_eq!(kuerzel(0x09, true, true, false), Some("voriger_tab"));
         assert_eq!(kuerzel('S' as u32, false, false, true), Some("singra"));
+        assert_eq!(kuerzel(0x31, false, false, true), Some("workspace_1"));
+        assert_eq!(kuerzel(0x32, false, false, true), Some("workspace_2"));
+        assert_eq!(kuerzel(0x39, false, false, true), Some("workspace_9"));
         // Was der Seite gehört, bleibt bei ihr.
         assert_eq!(kuerzel('C' as u32, true, false, false), None);
         assert_eq!(kuerzel('F' as u32, true, false, false), Some("suchen"));
         assert_eq!(kuerzel(0x7B, false, false, false), Some("entwickler"));
         assert_eq!(kuerzel('I' as u32, true, true, false), Some("entwickler"));
         assert_eq!(kuerzel('P' as u32, true, false, false), Some("drucken"));
+        assert_eq!(kuerzel(0x78, false, false, false), Some("lesemodus"));
         assert_eq!(kuerzel(0xBC, true, false, false), Some("einstellungen"));
         assert_eq!(kuerzel('A' as u32, true, false, false), None);
         assert_eq!(kuerzel('T' as u32, false, false, false), None);

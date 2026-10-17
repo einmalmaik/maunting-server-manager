@@ -1,4 +1,4 @@
-# Maunting Search (die Suchseite des Secure Browsers)
+# Maunting Search (die Suchseite von Maunting Pontis)
 
 > Schreibweise: **Maunting** — immer mit „au“. Nie „Mounting“. Im Deutschen heißt
 > die Oberfläche *Maunting Search* bzw. *Maunting Suche*, nie „MSM-Suche“ und
@@ -7,7 +7,7 @@
 
 ## Was es ist
 
-Maunting Search ist die Suchseite des Maunting Secure Browsers
+Maunting Search ist die Suchseite von Maunting Pontis
 (`msb://suche?q=…`). Sie ist ein eigener Dienst des Browsers, kein eingebettetes
 Fenster auf eine fremde Suchmaschine: Layout, Suchleiste, Kategorien, Dropdowns,
 Kacheln und Fußzeile sind Bausteine der MSM-Design-DNA.

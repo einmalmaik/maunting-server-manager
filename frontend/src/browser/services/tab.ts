@@ -39,6 +39,16 @@ export interface Tab {
    * nicht mehr zurück kann.
    */
   vorher: string | null
+  /** Übergeordneter Tab, aus dem dieser geöffnet wurde (Baumstruktur) */
+  elternId: string | null
+  /** Ob Unterseiten im Baum eingeklappt sind */
+  baumEingeklappt?: boolean
+  /** Arbeitsbereich, zu dem der Tab gehört */
+  workspaceId?: string
+  /** Signalisiert, ob die Seite lesbaren Fließtext enthält */
+  lesbar?: boolean
+  /** Ob für diesen Tab der puristische Lesemodus aktiv ist */
+  lesemodus?: boolean
 }
 
 /**
@@ -46,16 +56,17 @@ export interface Tab {
  * und Fehlerseite zeichnet die Oberfläche; die Webview käme sonst darüber.
  */
 export function webviewZeigen(tab: Tab): boolean {
-  return tab.nativDa && !!tab.url && !istIntern(tab.url) && !tab.abgestuerzt && !tab.fehler
+  return tab.nativDa && !!tab.url && !istIntern(tab.url) && !tab.abgestuerzt && !tab.fehler && !tab.lesemodus
 }
 
 export function neueTabId(): string {
   return `tab-${crypto.randomUUID()}`
 }
 
-export function leererTab(id: string, privat = false): Tab {
+export function leererTab(id: string, privat = false, workspaceId?: string): Tab {
   return {
     id,
+    workspaceId: workspaceId ?? 'standard',
     url: '',
     titel: '',
     favicon: null,
@@ -75,5 +86,9 @@ export function leererTab(id: string, privat = false): Tab {
     stumm: false,
     ruhe: null,
     vorher: null,
+    elternId: null,
+    baumEingeklappt: false,
+    lesbar: false,
+    lesemodus: false,
   }
 }

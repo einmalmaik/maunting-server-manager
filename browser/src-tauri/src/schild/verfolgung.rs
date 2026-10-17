@@ -8,11 +8,12 @@
 //! nicht geht, nimmt man in die Ausnahmen.
 
 /// Kleingeschrieben verglichen. `utm_` gilt als Vorsilbe.
-const NAMEN: [&str; 32] = [
+const NAMEN: [&str; 48] = [
     "fbclid", "gclid", "gclsrc", "dclid", "gbraid", "wbraid", "msclkid", "yclid", "ysclid", "twclid", "ttclid",
     "igshid", "igsh", "li_fat_id", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "__hssc", "__hstc", "__hsfp",
     "hsctatracking", "mkt_tok", "oly_anon_id", "oly_enc_id", "vero_id", "vero_conv", "wickedid", "rb_clickid",
-    "_openstat", "__s", "srsltid",
+    "_openstat", "__s", "srsltid", "si", "feature", "ref_src", "ref_url", "ved", "usg", "cvid",
+    "pd_rd_r", "pd_rd_w", "pd_rd_wg", "pf_rd_p", "pf_rd_r", "pf_rd_m", "pf_rd_s", "pf_rd_t", "pf_rd_i",
 ];
 
 fn verfolgt(name: &str) -> bool {
@@ -61,6 +62,14 @@ mod tests {
         );
         assert_eq!(sauber("https://example.com/?gclid=1").as_deref(), Some("https://example.com/"));
         assert_eq!(sauber("https://example.com/?%75tm_source=x&q=1").as_deref(), Some("https://example.com/?q=1"));
+        assert_eq!(
+            sauber("https://youtu.be/dQw4w9WgXcQ?si=abcdef123456&t=42").as_deref(),
+            Some("https://youtu.be/dQw4w9WgXcQ?t=42")
+        );
+        assert_eq!(
+            sauber("https://www.amazon.de/dp/B001234567?tag=partner-21&pd_rd_r=abc-123").as_deref(),
+            Some("https://www.amazon.de/dp/B001234567?tag=partner-21")
+        );
     }
 
     #[test]

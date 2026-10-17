@@ -127,8 +127,16 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
     let profil = super::seitenprofil(app)?;
     let (tx, rx) = mpsc::channel();
     let optionen = webview2_com::CoreWebView2EnvironmentOptions::default();
+    let mut args = BROWSER_ARGUMENTE.to_string();
+    let gpu_an = app
+        .try_state::<crate::konfig::KonfigZustand>()
+        .and_then(|z| z.0.lock().ok().map(|k| k.hardwarebeschleunigung))
+        .unwrap_or(true);
+    if !gpu_an {
+        args.push_str(" --disable-gpu");
+    }
     unsafe {
-        optionen.set_additional_browser_arguments(BROWSER_ARGUMENTE.to_string());
+        optionen.set_additional_browser_arguments(args);
         // Absturzberichte der Tabs bleiben auf dem Rechner (Datenschutzerklärung 3.30).
         optionen.set_is_custom_crash_reporting_enabled(true);
         // Gilt je Umgebung und lässt sich später nicht umschalten. Ohne
@@ -151,7 +159,7 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
 }
 
 /// Ein unsichtbarer Controller im Hauptfenster. Nur auf dem UI-Faden.
-fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool) -> Result<ICoreWebView2Controller, String> {
+pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2Controller, String> {
     let fenster = app.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
     let hwnd = HWND(fenster.hwnd().map_err(fehler)?.0);
     let (tx, rx) = mpsc::channel();
@@ -163,6 +171,14 @@ fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool
         let u10 = umgebung.cast::<ICoreWebView2Environment10>().map_err(fehler)?;
         let optionen = u10.CreateCoreWebView2ControllerOptions().map_err(fehler)?;
         optionen.SetIsInPrivateModeEnabled(privat).map_err(fehler)?;
+        if !privat {
+            if let Some(ws) = workspace {
+                let saubere_id: String = ws.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+                if !saubere_id.is_empty() && saubere_id != "standard" && saubere_id != "default" {
+                    optionen.SetProfileName(&HSTRING::from(format!("ws_{saubere_id}"))).map_err(fehler)?;
+                }
+            }
+        }
         u10.CreateCoreWebView2ControllerWithOptions(hwnd, &optionen, &fertig).map_err(fehler)?;
     }
     let controller = webview2_com::wait_with_pump(rx).map_err(fehler)?.map_err(fehler)?;
@@ -171,13 +187,14 @@ fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool
     Ok(controller)
 }
 
-pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool) -> Result<(), String> {
+pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool, workspace: Option<&str>) -> Result<(), String> {
     let (app2, id2) = (app.clone(), id.to_string());
+    let ws = workspace.map(|s| s.to_string());
     auf_ui(app, move || {
         let da = NATIV.with(|n| n.borrow().get(&id2).map(|t| t.core.clone()));
         let core = match da {
             Some(core) => core,
-            None => anlegen(&app2, &id2, privat)?,
+            None => anlegen(&app2, &id2, privat, ws.as_deref())?,
         };
         unsafe { core.Navigate(&HSTRING::from(ziel.as_str())).map_err(fehler) }
     })?;
@@ -186,10 +203,17 @@ pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: boo
     Ok(())
 }
 
+pub fn tab_verwerfen(app: &AppHandle, id: &str) {
+    let (app2, id2) = (app.clone(), id.to_string());
+    let _ = app.run_on_main_thread(move || {
+        schlaf::verwerfen(&app2, &id2);
+    });
+}
+
 /// Legt den Controller eines Tabs an und hängt alles daran. UI-Faden.
-fn anlegen(app: &AppHandle, id: &str, privat: bool) -> Result<ICoreWebView2, String> {
+fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2, String> {
     let umgebung = umgebung(app)?;
-    let controller = controller(app, &umgebung, privat)?;
+    let controller = controller(app, &umgebung, privat, workspace)?;
     let core = unsafe { controller.CoreWebView2().map_err(fehler)? };
     unsafe {
         let einstellungen = core.Settings().map_err(fehler)?;
@@ -285,7 +309,15 @@ pub fn download_abbrechen(app: &AppHandle, nr: u64) -> Result<bool, String> {
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
     let stand: HashMap<String, (bool, bool)> = {
         let z = tabs.0.lock().unwrap();
-        let vorne = |id: &str| z.vollbild.as_deref().or(z.aktiv.as_deref()) == Some(id);
+        let vorne = |id: &str| {
+            if let Some(v) = &z.vollbild {
+                v == id
+            } else if let Some(s) = &z.split {
+                z.aktiv.as_deref() == Some(id) || s.sekundaer_id == id
+            } else {
+                z.aktiv.as_deref() == Some(id)
+            }
+        };
         z.tabs.keys().map(|id| (id.clone(), (z.sichtbar(id), vorne(id)))).collect()
     };
     let app2 = app.clone();
@@ -326,23 +358,46 @@ fn rechteck(app: &AppHandle, x: f64, y: f64, breite: f64, hoehe: f64) -> RECT {
 }
 
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let (r, vollbild) = {
+    let (r, split, aktiv, vollbild) = {
         let z = tabs.0.lock().unwrap();
-        (z.rahmen, z.vollbild.clone())
+        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.vollbild.clone())
     };
     if vollbild.is_some() {
         return;
     }
-    let rechteck = rechteck(app, r.x, r.y, r.breite, r.hoehe);
-    let _ = app.run_on_main_thread(move || {
-        NATIV.with(|n| {
-            for tab in n.borrow().values() {
-                unsafe {
-                    let _ = tab.controller.SetBounds(rechteck);
+    if let Some(s) = split {
+        let rect_primaer = rechteck(app, s.primaer_rahmen.x, s.primaer_rahmen.y, s.primaer_rahmen.breite, s.primaer_rahmen.hoehe);
+        let rect_sekundaer = rechteck(app, s.sekundaer_rahmen.x, s.sekundaer_rahmen.y, s.sekundaer_rahmen.breite, s.sekundaer_rahmen.hoehe);
+        let default_rect = rechteck(app, r.x, r.y, r.breite, r.hoehe);
+        let primaer_id = aktiv.unwrap_or_default();
+        let _ = app.run_on_main_thread(move || {
+            NATIV.with(|n| {
+                for (id, tab) in n.borrow().iter() {
+                    let ziel_rect = if !primaer_id.is_empty() && id == &primaer_id {
+                        rect_primaer
+                    } else if id == &s.sekundaer_id {
+                        rect_sekundaer
+                    } else {
+                        default_rect
+                    };
+                    unsafe {
+                        let _ = tab.controller.SetBounds(ziel_rect);
+                    }
                 }
-            }
-        })
-    });
+            })
+        });
+    } else {
+        let rechteck = rechteck(app, r.x, r.y, r.breite, r.hoehe);
+        let _ = app.run_on_main_thread(move || {
+            NATIV.with(|n| {
+                for tab in n.borrow().values() {
+                    unsafe {
+                        let _ = tab.controller.SetBounds(rechteck);
+                    }
+                }
+            })
+        });
+    }
     oberflaeche_nach_unten(app);
 }
 
@@ -371,6 +426,55 @@ pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
             _ => tab.core.Stop(),
         }
         .map_err(fehler)
+    })
+}
+
+/// Löscht Cookies, lokalen Speicher und Cache gezielt für die aktuelle Herkunft (Origin)
+/// dieses Tabs und lädt die Seite anschließend neu.
+pub fn seite_zuruecksetzen(app: &AppHandle, id: &str) -> Result<(), String> {
+    mit_tab(app, id, move |tab| unsafe {
+        let url_str = webview2::quelle(&tab.core);
+        if url_str.is_empty() {
+            return Ok(());
+        }
+        if let Ok(parsed) = url::Url::parse(&url_str) {
+            let origin = parsed.origin().ascii_serialization();
+            let host = parsed.host_str().unwrap_or("").to_string();
+
+            // 1. CDP Storage.clearDataForOrigin: leert Cookies, LocalStorage, IndexedDB, Cache etc.
+            let param_storage = serde_json::json!({
+                "origin": origin,
+                "storageTypes": "cookies,storage,local_storage,indexeddb,websql,service_workers,cache_storage"
+            });
+            let _ = tab.core.CallDevToolsProtocolMethod(
+                &windows::core::HSTRING::from("Storage.clearDataForOrigin"),
+                &windows::core::HSTRING::from(param_storage.to_string()),
+                None,
+            );
+
+            // 2. CDP Network.deleteCookies für den spezifischen Host
+            if !host.is_empty() {
+                let param_network = serde_json::json!({
+                    "domain": host
+                });
+                let _ = tab.core.CallDevToolsProtocolMethod(
+                    &windows::core::HSTRING::from("Network.deleteCookies"),
+                    &windows::core::HSTRING::from(param_network.to_string()),
+                    None,
+                );
+            }
+
+            // 3. LocalStorage & SessionStorage via Runtime.evaluate (ohne Nutzergeste) leeren
+            webview2::ohne_geste(
+                &tab.core,
+                "try { localStorage.clear(); sessionStorage.clear(); } catch(e) {}",
+                |_| {},
+            );
+
+            // 4. Frisches Neuladen der Seite
+            let _ = tab.core.Reload();
+        }
+        Ok(())
     })
 }
 
@@ -472,7 +576,7 @@ pub(crate) fn im_profil<T: Send + 'static>(
             return f(&core);
         }
         let umgebung = umgebung(&app2)?;
-        let helfer = controller(&app2, &umgebung, false)?;
+        let helfer = controller(&app2, &umgebung, false, None)?;
         let ergebnis = unsafe { helfer.CoreWebView2().map_err(fehler) }.and_then(|core| f(&core));
         HELFER.with(|h| {
             if let Some(alt) = h.borrow_mut().replace(helfer) {

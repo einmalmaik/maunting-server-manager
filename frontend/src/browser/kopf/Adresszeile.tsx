@@ -8,15 +8,19 @@ import { createPortal } from 'react-dom'
 import { Bookmark, Clock, Globe, Lock, LockOpen, Search } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { toast } from '@/stores/toastStore'
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
-import { Input } from '@/Singra/UI'
+import { Omnibox } from '@/Singra/UI'
 
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { msmSucheBegriff } from '../services/intern'
+import { bereinigeUrl } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
 import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines'
 import { suchName, SuchwahlKnopf } from '../services/suchwahl'
+import { SeitenSicherheitPopover } from './SeitenSicherheitPopover'
 import { SprachsucheKnopf } from './SprachsucheKnopf'
+import { LesemodusKnopf } from './LesemodusKnopf'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore, vorschlaege, type Eintrag } from '../services/verlaufStore'
 
@@ -37,16 +41,19 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
   const oeffnen = useTabsStore((s) => s.oeffnen)
   const suche = suchmaschine(useWirksameSuche())
   const searxngUrl = useEinstellungenStore((s) => s.searxngUrl)
+  const cleanCopy = useEinstellungenStore((s) => s.cleanCopy)
   const verlauf = useVerlaufStore((s) => s.verlauf)
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
 
   const feld = useRef<HTMLInputElement>(null)
   const huelle = useRef<HTMLDivElement>(null)
+  const schlossKnopf = useRef<HTMLButtonElement>(null)
   const liste = useRef<HTMLUListElement>(null)
   const listenId = useId()
   const [text, setText] = useState('')
   const [tippt, setTippt] = useState(false)
   const [markiert, setMarkiert] = useState(0)
+  const [sicherheitOffen, setSicherheitOffen] = useState(false)
 
   // Bei der MSM-Suche steht der Begriff da, nicht `msb://suche?q=…`.
   const begriff = tab ? msmSucheBegriff(tab.url) : null
@@ -90,35 +97,65 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
     feld.current?.blur()
   }
 
+  const [suchwahlOffen, setSuchwahlOffen] = useState(false)
+
   const sicher = adresse.startsWith('https://')
   const unsicher = adresse.startsWith('http://')
-  const istSucheModus = tippt || !adresse || begriff
+  const zeigeSicherheit = Boolean(adresse && !tippt && !begriff)
 
   return (
-    <div ref={huelle} className="relative min-w-0 flex-1">
-      {istSucheModus ? (
-        <div className="absolute left-1.5 top-1/2 z-20 -translate-y-1/2 flex items-center">
-          <SuchwahlKnopf kompakt />
-        </div>
-      ) : (
-        <span className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-on-surface-variant">
-          {sicher ? (
-            <Lock className="h-4 w-4 text-status-success" aria-label={t('browser.adresse.sicher')} role="img" />
-          ) : unsicher ? (
-            <LockOpen className="h-4 w-4 text-status-warning" aria-label={t('browser.adresse.unsicher')} role="img" />
-          ) : (
-            <Globe className="h-4 w-4" aria-hidden="true" />
+    <Omnibox
+      ref={huelle}
+      links={
+        <>
+          <SuchwahlKnopf kompakt beiOffenAenderung={setSuchwahlOffen} />
+          {zeigeSicherheit && (
+            <>
+              <button
+                ref={schlossKnopf}
+                type="button"
+                onClick={() => setSicherheitOffen((o) => !o)}
+                aria-label={t(sicher ? 'browser.adresse.sicher' : 'browser.adresse.unsicher')}
+                className="flex h-5 w-5 items-center justify-center rounded hover:bg-surface-container-highest transition-colors text-on-surface-variant focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                {sicher ? (
+                  <Lock className="h-3.5 w-3.5 text-status-success" role="img" aria-label={t('browser.adresse.sicher')} />
+                ) : unsicher ? (
+                  <LockOpen className="h-3.5 w-3.5 text-status-warning" role="img" aria-label={t('browser.adresse.unsicher')} />
+                ) : (
+                  <Globe className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+              </button>
+              <SeitenSicherheitPopover
+                offen={sicherheitOffen}
+                onSchliessen={() => setSicherheitOffen(false)}
+                anker={schlossKnopf}
+                tab={tab}
+              />
+            </>
           )}
-        </span>
-      )}
-      {/* Ziel des Links unter dem Zeiger: die Statusblase von Edge ist aus,
-          und über der Seite kann die Oberfläche nichts zeichnen. */}
-      {!tippt && tab?.status && (
-        <span className="pointer-events-none absolute right-10 top-1/2 z-10 max-w-[40%] -translate-y-1/2 truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
-          {tab.status}
-        </span>
-      )}
-      <Input
+        </>
+      }
+      rechts={
+        <>
+          {!tippt && tab?.status && (
+            <span className="pointer-events-none max-w-[200px] truncate rounded-full bg-surface-container-high px-2 py-0.5 text-label-sm text-on-surface-variant">
+              {tab.status}
+            </span>
+          )}
+          <LesemodusKnopf tab={tab} />
+          <SprachsucheKnopf
+            onErgebnis={(sttText) => {
+              setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
+              setTippt(true)
+              feld.current?.focus()
+            }}
+          />
+        </>
+      }
+    >
+      {/* Eingabefeld im flexiblen Raum */}
+      <input
         ref={feld}
         value={text}
         aria-label={t('browser.adresse.label')}
@@ -129,16 +166,37 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
         aria-expanded={offen}
         aria-controls={listenId}
         aria-activedescendant={offen ? `${listenId}-${markiert}` : undefined}
-        className={`h-9 rounded-full bg-surface-container-low ${istSucheModus ? 'pl-11' : 'pl-9'} pr-9 text-body-sm [@media(pointer:coarse)]:h-11`}
+        className="h-full min-w-0 flex-1 bg-transparent text-body-sm text-on-surface placeholder:text-on-surface-variant outline-none p-0"
         onFocus={(e) => {
           e.currentTarget.select()
           setTippt(true)
         }}
-        onBlur={() => setTimeout(beenden, 120)}
+        onBlur={(e) => {
+          const naechstes = e.relatedTarget as Node | null
+          if (huelle.current?.contains(naechstes) || suchwahlOffen) {
+            return
+          }
+          setTimeout(() => {
+            if (!suchwahlOffen && document.activeElement !== feld.current) {
+              beenden()
+            }
+          }, 120)
+        }}
         onChange={(e) => {
           setText(e.target.value)
           setTippt(true)
           setMarkiert(0)
+        }}
+        onCopy={(e) => {
+          if (!cleanCopy) return
+          const selection = window.getSelection()?.toString() || text
+          if (!selection) return
+          const ergebnis = bereinigeUrl(selection)
+          if (ergebnis.bereinigt) {
+            e.preventDefault()
+            e.clipboardData.setData('text/plain', ergebnis.url)
+            toast.success(t('browser.adresse.linkBereinigtKopiert'))
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === 'ArrowDown' && offen) {
@@ -159,16 +217,8 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           }
         }}
       />
-      <div className="absolute right-1.5 top-1/2 -translate-y-1/2 z-10 flex items-center">
-        <SprachsucheKnopf
-          onErgebnis={(sttText) => {
-            setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))
-            setTippt(true)
-            feld.current?.focus()
-          }}
-        />
-      </div>
       {offen &&
+
         createPortal(
           <ul
             ref={liste}
@@ -213,6 +263,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
           </ul>,
           document.body,
         )}
-    </div>
+    </Omnibox>
   )
 })
+

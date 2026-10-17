@@ -434,7 +434,7 @@
       "memoryOff": "Kein eigenes Gedächtnis-Modell",
       "memoryEnabled": "Gedächtnis-Rolle aktiv",
       "searchSummarySection": "Suchzusammenfassung (SearXNG)",
-      "searchSummaryHint": "Erstellt neutrale KI-Überblicke über Websuchergebnisse im Secure Browser. Völlig isoliert, 0 Bytes Datenbank-Speicherung.",
+      "searchSummaryHint": "Erstellt neutrale KI-Überblicke über Websuchergebnisse in Maunting Pontis. Völlig isoliert, 0 Bytes Datenbank-Speicherung.",
       "searchSummaryModel": "Suchzusammenfassungs-Modell",
       "searchSummaryOff": "Deaktiviert (keine Suchzusammenfassung)",
       "searchSummaryEnabled": "Suchzusammenfassung aktiv",
@@ -3517,8 +3517,8 @@
       "passwordSaved": "Backup-Passwort gespeichert"
     },
     "loadFailed": "Laden fehlgeschlagen",
-    "browserPromo": "MSB-Browser-Hinweis anzeigen",
-    "browserPromoHint": "Blendet in der Seitenleiste über dem MSS-Download einen Hinweis auf den Maunting Secure Browser ein."
+    "browserPromo": "Maunting-Pontis-Hinweis anzeigen",
+    "browserPromoHint": "Blendet in der Seitenleiste über dem MSS-Download einen Hinweis auf Maunting Pontis ein."
   },
   "profile": {
     "title": "Profil",
@@ -4421,7 +4421,7 @@
       "unsigned": "Der Installer ist nicht signiert. Windows SmartScreen meldet einen unbekannten Herausgeber; die Installation lässt sich über „Weitere Informationen“ starten. Vergleiche vorher die SHA256-Summe aus dem Release zur Verifikation."
     },
     "secureBrowser": {
-      "title": "MSB — Maunting Secure Browser",
+      "title": "Maunting Pontis",
       "intro": "Optionaler Browser für Windows und Android mit Werbe- und Trackerfilter, Jugendschutz und Ausfüllen aus dem Tresor. Ohne Kopplung spricht er mit keinem Server von Maunting Studios; gekoppelt zeigt er Singra, Messenger, Notizen, Kalender und Tresor der Instanz in der Seitenleiste.",
       "artifact": {
         "title": "Installer",
@@ -4785,7 +4785,7 @@
   },
   "privacyPolicy": {
     "title": "Datenschutzerklärung",
-    "intro": "In einer Zeit zunehmender digitaler Überwachung und schwindender Privatsphäre setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers, der Desktop-App und des Maunting Secure Browsers. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
+    "intro": "In einer Zeit zunehmender digitaler Überwachung und schwindender Privatsphäre setzt Maunting Studios das Gegenmodell: Schutz braucht Vertrauen. Diese Erklärung beschreibt transparent und lückenlos alle Datenflüsse des Maunting Service Managers, der Desktop-App und von Maunting Pontis. Wir überwachen niemanden heimlich: Alle Aktionen sind transparent, auditierbar, self-hosted und liegen vollständig unter der Kontrolle des Nutzers.",
     "callout": "Kurzfassung: Maunting Studios – Schutz braucht Vertrauen. Volle Datenhoheit, kein heimliches Tracking, risikobehaftete Funktionen (wie Computer-Use) sind standardmäßig deaktiviert und jede KI-Aktion ist für Sie transparent kontrollier- und abschaltbar.",
     "documentLabel": "MSM Datenschutz",
     "summaryLabel": "Datenschutz",
@@ -4918,8 +4918,8 @@
         }
       },
       "browser": {
-        "heading": "Maunting Secure Browser",
-        "body": "Der Maunting Secure Browser ist ein eigenständiger Browser für Windows und Android. Unter Windows zeigt er Webseiten mit der Laufzeit Microsoft Edge WebView2, die Windows bereitstellt und aktualisiert, unter Android mit der Android System WebView, die Google über den Play Store aktualisiert. Ohne Kopplung mit einer MSM-Instanz spricht er mit keinem Server von Maunting Studios. Es gibt keine Telemetrie.",
+        "heading": "Maunting Pontis",
+        "body": "Maunting Pontis ist ein eigenständiger Browser für Windows und Android. Unter Windows zeigt er Webseiten mit der Laufzeit Microsoft Edge WebView2, die Windows bereitstellt und aktualisiert, unter Android mit der Android System WebView, die Google über den Play Store aktualisiert. Ohne Kopplung mit einer MSM-Instanz spricht er mit keinem Server von Maunting Studios. Es gibt keine Telemetrie.",
         "items": {
           "lokal": "Auf dem Rechner: Verlauf, Lesezeichen, geöffnete Tabs (Adresse, Titel, Seitensymbol), Einstellungen, die Symbole Ihrer Kacheln und die Statistik des Schilds liegen nur im App-Ordner und gehen an keinen Server, auch nicht an Ihre Instanz. Die Statistik besteht aus Zahlen ohne Adressen: geblockte Werbe- und Trackeranfragen, abgelehnte Cookie-Hinweise, Seitenaufrufe mit Blockierungen und der Tag, ab dem gezählt wird; private Tabs zählen nicht mit. Cookies, Cache und Website-Speicher liegen in einem eigenen Profil, getrennt von Microsoft Edge.",
           "privat": "Private Tabs legen nichts im Verlauf ab und zeigen kein Seitensymbol. Unter Windows liegen ihre Cookies und ihr Website-Speicher nur im Arbeitsspeicher und verschwinden, wenn der letzte private Tab geschlossen ist; bis dahin teilen sich alle privaten Tabs diese Sitzung. „Beim Schließen vergessen“ (standardmäßig aus) löscht beim Beenden Cookies, Cache und Website-Speicher der normalen Tabs; Verlauf und Lesezeichen bleiben.",
@@ -6171,8 +6171,8 @@
       "keinChatrecht": "Dein Konto besitzt kein Recht für den KI-Chat (ai.chat.use). Wende dich an deinen Administrator, um die Berechtigung zu erhalten.",
       "gedaechtnis": "Gedächtnis",
       "tresor": "Tresor",
-      "browserInstallieren": "MSB Browser installieren",
-      "browserLadenAndroid": "MSB Browser laden",
+      "browserInstallieren": "Maunting Pontis installieren",
+      "browserLadenAndroid": "Maunting Pontis laden",
       "browserDownloadSubtext": "Gehärteter, privater Webbrowser für Windows",
       "browserDownloadSubtextAndroid": "Gehärteter, privater Webbrowser für Android"
     },
@@ -7047,9 +7047,9 @@
     "androidLabel": "App für Android (.apk)"
   },
   "browserBadge": {
-    "tooltip": "Maunting Secure Browser für Windows herunterladen",
+    "tooltip": "Maunting Pontis für Windows herunterladen",
     "label": "Sicherer Webbrowser",
-    "androidTooltip": "Maunting Secure Browser für Android herunterladen",
+    "androidTooltip": "Maunting Pontis für Android herunterladen",
     "androidLabel": "Browser für Android (.apk)"
   },
   "calls": {
@@ -8613,7 +8613,50 @@
         "schlaf": "schläft",
         "verworfen": "Speicher freigegeben"
       },
-      "anzahl": "Alle Tabs ({{anzahl}})"
+      "anzahl": "Alle Tabs ({{anzahl}})",
+      "baumEinklappen": "Untergeordnete Tabs einklappen",
+      "baumAusklappen": "Untergeordnete Tabs ausklappen",
+      "leisteEinklappen": "Tableiste einklappen",
+      "leisteAusklappen": "Tableiste ausklappen",
+      "scrollLinks": "Tabs nach links scrollen",
+      "scrollRechts": "Tabs nach rechts scrollen"
+    },
+    "workspaces": {
+      "titel": "Arbeitsbereiche",
+      "neu": "Neuer Arbeitsbereich",
+      "name": "Name des Bereichs",
+      "namePlatzhalter": "z. B. Dev, Recherche, Gaming",
+      "farbe": "Farbe",
+      "symbol": "Symbol",
+      "anlegen": "Erstellen",
+      "speichern": "Speichern",
+      "abbrechen": "Abbrechen",
+      "bearbeiten": "Bereich bearbeiten",
+      "loeschen": "Bereich löschen",
+      "loeschenBestaetigen": "Möchtest du den Arbeitsbereich „{{name}}“ wirklich löschen? Die enthaltenen Tabs werden in den Standardbereich verschoben.",
+      "verschiebenNach": "In Arbeitsbereich verschieben",
+      "verschiebenZiel": "Nach „{{name}}“ verschieben",
+      "kuerzel": "Alt+{{index}}",
+      "tabsAnzahl_one": "{{count}} Tab",
+      "tabsAnzahl_other": "{{count}} Tabs",
+      "dropHinweis": "Hier ablegen zum Verschieben"
+    },
+    "split": {
+      "trennerLabel": "Trenner für geteilte Ansicht ({{prozent}} %)",
+      "tauschen": "Seiten tauschen",
+      "drehen": "Orientierung wechseln",
+      "horizontalDrehen": "Nebeneinander anordnen",
+      "vertikalDrehen": "Übereinander anordnen",
+      "schliessen": "Geteilte Ansicht beenden",
+      "snapLinks": "Links andocken",
+      "snapRechts": "Rechts andocken",
+      "snapOben": "Oben andocken",
+      "snapUnten": "Unten andocken",
+      "oeffnen": "In geteilter Ansicht öffnen",
+      "aktivBadge": "In geteilter Ansicht",
+      "primaerBadge": "Geteilte Ansicht: Links",
+      "sekundaerBadge": "Geteilte Ansicht: Rechts",
+      "snapDropHinweis": "In geteilter Ansicht andocken"
     },
     "fenster": {
       "minimieren": "Minimieren",
@@ -8634,7 +8677,14 @@
       "sicher": "Verbindung verschlüsselt",
       "unsicher": "Verbindung nicht verschlüsselt",
       "vorschlaege": "Vorschläge",
-      "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen"
+      "suchenMit": "„{{begriff}}“ mit {{suchmaschine}} suchen",
+      "linkBereinigtKopiert": "Link ohne Tracking-Parameter kopiert",
+      "sicherheitTitel": "Seiteninformationen & Sicherheit",
+      "sicherHinweis": "Deine Verbindung zu dieser Seite ist geschützt. Daten wie Passwörter oder Cookies bleiben privat.",
+      "unsicherHinweis": "Die Verbindung zu dieser Seite ist nicht verschlüsselt. Sensible Daten sollten hier nicht eingegeben werden.",
+      "seiteZuruecksetzen": "Seite zurücksetzen",
+      "seiteZuruecksetzenHinweis": "Löscht Cookies, Cache und lokalen Speicher dieser Domain und lädt die Seite neu.",
+      "seiteZurueckgesetzt": "Spuren der Seite gelöscht"
     },
     "sprachsuche": {
       "starten": "Sprachsuche starten",
@@ -8662,11 +8712,11 @@
       "abgestuerztText": "Der Prozess der Seite wurde beendet. Die übrigen Tabs laufen weiter."
     },
     "start": {
-      "titel": "Maunting Secure Browser",
+      "titel": "Maunting Pontis",
       "suchen": "Suchen",
       "suchmaschine": "Suchmaschine",
       "widgetTitel": "Suche auf dem Startbildschirm",
-      "widgetText": "Das Such-Widget öffnet den Secure Browser direkt vom Startbildschirm: zum Tippen, Sprechen oder für die Bildsuche.",
+      "widgetText": "Das Such-Widget öffnet Maunting Pontis direkt vom Startbildschirm: zum Tippen, Sprechen oder für die Bildsuche.",
       "widgetAnheften": "Widget hinzufügen",
       "widgetSpaeter": "Nicht jetzt",
       "schnellzugriff": "Schnellzugriff",
@@ -8805,8 +8855,15 @@
       "nacht": "Nacht",
       "wald": "Wald",
       "tiefsee": "Tiefsee",
+      "wechsel": "Wechselnde Bilder",
+      "erde": "Erde aus dem Orbit",
+      "sonnensystem": "Sonnensystem",
+      "bergwald": "Bergwald",
+      "ozean": "Ozean",
+      "feld": "Sommerfeld",
       "eigen": "Eigenes Bild"
     },
+
     "update": {
       "name": "Updates",
       "hinweis": "Fragt bei GitHub nach einer neuen Version. Installiert wird erst auf deinen Klick.",
@@ -8826,6 +8883,8 @@
       "eigeneInstanzHinweis": "Ohne eigene Adresse sucht der Browser über die Such-Instanz deines gekoppelten Servers.",
       "schild": "Werbung und Tracker blockieren",
       "schildHinweis": "Lehnt außerdem Cookie-Hinweise ab, wo das geht, und blendet bekannte Hinweise aus, die sich nicht ablehnen lassen. Tracking-Parameter wie „utm_source“ nimmt es aus Links. Gilt für alle Seiten außer den Ausnahmen darunter.",
+      "cleanCopy": "Links beim Kopieren bereinigen",
+      "cleanCopyHinweis": "Entfernt beim Kopieren von Internetadressen automatisch Tracking- und Kampagnenparameter (z. B. utm_*, fbclid, si).",
       "standard": {
         "name": "Standardbrowser",
         "ist": "Links aus anderen Apps öffnen hier.",
@@ -8837,7 +8896,7 @@
         "istWindows": "Links aus anderen Programmen öffnen hier.",
         "nichtWindows": "Links aus Mail, Teams und anderen Programmen öffnen in einem anderen Browser.",
         "festlegenWindows": "In Windows festlegen",
-        "gefragtWindows": "In den Windows-Einstellungen bei „Maunting Secure Browser“ auf „Als Standard festlegen“ klicken.",
+        "gefragtWindows": "In den Windows-Einstellungen bei „Maunting Pontis“ auf „Als Standard festlegen“ klicken.",
         "fehlerWindows": "Windows hat die Einstellungen nicht geöffnet."
       },
       "listeEingebaut": "{{name}}: noch nicht geladen, eingebaute Grundregeln aktiv",
@@ -8855,8 +8914,12 @@
       "ordnerWaehlen": "Ordner wählen",
       "ordnerStandard": "Standardordner",
       "hintergrund": "Hintergrund der Startseite",
+      "hintergrundBlur": "Hintergrund-Unschärfe",
+      "kiBilderHinweis": "Standard-Bilder sind KI-generiert und urheberrechtlich unbedenklich.",
       "bildWaehlen": "Eigenes Bild wählen",
       "bildZuGross": "Bitte ein Bild unter 3 MB wählen.",
+      "bildFehler": "Das Bild konnte nicht verarbeitet werden.",
+
       "kopplung": "MSM-Kopplung",
       "gekoppeltMit": "Gekoppelt mit {{adresse}}",
       "gekoppeltOffline": "Gekoppelt mit {{adresse}}, gerade nicht erreichbar",
@@ -8942,6 +9005,13 @@
       "datenschutz": "Datenschutzerklärung",
       "datenschutzStand": "Fassung {{version}}",
       "oeffnen": "Öffnen",
+      "tabLeiste": "Tab-Leiste",
+      "tabAusrichtung": "Ausrichtung der Tabs",
+      "tabAusrichtungHinweis": "Vertikale Tabs zeigen zusammenhängende Seiten übersichtlich in einer Baumstruktur an.",
+      "tabAusrichtungOption": {
+        "vertikal": "Vertikal mit Baumstruktur (links)",
+        "horizontal": "Horizontal (oben)"
+      },
       "aufbau": "Aufbau",
       "leisteOrt": "Module und Listen",
       "ort": {
@@ -8969,6 +9039,11 @@
       "nachUntenName": "{{name}} nach unten",
       "startseite": "Startseite",
       "startseiteHinweis": "Termine, Notizen und Nachrichten erscheinen, wenn der Browser mit MSM gekoppelt ist. Private Tabs zeigen nur die Uhr.",
+      "grafikLeistung": "Grafik und System",
+      "hardwarebeschleunigung": "Hardwarebeschleunigung verwenden",
+      "hardwarebeschleunigungHinweis": "Nutzt die Grafikkarte (GPU), um Webseiten flüssiger darzustellen. Auf schwächeren Systemen oder beim gleichzeitigen Spielen kann das Deaktivieren Ressourcen für die Grafikkarte freihalten.",
+      "hardwarebeschleunigungNeustart": "Änderungen an der Hardwarebeschleunigung werden nach einem Neustart des Browsers wirksam.",
+      "neustarten": "Jetzt neu starten",
       "hintergrundTabs": "Tabs im Hintergrund",
       "schlafenNach": "Schlafen nach",
       "schlafenHinweis": "Ein schlafender Tab ist eingefroren und braucht weniger Speicher. Tabs mit Ton schlafen nie.",
@@ -9774,7 +9849,7 @@
       "dazuSuchenNutzer": "Dazu suchen Nutzer auch",
       "kontextGeneriert": "Kontextbezogen generiert",
       "kontextVorschlaege": "Kontext-Vorschläge",
-      "footerDienst": "Ein Dienst von Maunting Studios für den Maunting Secure Browser",
+      "footerDienst": "Ein Dienst von Maunting Studios für Maunting Pontis",
       "footerKi": "KI-Synthese: Singra AI • Angaben anhand der Quellen prüfen",
       "footerLizenz": "Metasuche auf Basis freier Software (AGPLv3)",
       "zusammenfassungTitel": "Singra AI Überblick",
@@ -9815,12 +9890,45 @@
       "medienVorschauTitel": "Medien-Vorschau",
       "medienVorschauOeffnen": "Seite öffnen",
       "medienVorschauSchliessen": "Schließen"
+    },
+    "lesemodus": {
+      "titel": "Lesemodus",
+      "aktivieren": "Lesemodus aktivieren",
+      "beenden": "Lesemodus beenden",
+      "kuerzelHinweis": "(F9)",
+      "zusammenfassen": "Mit KI zusammenfassen",
+      "inNotizen": "In Notizen speichern",
+      "nurGekoppelt": "Notizen-Export ist nur verfügbar, wenn der Browser mit MSM gekoppelt ist.",
+      "notizGespeichert": "Artikel als Notiz gespeichert",
+      "textKopiert": "Artikeltext kopiert",
+      "lesezeit": "{{minuten}} Min. Lesezeit",
+      "woerter": "{{anzahl}} Wörter",
+      "laedt": "Artikel wird geladen …",
+      "nichtVerfuegbar": "Für diese Seite konnte kein lesbarer Artikeltext extrahiert werden.",
+      "schriftgroesse": "Schriftgröße",
+      "schriftart": "Schriftart",
+      "breite": "Zeilenbreite",
+      "groesseKlein": "Klein",
+      "groesseMittel": "Mittel",
+      "groesseGross": "Groß",
+      "groesseSehrGross": "Sehr groß",
+      "artSans": "Sans",
+      "artSerif": "Serif",
+      "artMono": "Mono",
+      "breiteSchmal": "Schmal",
+      "breiteStandard": "Standard",
+      "breiteBreit": "Breit",
+      "links": "Links im Text",
+      "linksDezent": "Dezent",
+      "linksHervorgehoben": "Hervorgehoben",
+      "linksAus": "Aus",
+      "kopieren": "Text kopieren"
     }
   },
   "searchEngineSettings": {
     "title": "Maunting Search (Eigene Suchmaschine)",
     "badge": "Metasuche & API-Aggregator",
-    "description": "Zentrale Steuerung deiner eigenen, datenschutzfreundlichen Suchmaschine für den Maunting Secure Browser und für Singra (KI). Alle Suchanfragen laufen über deinen Server; Tracker-Parameter werden automatisch entfernt und Bilder ausschließlich über den eigenen Medien-Proxy geladen.",
+    "description": "Zentrale Steuerung deiner eigenen, datenschutzfreundlichen Suchmaschine für Maunting Pontis und für Singra (KI). Alle Suchanfragen laufen über deinen Server; Tracker-Parameter werden automatisch entfernt und Bilder ausschließlich über den eigenen Medien-Proxy geladen.",
     "customInstanceGuardTitle": "Eigene API-Schlüssel trotz fremder SearXNG-Adresse mitbenutzen",
     "customInstanceGuardHint": "Du hast eine externe SearXNG-Adresse eingetragen. Eine fremde Instanz kann mit deinen hier hinterlegten API-Schlüsseln nichts anfangen. Standardmäßig werden deine Brave-/Google-Schlüssel deshalb pausiert, um kein API-Guthaben zu verbrauchen. Schalte dies nur ein, wenn dein Backend die APIs zusätzlich direkt abfragen soll.",
     "apisTitle": "Offizielle Such-APIs (Brave & Google)",

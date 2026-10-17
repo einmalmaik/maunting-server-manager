@@ -15,8 +15,8 @@ export interface KurzinfoProps {
    * für Knöpfe am linken Rand. Sonst stünde die Blase über den Fensterrand.
    */
   seite?: 'mitte' | 'anfang' | 'ende'
-  /** `unten` unter dem Element; `oben` für Leisten am unteren Rand (Anrufsteuerung, Eingabezeile). */
-  lage?: 'unten' | 'oben'
+  /** `unten` unter dem Element; `oben` für Leisten am unteren Rand; `rechts` für senkrechte Leisten links; `links` für senkrechte Leisten rechts. */
+  lage?: 'unten' | 'oben' | 'rechts' | 'links'
   /** Lage und Abstand des Ganzen (etwa `ml-auto`); am Knopf darin wirkten sie nicht mehr. */
   aussen?: string
 }
@@ -25,6 +25,13 @@ const SEITE = {
   mitte: 'left-1/2 -translate-x-1/2',
   anfang: 'left-0',
   ende: 'right-0',
+} as const
+
+const LAGE = {
+  unten: 'top-full mt-1.5',
+  oben: 'bottom-full mb-1.5',
+  rechts: 'left-full ml-2 top-1/2 -translate-y-1/2',
+  links: 'right-full mr-2 top-1/2 -translate-y-1/2',
 } as const
 
 /**
@@ -48,13 +55,15 @@ export function Kurzinfo({ text, children, className = '', seite = 'mitte', lage
   // Bringt `aussen` eine eigene Position mit (`absolute top-2 right-2`), gilt sie;
   // daneben ein `relative` gewönne im gebauten CSS und hielte die Hülle im Fluss.
   const position = /(^|\s)(absolute|fixed|sticky)(?=\s|$)/.test(aussen) ? '' : 'relative'
+  const lageKlasse = LAGE[lage]
+  const seiteKlasse = lage === 'rechts' || lage === 'links' ? '' : SEITE[seite]
   return (
     <span className={`group/kurzinfo ${position} inline-flex ${aussen}`}>
       {children}
       <span
         aria-hidden="true"
         data-kurzinfo={text}
-        className={`pointer-events-none before:content-[attr(data-kurzinfo)] absolute z-50 ${lage === 'oben' ? 'bottom-full mb-1.5' : 'top-full mt-1.5'} w-max max-w-64 ${SEITE[seite]} rounded-md border border-outline-variant bg-surface-container-highest px-2 py-1 text-label-sm font-medium text-on-surface shadow-lg hidden [@media(hover:hover)]:group-hover/kurzinfo:block group-has-[:focus-visible]/kurzinfo:block ${className}`}
+        className={`pointer-events-none before:content-[attr(data-kurzinfo)] absolute z-50 ${lageKlasse} ${seiteKlasse} w-max max-w-64 rounded-md border border-outline-variant bg-surface-container-highest px-2 py-1 text-label-sm font-medium text-on-surface shadow-lg hidden [@media(hover:hover)]:group-hover/kurzinfo:block group-has-[:focus-visible]/kurzinfo:block ${className}`}
       />
     </span>
   )

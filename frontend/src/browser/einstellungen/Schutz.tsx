@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import { Button, Kurzinfo } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
+import { useEinstellungenStore } from '../services/einstellungenStore'
 import { useGeraetKonfig } from '../services/geraetKonfig'
 import { nativ, type Seitenrecht } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
@@ -24,6 +25,8 @@ function Schild() {
   const { t } = useTranslation()
   const konfig = useGeraetKonfig((s) => s.konfig)
   const aendern = useGeraetKonfig((s) => s.aendern)
+  const cleanCopy = useEinstellungenStore((s) => s.cleanCopy)
+  const einstellungenSetzen = useEinstellungenStore((s) => s.setzen)
   const [listen, setListen] = useState<{ name: string; alter_sekunden: number | null }[]>([])
 
   useEffect(() => {
@@ -79,6 +82,12 @@ function Schild() {
         hinweis={t(istAndroid() ? 'browser.einstellungen.vergessenHinweisAndroid' : 'browser.einstellungen.vergessenHinweis')}
         an={konfig?.vergessen_beim_schliessen ?? false}
         aendern={(v) => void setzen({ vergessen_beim_schliessen: v })}
+      />
+      <Schalterzeile
+        name={t('browser.einstellungen.cleanCopy')}
+        hinweis={t('browser.einstellungen.cleanCopyHinweis')}
+        an={cleanCopy}
+        aendern={(v) => einstellungenSetzen({ cleanCopy: v })}
       />
     </Abschnitt>
   )

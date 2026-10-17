@@ -93,4 +93,21 @@ describe('Wo die Einträge stehen', () => {
     })
     expect(useEinstellungenStore.getState().panelBreite).toBe(444)
   })
+
+  it('bleibt im Splitscreen minimalistisch ohne störende Steuerungs-Buttons', async () => {
+    const { useTabsStore } = await import('../services/tabsStore')
+    useTabsStore.setState({
+      split: {
+        sekundaerId: 'tab-2',
+        richtung: 'horizontal',
+        anteil: 0.5,
+        aktiveHaelfte: 'primaer',
+      },
+    })
+    zeigen(<Navigationsleiste />)
+    expect(screen.queryByTitle(/Linke Hälfte steuern/i)).not.toBeInTheDocument()
+    expect(screen.queryByTitle(/Rechte Hälfte steuern/i)).not.toBeInTheDocument()
+    expect(screen.queryByTitle(/Seiten tauschen/i)).not.toBeInTheDocument()
+  })
 })
+

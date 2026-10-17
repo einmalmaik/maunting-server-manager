@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tab-seite-zuruecksetzen"
+description = "Enables the tab_seite_zuruecksetzen command without any pre-configured scope."
+commands.allow = ["tab_seite_zuruecksetzen"]
+
+[[permission]]
+identifier = "deny-tab-seite-zuruecksetzen"
+description = "Denies the tab_seite_zuruecksetzen command without any pre-configured scope."
+commands.deny = ["tab_seite_zuruecksetzen"]

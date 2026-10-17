@@ -5,10 +5,13 @@
  */
 import { useTranslation } from 'react-i18next'
 
-import { FileButton, Input, Kurzinfo, MultiSelect } from '@/Singra/UI'
+import { FileButton, Input, Kurzinfo, MultiSelect, Slider } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
-import { HINTERGRUENDE, hintergrundStil } from '../seite/Startseite'
+import { bildZuWebp, FARB_HINTERGRUENDE, HINTERGRUND_OPTIONEN } from '../seite/hintergruende'
+import { hintergrundStil } from '../seite/Startseite'
+
+
 import { WIDGET_SYMBOLE, widgetsGeordnet } from '../seite/start/Widgets'
 import {
   EIGENES_BILD_MAX_BYTES,
@@ -18,6 +21,7 @@ import {
   type Hintergrund,
   type Leistenort,
   type NachrichtenThema,
+  type TabAusrichtung,
   type Widget,
 } from '../services/einstellungenStore'
 import { Anordnung } from './Anordnung'
@@ -129,18 +133,35 @@ function Nachrichtenwahl() {
 function Hintergrundwahl() {
   const { t } = useTranslation()
   const hintergrund = useEinstellungenStore((s) => s.hintergrund)
+  const hintergrundBlur = useEinstellungenStore((s) => s.hintergrundBlur)
   const eigenesBild = useEinstellungenStore((s) => s.eigenesBild)
   const setzen = useEinstellungenStore((s) => s.setzen)
-  const auswahl: Hintergrund[] = [...(Object.keys(HINTERGRUENDE) as Hintergrund[]), ...(eigenesBild ? (['eigen'] as const) : [])]
+  const auswahl: Hintergrund[] = [...HINTERGRUND_OPTIONEN, ...(eigenesBild ? (['eigen'] as const) : [])]
 
-  const bildLaden = (datei: File) => {
-    if (!datei.type.startsWith('image/') || datei.size > EIGENES_BILD_MAX_BYTES) {
+  const bildLaden = async (datei: File) => {
+    if (!datei.type.startsWith('image/')) {
+      toast.error(t('browser.einstellungen.bildFehler'))
+      return
+    }
+    if (datei.size > EIGENES_BILD_MAX_BYTES) {
       toast.error(t('browser.einstellungen.bildZuGross'))
       return
     }
-    const leser = new FileReader()
-    leser.onload = () => typeof leser.result === 'string' && setzen({ eigenesBild: leser.result, hintergrund: 'eigen' })
-    leser.readAsDataURL(datei)
+    try {
+      const webp = await bildZuWebp(datei, 0.85)
+      setzen({ eigenesBild: webp, hintergrund: 'eigen', ...(hintergrundBlur === 0 ? { hintergrundBlur: 30 } : {}) })
+    } catch {
+      toast.error(t('browser.einstellungen.bildFehler'))
+    }
+  }
+
+  const hintergrundWaehlen = (h: Hintergrund) => {
+    const istFarbe = h in FARB_HINTERGRUENDE
+    if (istFarbe) {
+      setzen({ hintergrund: h, hintergrundBlur: 0 })
+    } else {
+      setzen({ hintergrund: h, ...(hintergrundBlur === 0 ? { hintergrundBlur: 30 } : {}) })
+    }
   }
 
   return (
@@ -153,16 +174,58 @@ function Hintergrundwahl() {
               role="radio"
               aria-checked={hintergrund === h}
               aria-label={t(`browser.hintergrund.${h}`)}
-              onClick={() => setzen({ hintergrund: h })}
+              onClick={() => hintergrundWaehlen(h)}
               style={hintergrundStil(h, eigenesBild)}
-              className={`h-16 w-full rounded-lg border bg-surface ${hintergrund === h ? 'border-primary ring-2 ring-primary/40' : 'border-outline-variant'}`}
+              className={`h-16 w-full rounded-lg border bg-surface transition-all ${
+                hintergrund === h ? 'border-primary ring-2 ring-primary/40' : 'border-outline-variant hover:border-primary/50'
+              }`}
             />
           </Kurzinfo>
         ))}
       </div>
-      <FileButton accept="image/*" onFile={bildLaden} size="sm" className="self-start">
-        {t('browser.einstellungen.bildWaehlen')}
-      </FileButton>
+      <p className="text-label-sm text-on-surface-variant -mt-1">
+        {t('browser.einstellungen.kiBilderHinweis')}
+      </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-1">
+        <FileButton accept="image/*" onFile={bildLaden} size="sm" className="self-start">
+          {t('browser.einstellungen.bildWaehlen')}
+        </FileButton>
+        <div className="w-full sm:w-64">
+          <Slider
+            label={t('browser.einstellungen.hintergrundBlur')}
+            hint={`${hintergrundBlur} %`}
+            value={hintergrundBlur}
+            min={0}
+            max={100}
+            step={5}
+            onValueChange={(v) => setzen({ hintergrundBlur: v })}
+          />
+        </div>
+      </div>
+    </Abschnitt>
+  )
+}
+
+
+function TabLeisteWahl() {
+  const { t } = useTranslation()
+  const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
+  const setzen = useEinstellungenStore((s) => s.setzen)
+
+  if (istAndroid()) return null
+
+  return (
+    <Abschnitt titel={t('browser.einstellungen.tabLeiste')}>
+      <Auswahlzeile<TabAusrichtung>
+        name={t('browser.einstellungen.tabAusrichtung')}
+        hinweis={t('browser.einstellungen.tabAusrichtungHinweis')}
+        wert={tabAusrichtung}
+        optionen={[
+          { value: 'vertikal', label: t('browser.einstellungen.tabAusrichtungOption.vertikal') },
+          { value: 'horizontal', label: t('browser.einstellungen.tabAusrichtungOption.horizontal') },
+        ]}
+        aendern={(v) => setzen({ tabAusrichtung: v })}
+      />
     </Abschnitt>
   )
 }
@@ -172,6 +235,7 @@ export function Design() {
     <>
       <Aufbau />
       <Startwidgets />
+      <TabLeisteWahl />
       <Hintergrundwahl />
     </>
   )

@@ -126,7 +126,7 @@ unsafe fn einschlafen(app: &AppHandle, id: &str, core: &ICoreWebView2) {
 }
 
 /// Wie Schließen, nur bleibt der Tab in der Oberfläche. UI-Faden.
-fn verwerfen(app: &AppHandle, id: &str) {
+pub(super) fn verwerfen(app: &AppHandle, id: &str) {
     app.state::<Tabs>().0.lock().unwrap().tabs.remove(id);
     crate::schild::tab_vergessen(id);
     super::rueckfragen::vergessen(id);

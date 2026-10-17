@@ -3,9 +3,32 @@
  * hat keinen Rahmen des Systems; gezogen wird an der freien Fläche
  * (`data-tauri-drag-region`), ein Doppelklick maximiert.
  */
-import { Fragment, useEffect, useState, type DragEvent } from 'react'
-import { EyeOff, Globe, Loader2, Minus, Moon, Plus, Search, Settings, Square, Volume2, VolumeX, X } from 'lucide-react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type WheelEvent } from 'react'
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Columns2,
+  EyeOff,
+  Globe,
+  Loader2,
+  Minus,
+  Moon,
+  Plus,
+  Search,
+  Settings,
+  Square,
+  Volume2,
+  VolumeX,
+  X,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+
+import { WorkspaceIcon } from './WorkspaceLeiste'
+import { STANDARD_WORKSPACE_ID, useWorkspacesStore } from '../services/workspacesStore'
+import { farbwahl } from '@/config/farbpalette'
+import { useAnkerLage } from '@/Singra/UI/Ankerlage'
+import { createPortal } from 'react-dom'
 
 import { Kurzinfo } from '@/Singra/UI'
 
@@ -17,6 +40,7 @@ import {
   beendeTabDrag,
   entpackeTabTransfer,
   FENSTER_ID,
+  istTabFuerSplitVerwendet,
   istTabUebernommen,
   lauscheTabTransfer,
   lauscheTabZiehNachrichten,
@@ -83,7 +107,7 @@ export function TabSymbol({ tab }: { tab: Tab }) {
 }
 
 /** Lautsprecher am Tab, solange die Seite Ton spielt oder stumm ist; ein Klick schaltet um. */
-function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
+export function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
   const { t } = useTranslation()
   if (!tab.ton && !tab.stumm) return null
   const name = tab.stumm ? t('browser.tabs.tonAn', { titel }) : t('browser.tabs.stumm', { titel })
@@ -109,7 +133,7 @@ function TonKnopf({ tab, titel }: { tab: Tab; titel: string }) {
  * Erstellt ein optisches Phantom (Vorschau-Miniatur) des Browserfensters
  * für das Auslagern per Drag-and-Drop (wie bei Chromium/Chrome).
  */
-function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement {
+export function erstelleTabPhantom(titel: string, favicon: string | null): HTMLElement {
   const container = document.createElement('div')
   container.setAttribute('aria-hidden', 'true')
   container.style.cssText = [
@@ -266,182 +290,12 @@ interface TabReiterProps {
   index: number
   onHoverZieh?: (e: DragEvent<HTMLDivElement>) => void
   onDropTab?: (e: DragEvent<HTMLDivElement>) => void
-  onZielBerechnen?: (ziel: number | null) => void
-  onDropTabLokal?: (tabId: string) => void
 }
 
-function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBerechnen, onDropTabLokal }: TabReiterProps) {
+function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab }: TabReiterProps) {
   const { t } = useTranslation()
   const { aktivieren, schliessen } = useTabsStore.getState()
   const titel = tabTitel(tab, { neu: t('browser.tabs.neu'), einstellungen: t('browser.einstellungen.titel') })
-
-  const pointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return
-    if ((e.target as HTMLElement).closest('button')) return
-
-    const sx = typeof e.screenX === 'number' ? e.screenX : 0
-    const sy = typeof e.screenY === 'number' ? e.screenY : 0
-    const cx = typeof e.clientX === 'number' ? e.clientX : 0
-    const cy = typeof e.clientY === 'number' ? e.clientY : 0
-
-    let gezogen = false
-    let abgebrochen = false
-    const zielElement = e.currentTarget
-
-    const transferPayload: TabTransferDaten = {
-      ursprungFensterId: FENSTER_ID,
-      tabId: tab.id,
-      url: tab.url,
-      titel,
-      favicon: tab.favicon,
-      privat: tab.privat,
-    }
-
-    const onKey = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') {
-        abgebrochen = true
-        aufloesen(true)
-      }
-    }
-
-    const onMove = (ev: PointerEvent) => {
-      if (abgebrochen) return
-      const distanz = Math.hypot(ev.screenX - sx, ev.screenY - sy)
-      if (!gezogen && distanz >= 5) {
-        gezogen = true
-        registriereTabDrag(transferPayload)
-        try {
-          zielElement.setPointerCapture?.(ev.pointerId)
-        } catch {}
-      }
-
-      if (gezogen) {
-        // Normaler Mauszeiger statt Verbotszeichen (🚫)
-        document.body.style.cursor = 'default'
-
-        sendeTabZiehNachricht({
-          art: 'ziehen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: ev.screenX,
-          screenY: ev.screenY,
-        })
-
-        const imLokalenBalken =
-          ev.clientY >= 0 &&
-          ev.clientY <= 48 &&
-          ev.clientX >= 0 &&
-          ev.clientX <= (window.innerWidth || 1920)
-
-        if (imLokalenBalken) {
-          const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-          let ziel = tabEls.length
-          for (let i = 0; i < tabEls.length; i++) {
-            const rect = tabEls[i].getBoundingClientRect()
-            const mitte = rect.left + rect.width / 2
-            if (ev.clientX < mitte) {
-              ziel = i
-              break
-            }
-          }
-          onZielBerechnen?.(ziel)
-        } else {
-          onZielBerechnen?.(null)
-        }
-      }
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      aufloesen(false, ev)
-    }
-
-    const aufloesen = (abbrechen: boolean, ev?: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      window.removeEventListener('keydown', onKey, { capture: true })
-      document.body.style.cursor = ''
-      try {
-        zielElement.releasePointerCapture?.(e.pointerId)
-      } catch {}
-
-      if (abbrechen) {
-        sendeTabZiehNachricht({
-          art: 'abbrechen',
-          ursprungFensterId: FENSTER_ID,
-          tabId: tab.id,
-          url: tab.url,
-          titel,
-          favicon: tab.favicon,
-          privat: tab.privat,
-          screenX: 0,
-          screenY: 0,
-        })
-        beendeTabDrag()
-        onZielBerechnen?.(null)
-        return
-      }
-
-      if (!gezogen) {
-        aktivieren(tab.id)
-        return
-      }
-
-      const endScreenX = ev ? ev.screenX : sx
-      const endScreenY = ev ? ev.screenY : sy
-      const endClientX = ev ? ev.clientX : cx
-      const endClientY = ev ? ev.clientY : cy
-
-      sendeTabZiehNachricht({
-        art: 'ablegen',
-        ursprungFensterId: FENSTER_ID,
-        tabId: tab.id,
-        url: tab.url,
-        titel,
-        favicon: tab.favicon,
-        privat: tab.privat,
-        screenX: endScreenX,
-        screenY: endScreenY,
-      })
-
-      setTimeout(() => {
-        beendeTabDrag()
-        onZielBerechnen?.(null)
-
-        if (istTabUebernommen(tab.id)) {
-          schliessen(tab.id)
-          return
-        }
-
-        const imLokalenBalken =
-          endClientY >= 0 &&
-          endClientY <= 48 &&
-          endClientX >= 0 &&
-          endClientX <= (window.innerWidth || 1920)
-
-        if (imLokalenBalken) {
-          onDropTabLokal?.(tab.id)
-          return
-        }
-
-        const distanz = Math.hypot(endScreenX - sx, endScreenY - sy)
-        const tabs = useTabsStore.getState().tabs
-        if (tabs.length > 1 && !istAndroid() && (distanz >= 50 || endClientY < 0 || endClientY > 48)) {
-          void nativ
-            .tabAuslagern(tab.url, endScreenX, endScreenY, tab.privat)
-            .then(() => schliessen(tab.id))
-            .catch((err) => console.error('[MSB] Tab konnte nicht ausgelagert werden:', err))
-        }
-      }, 70)
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('keydown', onKey, { capture: true })
-  }
 
   const dragStart = (e: DragEvent<HTMLDivElement>) => {
     const onKey = (ev: KeyboardEvent) => {
@@ -451,12 +305,37 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     }
     window.addEventListener('keydown', onKey, { capture: true })
 
-    // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters
+    // Verhindert das Stop-Zeichen (🚫) beim Überqueren des Fensters und meldet Position für Snap
     const onWindowDragOver = (ev: globalThis.DragEvent) => {
       ev.preventDefault()
       if (ev.dataTransfer) {
         ev.dataTransfer.dropEffect = 'move'
       }
+      const cx = typeof ev.clientX === 'number' ? ev.clientX : 0
+      const cy = typeof ev.clientY === 'number' ? ev.clientY : 0
+      const sx = typeof ev.screenX === 'number' ? ev.screenX : 0
+      const sy = typeof ev.screenY === 'number' ? ev.screenY : 0
+
+      if (aktiverTabDrag) {
+        aktiverTabDrag.letzteClientX = cx
+        aktiverTabDrag.letzteClientY = cy
+        aktiverTabDrag.letzteScreenX = sx
+        aktiverTabDrag.letzteScreenY = sy
+      }
+
+      sendeTabZiehNachricht({
+        art: 'ziehen',
+        ursprungFensterId: FENSTER_ID,
+        tabId: tab.id,
+        url: tab.url,
+        titel,
+        favicon: tab.favicon,
+        privat: tab.privat,
+        screenX: sx,
+        screenY: sy,
+        clientX: cx,
+        clientY: cy,
+      })
     }
     window.addEventListener('dragover', onWindowDragOver, { capture: true })
 
@@ -495,6 +374,20 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     const cx = typeof e.clientX === 'number' ? e.clientX : 0
     const cy = typeof e.clientY === 'number' ? e.clientY : 0
 
+    sendeTabZiehNachricht({
+      art: 'ziehen',
+      ursprungFensterId: FENSTER_ID,
+      tabId: tab.id,
+      url: tab.url,
+      titel,
+      favicon: tab.favicon,
+      privat: tab.privat,
+      screenX: sx,
+      screenY: sy,
+      clientX: cx,
+      clientY: cy,
+    })
+
     const aufraeumen = () => {
       window.removeEventListener('keydown', onKey, { capture: true })
       window.removeEventListener('dragover', onWindowDragOver, { capture: true })
@@ -527,9 +420,11 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
     const cx = typeof e.clientX === 'number' ? e.clientX : 0
     const cy = typeof e.clientY === 'number' ? e.clientY : 0
 
-    if (sx !== 0 || sy !== 0) {
+    if (sx !== 0 || sy !== 0 || cx !== 0 || cy !== 0) {
       aktiverTabDrag.letzteScreenX = sx
       aktiverTabDrag.letzteScreenY = sy
+      aktiverTabDrag.letzteClientX = cx
+      aktiverTabDrag.letzteClientY = cy
 
       sendeTabZiehNachricht({
         art: 'ziehen',
@@ -541,11 +436,9 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         privat: tab.privat,
         screenX: sx,
         screenY: sy,
+        clientX: cx,
+        clientY: cy,
       })
-    }
-    if (cx !== 0 || cy !== 0) {
-      aktiverTabDrag.letzteClientX = cx
-      aktiverTabDrag.letzteClientY = cy
     }
   }
 
@@ -595,7 +488,17 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
       privat: tab.privat,
       screenX,
       screenY,
+      clientX,
+      clientY,
     })
+
+    const split = useTabsStore.getState().split
+    const istImSplit = split && (split.sekundaerId === drag.id || useTabsStore.getState().aktivId === drag.id)
+    if (istImSplit || istTabFuerSplitVerwendet(drag.id)) {
+      return
+    }
+
+    if (tabs.length <= 1) return
 
     // Nur wenn der Zeiger nachweislich in der Kopfleiste geblieben ist und sich kaum bewegt hat
     const imTabBereich =
@@ -627,13 +530,16 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
       })
   }
 
+  const split = useTabsStore((s) => s.split)
+  const aktivId = useTabsStore((s) => s.aktivId)
+  const istImSplit = split ? (tab.id === split.sekundaerId || tab.id === aktivId) : false
+
   return (
     <div
       role="tab"
       aria-selected={aktiv}
       tabIndex={aktiv ? 0 : -1}
       draggable
-      onPointerDown={pointerDown}
       onDragStart={dragStart}
       onDrag={beimZiehen}
       onDragEnd={dragEnde}
@@ -651,7 +557,11 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         if (e.key === 'Enter' || e.key === ' ') aktivieren(tab.id)
       }}
       className={`group flex h-8 min-w-[7.5rem] max-w-[14rem] flex-1 cursor-default items-center gap-2 rounded-t-lg px-2.5 text-label-md transition-all duration-150 ease-out ${
-        aktiv ? 'bg-surface-container text-on-surface' : 'text-on-surface-variant hover:bg-surface-container/60'
+        aktiv
+          ? 'bg-surface-container text-on-surface'
+          : istImSplit
+          ? 'bg-surface-container/80 text-on-surface'
+          : 'text-on-surface-variant hover:bg-surface-container/60'
       }`}
     >
       <span className={`flex h-4 w-4 shrink-0 items-center justify-center ${tab.ruhe ? 'opacity-50' : ''}`}>
@@ -662,6 +572,21 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
         {titel}
         {tab.ruhe && <span className="sr-only">, {t(`browser.tabs.ruhe.${tab.ruhe}`)}</span>}
       </span>
+      {istImSplit && (
+        <span
+          className={`flex h-4 items-center gap-0.5 rounded px-1 text-label-sm font-semibold ${
+            aktiv ? 'bg-primary/20 text-primary' : 'bg-surface-container-highest/60 text-on-surface-variant'
+          }`}
+          aria-label={
+            tab.id === aktivId
+              ? t('browser.split.primaerBadge', { defaultValue: 'Geteilte Ansicht: Links' })
+              : t('browser.split.sekundaerBadge', { defaultValue: 'Geteilte Ansicht: Rechts' })
+          }
+        >
+          <Columns2 className="h-3 w-3" aria-hidden="true" />
+          <span className="text-label-sm">{tab.id === aktivId ? 'L' : 'R'}</span>
+        </span>
+      )}
       {tab.ruhe && <Moon className="h-3 w-3 shrink-0 text-on-surface-variant" aria-hidden="true" />}
       <TonKnopf tab={tab} titel={titel} />
       <button
@@ -681,14 +606,171 @@ function TabReiter({ tab, aktiv, index: _index, onHoverZieh, onDropTab, onZielBe
   )
 }
 
+function WorkspaceKopfDropdown() {
+  const { t } = useTranslation()
+  const workspaces = useWorkspacesStore((s) => s.workspaces)
+  const aktiverWorkspaceId = useWorkspacesStore((s) => s.aktiverWorkspaceId)
+  const wechselnWorkspace = useWorkspacesStore((s) => s.wechselnWorkspace)
+  const [offen, setOffen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menueRef = useRef<HTMLDivElement>(null)
+  const lage = useAnkerLage(offen, triggerRef, menueRef, {
+    seite: 'unten',
+    ausrichtung: 'start',
+    abstand: 4,
+  })
+
+  const aktiver = workspaces.find((w) => w.id === aktiverWorkspaceId) ?? workspaces[0]
+  const aktiverFarbe = farbwahl(aktiver?.farbe)
+
+  useEffect(() => {
+    if (!offen) return
+    const daneben = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (!triggerRef.current?.contains(target) && !menueRef.current?.contains(target)) {
+        setOffen(false)
+      }
+    }
+    const taste = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOffen(false)
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', daneben)
+    document.addEventListener('keydown', taste)
+    return () => {
+      document.removeEventListener('mousedown', daneben)
+      document.removeEventListener('keydown', taste)
+    }
+  }, [offen])
+
+  return (
+    <div className="relative mb-1 shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={offen}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOffen(!offen)
+        }}
+        className="flex h-7 items-center gap-1.5 rounded-lg border border-outline-variant bg-surface-container px-2 text-label-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"
+        aria-label={t('browser.workspaces.titel')}
+      >
+        <span className={`h-2 w-2 rounded-full ${aktiverFarbe.flaecheStark} border ${aktiverFarbe.rand}`} />
+        <WorkspaceIcon icon={aktiver?.icon ?? 'globe'} className="h-3.5 w-3.5 opacity-80" />
+        <span className="max-w-24 truncate">{aktiver?.name}</span>
+        <ChevronDown className="h-3 w-3 text-on-surface-variant opacity-70" aria-hidden="true" />
+      </button>
+
+      {offen &&
+        createPortal(
+          <div
+            ref={menueRef}
+            role="menu"
+            data-msb-verdeckt="true"
+            style={lage}
+            className="fixed z-50 flex flex-col min-w-48 max-w-[calc(100vw-1rem)] max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel backdrop-blur-sm text-label-sm select-none"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-2.5 py-1 text-label-sm font-semibold uppercase tracking-wider text-on-surface-variant/70">
+              {t('browser.workspaces.titel')}
+            </div>
+            {workspaces.map((ws, index) => {
+              const aktiv = ws.id === aktiverWorkspaceId
+              const wsFarbe = farbwahl(ws.farbe)
+              return (
+                <button
+                  key={ws.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    wechselnWorkspace(ws.id)
+                    setOffen(false)
+                  }}
+                  className={`flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 transition-colors text-left ${
+                    aktiv
+                      ? 'bg-primary/15 text-primary font-semibold'
+                      : 'text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <span className={`h-2 w-2 rounded-full shrink-0 ${wsFarbe.flaecheStark} border ${wsFarbe.rand}`} />
+                    <WorkspaceIcon icon={ws.icon} className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                    <span className="truncate">{ws.name}</span>
+                  </div>
+                  {index < 9 && (
+                    <span className="text-label-sm text-on-surface-variant/50 ml-2">
+                      Alt+{index + 1}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>,
+          document.body
+        )}
+    </div>
+  )
+}
+
 export function Kopfleiste() {
   const { t } = useTranslation()
   const tabs = useTabsStore((s) => s.tabs)
+  const aktiverWorkspaceId = useWorkspacesStore((s) => s.aktiverWorkspaceId)
   const aktivId = useTabsStore((s) => s.aktivId)
+  const split = useTabsStore((s) => s.split)
+  const wirksamAktivId = split && split.aktiveHaelfte === 'sekundaer' ? split.sekundaerId : aktivId
   const neuerTab = useTabsStore((s) => s.neuerTab)
+  const startseite = useTabsStore((s) => s.startseite)
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
+  const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
   const [fremderDragTab, setFremderDragTab] = useState<TabZiehNachricht | null>(null)
+
+  const sichtbareTabs = useMemo(
+    () => tabs.filter((t) => (t.workspaceId ?? STANDARD_WORKSPACE_ID) === aktiverWorkspaceId),
+    [tabs, aktiverWorkspaceId]
+  )
+
+  const tabListRef = useRef<HTMLDivElement>(null)
+  const [kannScrollenLinks, setKannScrollenLinks] = useState(false)
+  const [kannScrollenRechts, setKannScrollenRechts] = useState(false)
+
+  const pruefeScroll = useCallback(() => {
+    const el = tabListRef.current
+    if (!el) return
+    setKannScrollenLinks(el.scrollLeft > 2)
+    setKannScrollenRechts(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
+  }, [])
+
+  useEffect(() => {
+    pruefeScroll()
+    const el = tabListRef.current
+    if (!el) return
+    el.addEventListener('scroll', pruefeScroll, { passive: true })
+    window.addEventListener('resize', pruefeScroll)
+    return () => {
+      el.removeEventListener('scroll', pruefeScroll)
+      window.removeEventListener('resize', pruefeScroll)
+    }
+  }, [sichtbareTabs, pruefeScroll])
+
+  useEffect(() => {
+    if (tabAusrichtung !== 'horizontal') return
+    const aktivEl = tabListRef.current?.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement | null
+    if (typeof aktivEl?.scrollIntoView === 'function') {
+      aktivEl.scrollIntoView({ behavior: 'smooth', inline: 'nearest', block: 'nearest' })
+    }
+  }, [wirksamAktivId, tabAusrichtung])
+
+  const behandleMausrad = (e: WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY !== 0) {
+      e.currentTarget.scrollLeft += e.deltaY
+    }
+  }
 
   useEffect(() => {
     const abmeldenTransfer = lauscheTabTransfer(({ tabId }) => {
@@ -724,7 +806,7 @@ export function Kopfleiste() {
         setFremderDragTab(msg)
 
         const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-        let ziel = tabs.length
+        let ziel = sichtbareTabs.length
         for (let i = 0; i < tabEls.length; i++) {
           const rect = tabEls[i].getBoundingClientRect()
           const mitte = rect.left + rect.width / 2
@@ -740,20 +822,31 @@ export function Kopfleiste() {
       if (msg.art === 'ablegen') {
         if (imBalken) {
           const tabEls = document.querySelectorAll<HTMLElement>('[role="tab"]')
-          let ziel = tabs.length
+          let sichtbaresZiel = sichtbareTabs.length
           for (let i = 0; i < tabEls.length; i++) {
             const rect = tabEls[i].getBoundingClientRect()
             const mitte = rect.left + rect.width / 2
             if (relX < mitte) {
-              ziel = i
+              sichtbaresZiel = i
               break
             }
           }
+          let globalerZielIndex = tabs.length
+          if (sichtbaresZiel < sichtbareTabs.length) {
+            const zielTab = sichtbareTabs[sichtbaresZiel]
+            const idx = tabs.findIndex((t) => t.id === zielTab.id)
+            if (idx >= 0) globalerZielIndex = idx
+          } else if (sichtbareTabs.length > 0) {
+            const letzterTab = sichtbareTabs[sichtbareTabs.length - 1]
+            const idx = tabs.findIndex((t) => t.id === letzterTab.id)
+            if (idx >= 0) globalerZielIndex = idx + 1
+          }
           neuerTab(msg.url, {
-            anIndex: ziel,
+            anIndex: globalerZielIndex,
             titel: msg.titel,
             favicon: msg.favicon,
             privat: msg.privat,
+            workspaceId: aktiverWorkspaceId,
           })
           sendeTabUebernommen(msg.ursprungFensterId, msg.tabId)
         }
@@ -766,7 +859,7 @@ export function Kopfleiste() {
       abmeldenTransfer()
       abmeldenLive()
     }
-  }, [tabs])
+  }, [tabs, sichtbareTabs, aktiverWorkspaceId, neuerTab])
 
   const behandleDrop = (e: DragEvent, zielIndex: number) => {
     e.preventDefault()
@@ -777,13 +870,25 @@ export function Kopfleiste() {
     const transfer = entpackeTabTransfer(e.dataTransfer)
     if (!transfer) return
 
+    let globalerZielIndex = tabs.length
+    if (zielIndex < sichtbareTabs.length) {
+      const zielTab = sichtbareTabs[zielIndex]
+      const idx = tabs.findIndex((t) => t.id === zielTab.id)
+      if (idx >= 0) globalerZielIndex = idx
+    } else if (sichtbareTabs.length > 0) {
+      const letzterTab = sichtbareTabs[sichtbareTabs.length - 1]
+      const idx = tabs.findIndex((t) => t.id === letzterTab.id)
+      if (idx >= 0) globalerZielIndex = idx + 1
+    }
+
     // 1. Aus einem anderen Fenster zusammenführen (Re-docking)
     if (transfer.ursprungFensterId !== FENSTER_ID) {
       neuerTab(transfer.url, {
-        anIndex: zielIndex,
+        anIndex: globalerZielIndex,
         titel: transfer.titel,
         favicon: transfer.favicon,
         privat: transfer.privat,
+        workspaceId: aktiverWorkspaceId,
       })
       sendeTabUebernommen(transfer.ursprungFensterId, transfer.tabId)
       beendeTabDrag()
@@ -797,7 +902,7 @@ export function Kopfleiste() {
     }
     const von = tabs.findIndex((t) => t.id === transfer.tabId)
     if (von >= 0) {
-      const korrigiert = von < zielIndex ? zielIndex - 1 : zielIndex
+      const korrigiert = von < globalerZielIndex ? globalerZielIndex - 1 : globalerZielIndex
       if (korrigiert !== von) {
         useTabsStore.getState().verschieben(transfer.tabId, korrigiert)
       }
@@ -819,112 +924,155 @@ export function Kopfleiste() {
         }
       }}
       onDrop={(e) => {
-        behandleDrop(e, dropZielIndex ?? tabs.length)
+        behandleDrop(e, dropZielIndex ?? sichtbareTabs.length)
       }}
-      className="flex h-10 shrink-0 select-none items-end gap-1 bg-surface-container-low pl-2"
+      className={`relative flex h-10 shrink-0 select-none gap-1 bg-surface-container-low pl-2 ${
+        tabAusrichtung === 'vertikal' ? 'items-center' : 'items-end'
+      }`}
     >
-      <img src="/msp.png" alt="" className="mb-2 h-5 w-5 shrink-0" data-tauri-drag-region />
-      <div
-        role="tablist"
-        aria-label={t('browser.tabs.liste')}
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-        }}
-        onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-            setDropZielIndex(null)
-            setFremderDragTab(null)
-          }
-        }}
-        onDrop={(e) => {
-          e.stopPropagation()
-          behandleDrop(e, dropZielIndex ?? tabs.length)
-        }}
-        className="flex min-w-0 items-end gap-0.5 overflow-hidden"
-      >
-        {tabs.map((tab, i) => (
-          <Fragment key={tab.id}>
-            {dropZielIndex === i && (
+      {tabAusrichtung === 'vertikal' ? (
+        <>
+          {/* Frei ziehbare Fensterfläche */}
+          <div data-tauri-drag-region className="h-full min-w-0 flex-1" />
+
+          {/* Mittig platziertes Logo: Klick führt zur Startseite */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+            <Kurzinfo text={t('browser.start.titel')} lage="unten">
+              <button
+                type="button"
+                onClick={() => startseite()}
+                className="pointer-events-auto flex h-7 w-7 items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-colors"
+                aria-label={t('browser.start.titel')}
+              >
+                <img src="/msp.png" alt="" className="h-5 w-5 pointer-events-none" />
+              </button>
+            </Kurzinfo>
+          </div>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => startseite()}
+            className="mb-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg hover:bg-surface-container-high transition-colors"
+            aria-label={t('browser.start.titel')}
+          >
+            <img src="/msp.png" alt="" className="h-5 w-5 pointer-events-none" />
+          </button>
+          <WorkspaceKopfDropdown />
+          {kannScrollenLinks && (
+            <button
+              type="button"
+              onClick={() => tabListRef.current?.scrollBy({ left: -220, behavior: 'smooth' })}
+              className="mb-1 flex h-7 w-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+              aria-label={t('browser.tabs.scrollLinks')}
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+          <div
+            ref={tabListRef}
+            role="tablist"
+            aria-label={t('browser.tabs.liste')}
+            onWheel={behandleMausrad}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+            }}
+            onDragLeave={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                setDropZielIndex(null)
+                setFremderDragTab(null)
+              }
+            }}
+            onDrop={(e) => {
+              e.stopPropagation()
+              behandleDrop(e, dropZielIndex ?? sichtbareTabs.length)
+            }}
+            className="flex min-w-0 items-end gap-0.5 overflow-x-auto scroll-smooth [overscroll-behavior:contain] msm-ohne-rollbalken"
+          >
+            {sichtbareTabs.map((tab, i) => (
+              <Fragment key={tab.id}>
+                {dropZielIndex === i && (
+                  <>
+                    <EinfuegeIndikator />
+                    {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
+                  </>
+                )}
+                <TabReiter
+                  tab={tab}
+                  aktiv={tab.id === wirksamAktivId}
+                  index={i}
+                  onHoverZieh={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const mitte = rect.left + rect.width / 2
+                    const ziel = e.clientX < mitte ? i : i + 1
+                    setDropZielIndex(ziel)
+                  }}
+                  onDropTab={(e) => {
+                    e.stopPropagation()
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const mitte = rect.left + rect.width / 2
+                    const ziel = e.clientX < mitte ? i : i + 1
+                    behandleDrop(e, ziel)
+                  }}
+                />
+              </Fragment>
+            ))}
+            {dropZielIndex === sichtbareTabs.length && (
               <>
                 <EinfuegeIndikator />
                 {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
               </>
             )}
-            <TabReiter
-              tab={tab}
-              aktiv={tab.id === aktivId}
-              index={i}
-              onHoverZieh={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                const mitte = rect.left + rect.width / 2
-                const ziel = e.clientX < mitte ? i : i + 1
-                setDropZielIndex(ziel)
-              }}
-              onDropTab={(e) => {
-                e.stopPropagation()
-                const rect = e.currentTarget.getBoundingClientRect()
-                const mitte = rect.left + rect.width / 2
-                const ziel = e.clientX < mitte ? i : i + 1
-                behandleDrop(e, ziel)
-              }}
-              onZielBerechnen={(ziel) => setDropZielIndex(ziel)}
-              onDropTabLokal={(tabId) => {
-                if (dropZielIndex !== null) {
-                  const von = tabs.findIndex((t) => t.id === tabId)
-                  if (von >= 0) {
-                    const korrigiert = von < dropZielIndex ? dropZielIndex - 1 : dropZielIndex
-                    if (korrigiert !== von) {
-                      useTabsStore.getState().verschieben(tabId, korrigiert)
-                    }
-                  }
-                }
-              }}
-            />
-          </Fragment>
-        ))}
-        {dropZielIndex === tabs.length && (
-          <>
-            <EinfuegeIndikator />
-            {fremderDragTab && <PhantomTabVorschau tab={fremderDragTab} />}
-          </>
-        )}
-      </div>
-      <div
-        className="mb-1 flex shrink-0 items-center"
-        onDragOver={(e) => {
-          e.preventDefault()
-          if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-          setDropZielIndex(tabs.length)
-        }}
-        onDrop={(e) => {
-          e.stopPropagation()
-          behandleDrop(e, tabs.length)
-        }}
-      >
-        <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">
-          <button
-            type="button"
-            onClick={() => neuerTab()}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
-            aria-label={t('browser.tabs.neu')}
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-          </button>
-        </Kurzinfo>
-        {!privatAus && (
-          <Kurzinfo text={t('browser.tabs.privatKuerzel')} seite="anfang">
+          </div>
+          {kannScrollenRechts && (
             <button
               type="button"
-              onClick={() => neuerTab(undefined, { privat: true })}
-              className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-primary"
-              aria-label={t('browser.tabs.neuPrivat')}
+              onClick={() => tabListRef.current?.scrollBy({ left: 220, behavior: 'smooth' })}
+              className="mb-1 flex h-7 w-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+              aria-label={t('browser.tabs.scrollRechts')}
             >
-              <EyeOff className="h-4 w-4" aria-hidden="true" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
-          </Kurzinfo>
-        )}
-      </div>
+          )}
+          <div
+            className="mb-1 flex shrink-0 items-center"
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+              setDropZielIndex(sichtbareTabs.length)
+            }}
+            onDrop={(e) => {
+              e.stopPropagation()
+              behandleDrop(e, sichtbareTabs.length)
+            }}
+          >
+            <Kurzinfo text={t('browser.tabs.neuKuerzel')} seite="anfang">
+              <button
+                type="button"
+                onClick={() => neuerTab()}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface"
+                aria-label={t('browser.tabs.neu')}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </Kurzinfo>
+            {!privatAus && (
+              <Kurzinfo text={t('browser.tabs.privatKuerzel')} seite="anfang">
+                <button
+                  type="button"
+                  onClick={() => neuerTab(undefined, { privat: true })}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container-high hover:text-primary"
+                  aria-label={t('browser.tabs.neuPrivat')}
+                >
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </Kurzinfo>
+            )}
+          </div>
+        </>
+      )}
       <div
         className="h-full min-w-6 flex-1"
         data-tauri-drag-region

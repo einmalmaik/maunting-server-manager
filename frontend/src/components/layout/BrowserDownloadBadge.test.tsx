@@ -23,7 +23,7 @@ describe('BrowserDownloadBadge', () => {
 
     render(<BrowserDownloadBadge />)
 
-    expect(await screen.findByText('MSB Browser')).toBeInTheDocument()
+    expect(await screen.findByText('Maunting Pontis')).toBeInTheDocument()
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute(
       'href',
@@ -41,7 +41,7 @@ describe('BrowserDownloadBadge', () => {
 
     try {
       render(<BrowserDownloadBadge />)
-      expect(await screen.findByText('MSB Mobile')).toBeInTheDocument()
+      expect(await screen.findByText('Pontis Mobile')).toBeInTheDocument()
       const link = screen.getByRole('link')
       expect(link).toHaveAttribute(
         'href',
@@ -61,7 +61,7 @@ describe('BrowserDownloadBadge', () => {
     render(<BrowserDownloadBadge />)
 
     await waitFor(() => {
-      expect(screen.queryByText('MSB Browser')).not.toBeInTheDocument()
+      expect(screen.queryByText('Maunting Pontis')).not.toBeInTheDocument()
     })
   })
 
@@ -72,7 +72,7 @@ describe('BrowserDownloadBadge', () => {
     render(<BrowserDownloadBadge />)
 
     await waitFor(() => {
-      expect(screen.queryByText('MSB Browser')).not.toBeInTheDocument()
+      expect(screen.queryByText('Maunting Pontis')).not.toBeInTheDocument()
     })
   })
 
@@ -81,7 +81,7 @@ describe('BrowserDownloadBadge', () => {
 
     render(<BrowserDownloadBadge />)
 
-    expect(await screen.findByText('MSB Browser')).toBeInTheDocument()
+    expect(await screen.findByText('Maunting Pontis')).toBeInTheDocument()
   })
 
   it('stays visible with fallback true when settings request fails', async () => {
@@ -89,6 +89,6 @@ describe('BrowserDownloadBadge', () => {
 
     render(<BrowserDownloadBadge />)
 
-    expect(await screen.findByText('MSB Browser')).toBeInTheDocument()
+    expect(await screen.findByText('Maunting Pontis')).toBeInTheDocument()
   })
 })

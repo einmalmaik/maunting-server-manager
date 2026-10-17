@@ -1,9 +1,9 @@
 {
   "name": "maunting-secure-browser",
   "private": true,
-  "version": "5.4.0",
+  "version": "5.5.0",
   "type": "module",
-  "description": "MSB - Maunting Secure Browser, datenschutzorientierter Browser auf Tauri-v2-Basis",
+  "description": "Maunting Pontis, datenschutzorientierter Browser auf Tauri-v2-Basis",
   "scripts": {
     "tauri": "tauri"
   },

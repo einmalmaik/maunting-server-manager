@@ -4,7 +4,7 @@
 ; Die Werte liest `src/widget/ohne/windows_standard.rs`.
 ; SHCTX ist bei der Installation für den eigenen Nutzer HKCU.
 
-!define MSB_NAME "Maunting Secure Browser"
+!define MSB_NAME "Maunting Pontis"
 !define MSB_CLIENT "Software\Clients\StartMenuInternet\MauntingSecureBrowser"
 !define MSB_PROGID "MSBURL"
 

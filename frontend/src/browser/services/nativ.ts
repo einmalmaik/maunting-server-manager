@@ -158,16 +158,33 @@ export interface Seitenrecht {
 }
 
 export const nativ = {
-  tabLaden: (id: string, url: string, privat: boolean) => nacheinander('tab_laden', { id, url, privat }),
+  tabLaden: (id: string, url: string, privat: boolean, workspace?: string) =>
+    nacheinander('tab_laden', { id, url, privat, workspace }),
   tabAktivieren: (id: string | null) => nacheinander('tab_aktivieren', { id }),
   tabSchliessen: (id: string) => nacheinander('tab_schliessen', { id }),
+  tabVerwerfen: (id: string) => nacheinander('tab_verwerfen', { id }),
   /** Lagert einen Tab in ein neues, separates Browserfenster aus (Desktop). */
   tabAuslagern: (url: string, x: number, y: number, privat = false) =>
     rufen('tab_auslagern', { url, x: Math.round(x), y: Math.round(y), privat }),
   tabAktion: (id: string, aktion: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten') =>
     rufen('tab_aktion', { id, aktion }),
+  /** Löscht alle Spuren der aktuellen Seite (Cookies, LocalStorage, Cache) und lädt sie neu. */
+  tabSeiteZuruecksetzen: (id: string) => rufen('tab_seite_zuruecksetzen', { id }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
     nacheinander('tabs_rahmen', { rahmen }),
+  tabsSplitSetzen: (
+    primaerId: string,
+    primaerRahmen: { x: number; y: number; breite: number; hoehe: number },
+    sekundaerId: string,
+    sekundaerRahmen: { x: number; y: number; breite: number; hoehe: number }
+  ) =>
+    nacheinander('tabs_split_setzen', {
+      primaerId,
+      primaerRahmen,
+      sekundaerId,
+      sekundaerRahmen,
+    }),
+  tabsSplitAufheben: () => nacheinander('tabs_split_aufheben'),
   tabsVerdecken: (verdeckt: boolean) => nacheinander('tabs_verdecken', { verdeckt }),
   /** JPEG des vorderen Tabs. */
   tabStandbild: () => nacheinander<ArrayBuffer | Uint8Array | number[]>('tab_standbild'),
@@ -204,7 +221,8 @@ export const nativ = {
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */
   tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
     rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
-  fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen') => rufen('fenster_aktion', { aktion }),
+  fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen' | 'neustarten') => rufen('fenster_aktion', { aktion }),
+  neustarten: () => rufen('fenster_aktion', { aktion: 'neustarten' }),
   /** Startinformationen dieses Browserfenster-Prozesses (z. B. ausgelagertes Einzelfenster). */
   fensterStartInfo: () => rufen<FensterStartInfo>('fenster_start_info'),
   /** Namensblase über der Seite (`kurzinfo.rs`); `null` verbirgt sie. */
@@ -321,6 +339,7 @@ export interface BrowserKonfig {
   download_ordner: string | null
   download_fragen: boolean
   vergessen_beim_schliessen: boolean
+  hardwarebeschleunigung?: boolean
 }
 
 export const konfig = {

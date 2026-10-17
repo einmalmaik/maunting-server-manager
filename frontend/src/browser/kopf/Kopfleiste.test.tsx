@@ -39,7 +39,7 @@ beforeEach(() => {
   alsAndroid(false)
   ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
   gerufen.length = 0
-  useEinstellungenStore.setState({ ausgeblendet: [] })
+  useEinstellungenStore.setState({ ausgeblendet: [], tabAusrichtung: 'horizontal' })
   useTabsStore.setState({
     tabs: [
       {
@@ -626,5 +626,20 @@ describe('Kopfleiste Tab-Auslagern (Tear-off)', () => {
     expect(screen.queryByTestId('phantom-tab-vorschau')).toBeNull()
     const tabs = useTabsStore.getState().tabs
     expect(tabs.some((t) => t.url === 'https://azure.microsoft.com/')).toBe(true)
+  })
+
+  it('zeigt im vertikalen Modus das zentrierte Logo und navigiert beim Klick zur Startseite', () => {
+    useEinstellungenStore.setState({ tabAusrichtung: 'vertikal' })
+    const startseiteSpy = vi.spyOn(useTabsStore.getState(), 'startseite')
+    render(<Kopfleiste />)
+
+    // Horizontale Tabliste ist nicht vorhanden
+    expect(screen.queryByRole('tablist')).toBeNull()
+
+    // Logo-Knopf ist vorhanden und mittig platziert
+    const logoKnopf = screen.getByRole('button', { name: /Maunting Pontis/i })
+    expect(logoKnopf).toBeDefined()
+    fireEvent.click(logoKnopf)
+    expect(startseiteSpy).toHaveBeenCalled()
   })
 })

@@ -1,5 +1,5 @@
 /**
- * Die Oberfläche des Maunting Secure Browsers.
+ * Die Oberfläche von Maunting Pontis.
  *
  * Oben Tabs und Navigation, in der Mitte die Seite (eine Webview von Rust),
  * am Handy statt oben eine Leiste unten (`HandyLeiste`, wie Chrome mit
@@ -31,6 +31,7 @@ import { HandyLeiste } from './kopf/HandyLeiste'
 import { Kopfleiste } from './kopf/Kopfleiste'
 import { Navigationsleiste } from './kopf/Navigationsleiste'
 import { Suchleiste } from './kopf/Suchleiste'
+import { VertikaleTableiste } from './kopf/VertikaleTableiste'
 import { Panel } from './leiste/Panel'
 import { Seitenleiste } from './leiste/Seitenleiste'
 import { useOhneEdgeMenue } from './seite/EigenesMenue'
@@ -113,6 +114,7 @@ function Wurzel() {
   const anruf = useCallStore((s) => s.state !== 'idle')
   const leiste = useEinstellungenStore((s) => s.leiste)
   const panelSeite = useEinstellungenStore((s) => s.panelSeite)
+  const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const handy = istAndroid()
   const [imVollbild, setImVollbild] = useState(false)
 
@@ -257,6 +259,7 @@ function Wurzel() {
       )}
       {!imVollbild && <Suchleiste />}
       <div className="flex min-h-0 flex-1 bg-surface-container">
+        {!imVollbild && !handy && tabAusrichtung === 'vertikal' && <VertikaleTableiste />}
         {!imVollbild && !handy && leiste === 'links' && <Seitenleiste seite="links" />}
         {!imVollbild && !handy && panelSeite === 'links' && <Panel seite="links" />}
         <div className="flex min-w-0 flex-1 flex-col">

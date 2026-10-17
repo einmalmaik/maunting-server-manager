@@ -29,7 +29,7 @@ beforeEach(() => {
     ],
     aktivId: 'tab-vorne',
   })
-  useEinstellungenStore.setState({ schlafenNach: 30, speicherSparen: false, schlafAusnahmen: [] })
+  useEinstellungenStore.setState({ schlafenNach: 30, speicherSparen: false, schlafAusnahmen: [], tabAusrichtung: 'horizontal' })
   gerufen.length = 0
 })
 
