@@ -81,6 +81,21 @@ Die Datenbanken deiner Server und die des Panels verwaltest du im Browser: Daten
 
 ---
 
+## Maunting Pontis (Desktop-Browser)
+
+Teil des Repositories ist **Maunting Pontis**, ein datenschutzorientierter Desktop-Browser auf Basis von Tauri v2 und Rust. Er funktioniert eigenständig ohne Server und lässt sich bei Bedarf direkt mit deinem MSM-Panel koppeln.
+
+![Maunting Pontis Browser](docs/images/maunting-pontis.png)
+*Maunting Pontis: Lokale Bergamot-Übersetzung, strikte Tab-Isolation und Schnellzugriff auf dein Ökosystem.*
+
+### Highlights
+- **Strikte Tab-Isolation**: Jeder Tab läuft isoliert ohne Host-Dateisystemzugriff.
+- **Lokale KI-Werkzeuge**: Bergamot-Übersetzung direkt im Speicher (WASM) und Offline-Spracherkennung mit Whisper.
+- **Messbare Leistung**: Speedometer 3.0 (+36,5 % schneller als Chromium) bei geringem RAM-Bedarf von 800 bis 1.200 MB.
+- **MSM-Integration**: Direkter Zugriff auf Node-Status und verschlüsselten Tresor.
+
+---
+
 ## MSM im Vergleich
 
 Hier siehst du MSM neben **Pelican Panel** (dem Nachfolger von Pterodactyl) und **klassischen Panels** wie Pterodactyl v1 oder AMP.
