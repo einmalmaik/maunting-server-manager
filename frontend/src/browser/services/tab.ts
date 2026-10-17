@@ -45,6 +45,10 @@ export interface Tab {
   baumEingeklappt?: boolean
   /** Arbeitsbereich, zu dem der Tab gehört */
   workspaceId?: string
+  /** Signalisiert, ob die Seite lesbaren Fließtext enthält */
+  lesbar?: boolean
+  /** Ob für diesen Tab der puristische Lesemodus aktiv ist */
+  lesemodus?: boolean
 }
 
 /**
@@ -52,7 +56,7 @@ export interface Tab {
  * und Fehlerseite zeichnet die Oberfläche; die Webview käme sonst darüber.
  */
 export function webviewZeigen(tab: Tab): boolean {
-  return tab.nativDa && !!tab.url && !istIntern(tab.url) && !tab.abgestuerzt && !tab.fehler
+  return tab.nativDa && !!tab.url && !istIntern(tab.url) && !tab.abgestuerzt && !tab.fehler && !tab.lesemodus
 }
 
 export function neueTabId(): string {
@@ -84,5 +88,7 @@ export function leererTab(id: string, privat = false, workspaceId?: string): Tab
     vorher: null,
     elternId: null,
     baumEingeklappt: false,
+    lesbar: false,
+    lesemodus: false,
   }
 }

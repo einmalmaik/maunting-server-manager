@@ -94,7 +94,7 @@ export function SeitenSicherheitPopover({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-title-sm font-medium text-on-surface" title={herkunft}>
+            <h3 className="truncate text-title-sm font-medium text-on-surface">
               {host || herkunft}
             </h3>
             <p className="mt-0.5 text-label-sm text-on-surface-variant">

@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve(null) }))
 const { kuerzelAusTaste } = await import('./kuerzel')
 
 const rust = readFileSync(resolve(process.cwd(), '../browser/src-tauri/src/tabs/desktop/webview2.rs'), 'utf-8')
-const TASTEN: Record<string, string> = { TAB: 'Tab', F3: 'F3', F6: 'F6', F7: 'F7', F12: 'F12', KOMMA: ',' }
+const TASTEN: Record<string, string> = { TAB: 'Tab', F3: 'F3', F6: 'F6', F7: 'F7', F9: 'F9', F12: 'F12', KOMMA: ',' }
 
 /** Jede Taste aus `kuerzel` in `webview2.rs` als KeyboardEvent mit dem Namen, den Rust meldet. */
 function ausRust(): { taste: KeyboardEvent; name: string }[] {

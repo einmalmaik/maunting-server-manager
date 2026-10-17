@@ -20,6 +20,7 @@ import { baueZielUrl, istAdresse, suchmaschine } from '../services/searchEngines
 import { suchName, SuchwahlKnopf } from '../services/suchwahl'
 import { SeitenSicherheitPopover } from './SeitenSicherheitPopover'
 import { SprachsucheKnopf } from './SprachsucheKnopf'
+import { LesemodusKnopf } from './LesemodusKnopf'
 import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore, vorschlaege, type Eintrag } from '../services/verlaufStore'
 
@@ -142,6 +143,7 @@ export const Adresszeile = forwardRef<AdresszeileGriff>(function Adresszeile(_, 
               {tab.status}
             </span>
           )}
+          <LesemodusKnopf tab={tab} />
           <SprachsucheKnopf
             onErgebnis={(sttText) => {
               setText((alt) => (alt ? `${alt.trim()} ${sttText}` : sttText))

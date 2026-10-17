@@ -445,7 +445,6 @@ export function WorkspaceLeiste({ eingeklappt }: WorkspaceLeisteProps) {
           onClick={oeffneNeuModal}
           className="flex h-5 w-5 items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-highest hover:text-on-surface transition-colors"
           aria-label={t('browser.workspaces.neu')}
-          title={t('browser.workspaces.neu')}
         >
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

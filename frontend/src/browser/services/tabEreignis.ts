@@ -11,6 +11,7 @@ import type { TabEreignis } from './nativ'
 import { useRueckfragen } from './rueckfragen'
 import type { Tab } from './tab'
 import { useVerlaufStore } from './verlaufStore'
+import { istSeiteLesbarPruefen } from './lesemodusService'
 import { protokollEreignis } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
 
@@ -36,7 +37,15 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
   if (!tab) return
   switch (e.art) {
     case 'laedt':
-      z.aendern(e.id, { laedt: true, url: e.url, abgestuerzt: false, fehler: null, status: '' })
+      z.aendern(e.id, {
+        laedt: true,
+        url: e.url,
+        abgestuerzt: false,
+        fehler: null,
+        status: '',
+        lesbar: false,
+        lesemodus: false,
+      })
       useFormulare.getState().laedt(e.id)
       useUebersetzung.getState().seiteWeg(e.id)
       // Erstes Laden oder Zurück aus einer Fehlerseite: die Webview wieder nach vorn.
@@ -75,6 +84,16 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
       z.aendern(e.id, { laedt: false })
       if (!tab.privat && istWebseite(e.url)) {
         useVerlaufStore.getState().besucht(e.url, z.finden(e.id)?.titel || e.url)
+      }
+      if (istWebseite(e.url || tab.url)) {
+        void istSeiteLesbarPruefen(e.id)
+          .then((lesbar) => {
+            const akt = z.finden(e.id)
+            if (akt && (akt.url === e.url || (!e.url && akt.url === tab.url))) {
+              z.aendern(e.id, { lesbar })
+            }
+          })
+          .catch(() => null)
       }
       break
     case 'adresse':

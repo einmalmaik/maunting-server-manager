@@ -26,6 +26,8 @@ import { istUnterfenster, setzeUnterfenster, tabsSpeichern } from './tabsAblage'
 import { tabWeg as entwicklerTabWeg } from '../entwickler/werkzeuge'
 import { useUebersetzung } from '../uebersetzung/ablauf'
 import { useWorkspacesStore } from './workspacesStore'
+import { useLesemodusStore } from './lesemodusStore'
+import { artikelExtrahieren } from './lesemodusService'
 
 interface Geschlossen {
   url: string
@@ -102,6 +104,8 @@ export interface TabsZustand {
   splitPositionSetzen: (primaerId: string, sekundaerId: string, richtung: SplitRichtung, anteil?: number) => void
   /** Setzt den Tastatur- und Omnibox-Fokus auf eine Hälfte der geteilten Ansicht. */
   splitFokusSetzen: (haelfte: 'primaer' | 'sekundaer') => void
+  /** Schaltet den puristischen Lesemodus für einen Tab oder den aktiven Tab um. */
+  lesemodusUmschalten: (id?: string) => Promise<void>
   ereignis: (e: TabEreignis) => void
   /** Nach dem Start: Rust kennt noch keine Webview, die Oberfläche schon Tabs. */
   hochfahren: () => Promise<void>
@@ -620,6 +624,27 @@ export const useTabsStore = create<TabsZustand>()(
           const s = get().split
           if (!s || s.aktiveHaelfte === haelfte) return
           set({ split: { ...s, aktiveHaelfte: haelfte } })
+        },
+
+        lesemodusUmschalten: async (id) => {
+          const zielId = id ?? get().aktivId
+          const tab = finden(zielId)
+          if (!tab || !istWebseite(tab.url)) return
+          const naechsterZustand = !tab.lesemodus
+          aendern(zielId, { lesemodus: naechsterZustand })
+          zeigen(zielId)
+          if (naechsterZustand) {
+            const cacheKey = `${zielId}:${tab.url}`
+            const imCache = useLesemodusStore.getState().artikelAusCache(cacheKey)
+            if (!imCache) {
+              try {
+                const artikel = await artikelExtrahieren(zielId, tab.url)
+                useLesemodusStore.getState().artikelCachen(cacheKey, artikel)
+              } catch (err) {
+                console.warn('Lesemodus-Extraktion fehlgeschlagen:', err)
+              }
+            }
+          }
         },
 
         ereignis: (e) =>

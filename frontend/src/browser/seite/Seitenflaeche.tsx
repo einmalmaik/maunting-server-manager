@@ -28,6 +28,7 @@ import { Startseite } from './Startseite'
 import { useEigenesMenue } from './EigenesMenue'
 import { Aufnahmen } from '../aufnahme/Aufnahmen'
 import { SplitTrenner } from './SplitTrenner'
+import { LesemodusAnsicht } from './LesemodusAnsicht'
 
 const EinstellungenSeite = lazy(() => import('../einstellungen/EinstellungenSeite').then((m) => ({ default: m.EinstellungenSeite })))
 
@@ -80,6 +81,9 @@ function EinzelInhalt({ tab, aktion }: { tab?: Tab; aktion: (a: 'zurueck' | 'vor
         />
       </div>
     )
+  }
+  if (tab.lesemodus) {
+    return <LesemodusAnsicht tab={tab} />
   }
   if (standbild?.tab === tab.id) {
     return (

@@ -12,5 +12,6 @@ describe('webviewZeigen', () => {
     expect(webviewZeigen({ ...seite, url: 'msb://einstellungen' })).toBe(false)
     expect(webviewZeigen({ ...seite, abgestuerzt: true })).toBe(false)
     expect(webviewZeigen({ ...seite, fehler: 'gesperrt' })).toBe(false)
+    expect(webviewZeigen({ ...seite, lesemodus: true })).toBe(false)
   })
 })

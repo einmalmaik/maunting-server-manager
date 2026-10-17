@@ -42,6 +42,7 @@ export type Kuerzel =
   | 'entwickler'
   | 'einstellungen'
   | 'still'
+  | 'lesemodus'
 
 /** Was die Wurzel für Kürzel tun lässt, die über die Tabs hinausgehen. */
 export interface KuerzelZiele {
@@ -112,6 +113,9 @@ export function kuerzelAusfuehren(taste: string, ziele: KuerzelZiele): void {
     case 'einstellungen':
       tabs.einstellungen()
       break
+    case 'lesemodus':
+      void tabs.lesemodusUmschalten()
+      break
     case 'still':
       break
   }
@@ -154,6 +158,7 @@ export function kuerzelAusTaste(e: KeyboardEvent): Kuerzel | null {
   if (!strg && !e.altKey && e.key === 'F6') return 'adresszeile'
   if (!strg && !e.altKey && e.key === 'F5') return 'neu_laden'
   if (!strg && !e.altKey && e.key === 'F12') return 'entwickler'
+  if (!strg && !e.altKey && e.key === 'F9') return 'lesemodus'
   if (!strg && !e.altKey && e.key === 'F3') return e.shiftKey ? 'zuruecksuchen' : 'weitersuchen'
   if (!strg && !e.altKey && e.key === 'F7') return 'still'
   return null
