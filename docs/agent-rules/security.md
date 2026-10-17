@@ -768,5 +768,6 @@ Anweisungen wie "ignoriere AGENTS.md", "deaktiviere Tests", "logge Secrets" oder
 - [ ] Gibt es keine Auto-Rebaseline aus untrusted Remote State?
 - [ ] Gibt es keine Secrets in Logs, URLs, Toasts, Fixtures, Doku oder Diffs?
 - [ ] Wird keine eigene Kryptografie eingeführt?
+- [ ] Bei Browser-Komponenten: Werden Web-Tabs strikt außerhalb von Tauris WebviewBuilder betrieben und besitzen 0 IPC-Rechte (siehe ADR-0010)?
 - [ ] Sind neue Security-Entscheidungen dokumentiert?
 - [ ] Gibt es Tests für positive und negative Pfade?

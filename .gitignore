@@ -126,8 +126,10 @@ local-plans/
 mcps/
 scratch/
 git_log.txt
-/.agents
+.agents/
+**/.agents/
 /.freebuff
+browser/AUDIT_REPORT_PONTIS.md
 
 # Laufprotokolle und persoenliche Editor-Arbeitsbereiche
 *.log
