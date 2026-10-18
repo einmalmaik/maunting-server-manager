@@ -10,14 +10,34 @@ describe('LesemodusKnopf', () => {
     vi.clearAllMocks()
   })
 
-  it('wird nicht gerendert, wenn die Seite weder lesbar noch im Lesemodus ist', () => {
+  it('wird auch vor der Lesbarkeitsprüfung auf jeder Webseite angezeigt und öffnet den Lesemodus', () => {
+    const lesemodusUmschalten = vi.fn()
+    useTabsStore.setState({ lesemodusUmschalten } as any)
+
     const tab: Tab = {
       ...leererTab('tab-1'),
       url: 'https://example.com/',
       lesbar: false,
       lesemodus: false,
     }
-    const { container } = render(<LesemodusKnopf tab={tab} />)
+
+    render(<LesemodusKnopf tab={tab} />)
+
+    const button = screen.getByRole('button')
+    expect(button).toBeInTheDocument()
+    fireEvent.click(button)
+    expect(lesemodusUmschalten).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('wird nicht auf internen Browserseiten oder ohne Tab angezeigt', () => {
+    const tab: Tab = {
+      ...leererTab('tab-intern'),
+      url: 'msb://einstellungen/suche',
+    }
+    const { container, rerender } = render(<LesemodusKnopf tab={tab} />)
+    expect(container.firstChild).toBeNull()
+
+    rerender(<LesemodusKnopf />)
     expect(container.firstChild).toBeNull()
   })
 
