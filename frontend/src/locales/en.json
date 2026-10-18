@@ -9856,6 +9856,8 @@
       "footerLizenz": "Meta search built on free software (AGPLv3)",
       "zusammenfassungTitel": "Singra AI overview",
       "zusammenfassungLaedt": "Generating response …",
+      "zusammenfassungFehler": "The response could not be generated. Please try again.",
+      "zusammenfassungWiederholen": "Try again",
       "zusammenfassungRecherche": "Researching further",
       "zusammenfassungSchliessen": "Dismiss",
       "zusammenfassungEinklappen": "Collapse",

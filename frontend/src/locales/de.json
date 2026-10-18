@@ -9856,6 +9856,8 @@
       "footerLizenz": "Metasuche auf Basis freier Software (AGPLv3)",
       "zusammenfassungTitel": "Singra AI Überblick",
       "zusammenfassungLaedt": "Antwort wird generiert …",
+      "zusammenfassungFehler": "Die Antwort konnte nicht erzeugt werden. Bitte erneut versuchen.",
+      "zusammenfassungWiederholen": "Erneut versuchen",
       "zusammenfassungRecherche": "Sucht weiter",
       "zusammenfassungSchliessen": "Ausblenden",
       "zusammenfassungEinklappen": "Einklappen",

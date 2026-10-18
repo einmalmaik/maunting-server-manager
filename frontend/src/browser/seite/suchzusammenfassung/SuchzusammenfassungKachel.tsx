@@ -26,6 +26,7 @@ import { SuchBild } from '../SuchBild'
 interface SuchNachricht {
   role: 'user' | 'assistant'
   content: string
+  fehler?: boolean
 }
 
 interface SuchzusammenfassungKachelProps {
@@ -72,6 +73,7 @@ export function SuchzusammenfassungKachel({
   const [recherche, setRecherche] = useState<string[]>([])
   const [verlauf, setVerlauf] = useState<SuchNachricht[]>([])
   const [nachfrage, setNachfrage] = useState('')
+  const [folgeFehler, setFolgeFehler] = useState<string | null>(null)
   const [denkstufe, setDenkstufe] = useState<string>('fast')
   const [kopiert, setKopiert] = useState(false)
   const [konfig, setKonfig] = useState<SuchKonfig | null>(null)
@@ -117,6 +119,23 @@ export function SuchzusammenfassungKachel({
     window.dispatchEvent(new CustomEvent('msm:singra-weiter', { detail: { frage: begriff, zusammenfassung: hauptText } }))
   }
 
+  const istAktuell = (controller: AbortController) => abbruchRef.current === controller
+
+  const fehlerSetzen = (controller: AbortController, dialogVerlauf: SuchNachricht[], meldung: string) => {
+    setFolgeFehler(meldung)
+    if (dialogVerlauf.length > 0) {
+      setVerlauf((prev) => {
+        const kopie = [...prev]
+        if (kopie.length > 0 && kopie[kopie.length - 1].role === 'assistant') {
+          kopie[kopie.length - 1] = { role: 'assistant', content: meldung, fehler: true }
+          return kopie
+        }
+        return [...kopie, { role: 'assistant', content: meldung, fehler: true }]
+      })
+    }
+    if (istAktuell(controller)) setLaedt(false)
+  }
+
   const starteStream = async (frage: string, dialogVerlauf: SuchNachricht[] = [], gewaehlteStufe: string = denkstufe) => {
     if (abbruchRef.current) {
       abbruchRef.current.abort()
@@ -125,6 +144,7 @@ export function SuchzusammenfassungKachel({
     abbruchRef.current = controller
 
     setLaedt(true)
+    setFolgeFehler(null)
     setGedankenText('')
     setRecherche([])
 
@@ -153,14 +173,23 @@ export function SuchzusammenfassungKachel({
       })
 
       if (!res.ok) {
-        setDeaktiviert(true)
-        setLaedt(false)
+        if (dialogVerlauf.length === 0) {
+          setDeaktiviert(true)
+        } else {
+          fehlerSetzen(controller, dialogVerlauf, t('browser.msmSuche.zusammenfassungFehler'))
+          return
+        }
+        if (istAktuell(controller)) setLaedt(false)
         return
       }
 
       const reader = res.body?.getReader()
       if (!reader) {
-        setLaedt(false)
+        if (dialogVerlauf.length === 0) {
+          if (istAktuell(controller)) setLaedt(false)
+        } else {
+          fehlerSetzen(controller, dialogVerlauf, t('browser.msmSuche.zusammenfassungFehler'))
+        }
         return
       }
 
@@ -186,8 +215,17 @@ export function SuchzusammenfassungKachel({
           try {
             const data = JSON.parse(jsonStr)
             if (data.type === 'disabled') {
-              setDeaktiviert(true)
-              setLaedt(false)
+              if (dialogVerlauf.length === 0) {
+                setDeaktiviert(true)
+                if (istAktuell(controller)) setLaedt(false)
+              } else {
+                fehlerSetzen(controller, dialogVerlauf, t('browser.msmSuche.zusammenfassungFehler'))
+              }
+              try {
+                await reader.cancel()
+              } catch {
+                // Ignorieren falls Stream bereits geschlossen ist
+              }
               return
             }
             if (data.type === 'start') {
@@ -220,8 +258,25 @@ export function SuchzusammenfassungKachel({
                   return [...kopie, { role: 'assistant', content: akkumulierterText }]
                 })
               }
-            } else if (data.type === 'done' || data.type === 'error') {
-              setLaedt(false)
+            } else if (data.type === 'error') {
+              const meldung =
+                typeof data.message === 'string' && data.message.trim()
+                  ? data.message
+                  : t('browser.msmSuche.zusammenfassungFehler')
+              fehlerSetzen(controller, dialogVerlauf, meldung)
+              try {
+                await reader.cancel()
+              } catch {
+                // Ignorieren falls Stream bereits geschlossen ist
+              }
+              return
+            } else if (data.type === 'done') {
+              if (istAktuell(controller)) setLaedt(false)
+              // Leere Antwort ohne Inhalt ist ein Fehler, kein ewiger Spinner.
+              if (!akkumulierterText && dialogVerlauf.length > 0) {
+                fehlerSetzen(controller, dialogVerlauf, t('browser.msmSuche.zusammenfassungFehler'))
+                return
+              }
             }
           } catch {
             // Ignoriere unvollständige JSON-Chunks
@@ -229,15 +284,25 @@ export function SuchzusammenfassungKachel({
         }
       }
     } catch (err: unknown) {
-      if ((err as { name?: string })?.name !== 'AbortError') {
-        setLaedt(false)
+      // Ein abgebrochener Vorgänger-Stream darf den neuen Lauf nicht stoppen.
+      if (controller.signal.aborted || (err as { name?: string })?.name === 'AbortError') {
+        return
       }
-    } finally {
-      setLaedt(false)
+      if (dialogVerlauf.length === 0) {
+        if (istAktuell(controller)) setLaedt(false)
+      } else {
+        fehlerSetzen(controller, dialogVerlauf, t('browser.msmSuche.zusammenfassungFehler'))
+      }
     }
   }
 
-  // Initialer Start beim Laden der Suchbegriffe
+  // Abbruch bei Unmount, damit kein Stream nach dem Schließen weiterläuft.
+  useEffect(() => () => {
+    abbruchRef.current?.abort()
+  }, [])
+
+  // Initialer Start beim Laden der Suchbegriffe. Hängt bewusst nur am Begriff:
+  // frische Treffer via onNeueTreffer dürfen den laufenden Stream nicht abbrechen.
   useEffect(() => {
     if (!begriff || treffer.length === 0) return
     if (begonneneSucheRef.current === begriff) return
@@ -248,15 +313,11 @@ export function SuchzusammenfassungKachel({
     setGedankenText('')
     setVerlauf([])
     setNachfrage('')
+    setFolgeFehler(null)
 
     void starteStream(begriff, [])
-
-    return () => {
-      if (abbruchRef.current) {
-        abbruchRef.current.abort()
-      }
-    }
-  }, [begriff, treffer])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [begriff])
 
   if (deaktiviert || (!laedt && !hauptText)) {
     return null
@@ -266,15 +327,53 @@ export function SuchzusammenfassungKachel({
     const text = frageText.trim()
     if (!text || laedt) return
 
+    // Verlauf strikt alternierend aufbauen: Nutzer (Ausgangsfrage) -> Assistent
+    // (initiale Zusammenfassung) -> Nutzer (Folgefrage) -> Assistent (Antwort).
+    // hauptText lebt außerhalb von verlauf, deshalb bei der ersten Folgefrage
+    // explizit als Assistent-Turn voranstellen, sonst sendet das Frontend zwei
+    // aufeinanderfolgende user-Turns und die LLM-API antwortet mit HTTP 400.
+    const basis: SuchNachricht[] =
+      verlauf.length === 0 && hauptText
+        ? [
+            { role: 'user', content: begriff },
+            { role: 'assistant', content: hauptText },
+          ]
+        : verlauf
+
     const neuerVerlauf: SuchNachricht[] = [
-      ...verlauf,
+      ...basis,
       { role: 'user', content: text },
       { role: 'assistant', content: '' },
     ]
 
     setVerlauf(neuerVerlauf)
     setNachfrage('')
+    setFolgeFehler(null)
     void starteStream(text, neuerVerlauf.slice(0, -1), denkstufe)
+  }
+
+  const letzteFolgefrageErneut = () => {
+    for (let i = verlauf.length - 1; i >= 0; i -= 1) {
+      if (verlauf[i].role === 'user') {
+        const ohneFehler = verlauf.slice(0, i)
+        const basis: SuchNachricht[] =
+          ohneFehler.length === 0 && hauptText
+            ? [
+                { role: 'user', content: begriff },
+                { role: 'assistant', content: hauptText },
+              ]
+            : ohneFehler
+        const erneut: SuchNachricht[] = [
+          ...basis,
+          { role: 'user', content: verlauf[i].content },
+          { role: 'assistant', content: '' },
+        ]
+        setVerlauf(erneut)
+        setFolgeFehler(null)
+        void starteStream(verlauf[i].content, erneut.slice(0, -1), denkstufe)
+        return
+      }
+    }
   }
 
   const absendenNachfrage = () => {
@@ -570,12 +669,40 @@ export function SuchzusammenfassungKachel({
                     <div className="flex items-center justify-between gap-2 text-label-sm font-medium text-primary">
                       <span>↳ {nachricht.content}</span>
                     </div>
+                  ) : nachricht.fehler ? (
+                    <div className="flex flex-wrap items-center gap-2 text-body-sm text-on-surface-variant">
+                      <span>{nachricht.content || t('browser.msmSuche.zusammenfassungFehler')}</span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={letzteFolgefrageErneut}
+                        disabled={laedt}
+                        className="h-8 px-2.5 text-label-sm"
+                      >
+                        {t('browser.msmSuche.zusammenfassungWiederholen')}
+                      </Button>
+                    </div>
                   ) : nachricht.content ? (
                     renderMarkdown(nachricht.content)
-                  ) : (
+                  ) : laedt ? (
                     <div className="flex items-center gap-1.5 text-body-sm text-on-surface-variant">
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
                       <span>{t('browser.msmSuche.zusammenfassungLaedt')}</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2 text-body-sm text-on-surface-variant">
+                      <span>{t('browser.msmSuche.zusammenfassungFehler')}</span>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={letzteFolgefrageErneut}
+                        disabled={laedt}
+                        className="h-8 px-2.5 text-label-sm"
+                      >
+                        {t('browser.msmSuche.zusammenfassungWiederholen')}
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -598,6 +725,13 @@ export function SuchzusammenfassungKachel({
                   <span className="truncate max-w-[260px]">{chip}</span>
                 </button>
               ))}
+            </div>
+          )}
+
+          {/* Genereller Stream-Fehler der Initialsuche (kein ewiger Spinner) */}
+          {folgeFehler && verlauf.length === 0 && !laedt && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-outline-variant/35 bg-surface-container-high/50 p-3 text-body-sm text-on-surface-variant">
+              <span>{folgeFehler}</span>
             </div>
           )}
 
