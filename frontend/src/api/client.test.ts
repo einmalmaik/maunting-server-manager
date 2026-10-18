@@ -319,6 +319,46 @@ describe('api client', () => {
 
       await expect(api('/test')).rejects.toThrow(i18n.t('errors.RATE_LIMITED'))
     })
+
+    it('should translate valid i18n translation key in detail on 429', async () => {
+      fetchSpy.mockReturnValueOnce(mockResponse(429, { detail: 'errors.SESSION_EXPIRED' }))
+
+      await expect(api('/test')).rejects.toThrow(i18n.t('errors.SESSION_EXPIRED'))
+    })
+
+    it('should preserve rate-limit error code on SanitizedApiError', async () => {
+      fetchSpy.mockReturnValueOnce(
+        mockResponse(429, { detail: { code: 'BROWSER_SUCHE_ZU_VIELE', message: 'Too many requests' } }),
+      )
+
+      let thrownError: SanitizedApiError | null = null
+      try {
+        await api('/test')
+      } catch (err) {
+        thrownError = err as SanitizedApiError
+      }
+
+      expect(thrownError).toBeInstanceOf(SanitizedApiError)
+      expect(thrownError?.status).toBe(429)
+      expect(thrownError?.code).toBe('BROWSER_SUCHE_ZU_VIELE')
+      expect(thrownError?.message).toBe(i18n.t('errors.RATE_LIMITED'))
+    })
+
+    it('should assign BROWSER_SUCHE_ZU_VIELE code on /browser/suche 429 without explicit code', async () => {
+      fetchSpy.mockReturnValueOnce(mockResponse(429, { detail: 'Too many requests' }))
+
+      let thrownError: SanitizedApiError | null = null
+      try {
+        await api('/browser/suche', { method: 'POST' })
+      } catch (err) {
+        thrownError = err as SanitizedApiError
+      }
+
+      expect(thrownError).toBeInstanceOf(SanitizedApiError)
+      expect(thrownError?.status).toBe(429)
+      expect(thrownError?.code).toBe('BROWSER_SUCHE_ZU_VIELE')
+      expect(thrownError?.message).toBe(i18n.t('errors.RATE_LIMITED'))
+    })
   })
 
   describe('error handling', () => {

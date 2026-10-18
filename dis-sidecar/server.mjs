@@ -1006,6 +1006,11 @@ async function handleDecryptStream(req, res) {
   }
 }
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`[DIS Sidecar] Listening on http://127.0.0.1:${PORT}`);
+// Bind-Adresse: Standard 127.0.0.1 (nur Loopback). Im Docker-Dev-Stack laeuft
+// das Backend in einem eigenen Container — der erreicht den Sidecar nur ueber
+// dessen eth0, deshalb setzt docker-compose.dev.yml MSM_DIS_SIDECAR_HOST=0.0.0.0
+// (der Port bleibt am Host trotzdem nur an 127.0.0.1 veroeffentlicht).
+const HOST = process.env.MSM_DIS_SIDECAR_HOST || '127.0.0.1';
+server.listen(PORT, HOST, () => {
+  console.log(`[DIS Sidecar] Listening on http://${HOST}:${PORT}`);
 });

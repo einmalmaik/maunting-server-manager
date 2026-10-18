@@ -440,9 +440,29 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     if (res.status === 429) {
-      const message = i18n.t('errors.RATE_LIMITED')
-      toast.error(message)
-      throw new SanitizedApiError(message, { status: 429 })
+      let code: string | null = null
+      let message: string | null = null
+      try {
+        const text = await res.text()
+        if (text) {
+          const parsed = JSON.parse(text)
+          const detail = parsed.detail ?? parsed.message ?? parsed.error ?? parsed
+          message = extractErrorMessage(detail)
+          if (detail && typeof detail === 'object' && typeof detail.code === 'string') {
+            code = detail.code
+          } else if (typeof parsed.code === 'string') {
+            code = parsed.code
+          }
+        }
+      } catch {
+        // Nicht-JSON-Rückfall
+      }
+      if (!code && (path.includes('/browser/suche') || path.includes('/suche'))) {
+        code = 'BROWSER_SUCHE_ZU_VIELE'
+      }
+      const finalMessage = (message && i18n.exists(message) ? i18n.t(message) : null) || i18n.t('errors.RATE_LIMITED')
+      toast.error(finalMessage)
+      throw new SanitizedApiError(finalMessage, { status: 429, code: code ?? undefined })
     }
     const text = await res.text()
     let message: string | null = null

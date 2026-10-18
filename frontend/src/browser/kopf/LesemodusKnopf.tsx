@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { Kurzinfo } from '@/Singra/UI'
 
 import type { Tab } from '../services/tab'
+import { istWebseite } from '../services/intern'
 import { useTabsStore } from '../services/tabsStore'
 
 interface LesemodusKnopfProps {
@@ -20,8 +21,9 @@ export function LesemodusKnopf({ tab, className = '', groesse = 'sm' }: Lesemodu
   const { t } = useTranslation()
   const lesemodusUmschalten = useTabsStore((s) => s.lesemodusUmschalten)
 
-  // Nur anzeigen, wenn die Seite lesbar ist oder der Lesemodus bereits läuft
-  if (!tab || (!tab.lesbar && !tab.lesemodus)) {
+  // Auf jeder HTTP(S)-Seite anbieten: die Lesbarkeitsprüfung kann scheitern,
+  // bevor dynamisch geladene Inhalte verfügbar sind.
+  if (!tab || !istWebseite(tab.url)) {
     return null
   }
 

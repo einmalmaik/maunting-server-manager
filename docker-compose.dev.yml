@@ -1,0 +1,149 @@
+# MSM Dev-Stack: alles, was NICHT unter Windows läuft, liegt in Docker (Linux).
+# Das Frontend läuft IMMER nativ im Dev-Mode (npm run dev, Port 3000) und ist
+# bewusst KEIN Service hier — Vite proxyt /api → http://localhost:8000.
+#
+# Start:  docker compose -f docker-compose.dev.yml up -d --build
+# Stop:   docker compose -f docker-compose.dev.yml down
+# Logs:   docker compose -f docker-compose.dev.yml logs -f backend
+#
+# Erreichbar über localhost vom Windows-Host:
+#   Backend  http://localhost:8000  (/api/health)
+#   DIS      http://localhost:9100  (/health)
+#   SearXNG  http://localhost:8888
+#   LiveKit  ws://localhost:7880 (Medien 7881/tcp, 7882/udp)
+#   Panel-DB 127.0.0.1:15434 (msm / msm_dev_pass)
+#   Redis    127.0.0.1:6379
+# Docker-intern sprechen sich die Dienste über Service-Namen an
+# (panel-db, dis, redis, searxng) — siehe backend/.env (wird per Skript erzeugt).
+
+name: msm-dev
+
+services:
+  panel-db:
+    image: postgres:17-alpine
+    container_name: msm-panel-postgres-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:15434:5432"
+    environment:
+      POSTGRES_DB: msm
+      POSTGRES_USER: msm
+      POSTGRES_PASSWORD: msm_dev_pass
+    volumes:
+      - panel-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U msm -d msm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: msm-redis-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dis:
+    image: node:22-alpine
+    container_name: msm-dis-dev
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - ./dis-sidecar:/app:ro
+    env_file:
+      - ./dis-sidecar/.env
+    environment:
+      NODE_ENV: development
+      # Backend laeuft in eigenem Container → Sidecar muss auf eth0 hoeren.
+      # Von aussen bleibt der Port nur an Host-Loopback veroeffentlicht.
+      MSM_DIS_SIDECAR_HOST: 0.0.0.0
+    command: ["node", "server.mjs"]
+    healthcheck:
+      # node:alpine hat weder wget noch curl — Healthcheck per node/fetch.
+      # /health verlangt den Bearer-Token (checkAuth laeuft vor jeder Route).
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:9100/health',{headers:{Authorization:'Bearer '+process.env.MSM_DIS_SIDECAR_TOKEN}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: msm-backend-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Live-Reload: Code vom Windows-Host in den Linux-Container
+      - ./backend:/app
+      - ./msm-agent/.env:/opt/msm/msm-agent/.env:ro
+      - backend-servers:/data/servers
+      - backend-vault:/data/vault-blobs
+    env_file:
+      - ./backend/.env
+    environment:
+      MSM_DEBUG: "true"
+    depends_on:
+      panel-db:
+        condition: service_healthy
+      dis:
+        condition: service_healthy
+    extra_hosts:
+      # Backend erreicht den nativ laufenden Agent auf dem Windows-Host
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: msm-searxng-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng-sidecar/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+      SEARXNG_SECRET_KEY: dev-nur-lokal-kein-secret
+    env_file:
+      - ./searxng-sidecar/.env
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+  livekit:
+    image: livekit/livekit-server:v1.9
+    container_name: msm-livekit-dev
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    ports:
+      - "127.0.0.1:7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    volumes:
+      - ./livekit-sidecar/livekit.yaml:/etc/livekit.yaml:ro
+    env_file:
+      - ./livekit-sidecar/.env
+
+volumes:
+  panel-db-data:
+  redis-data:
+  backend-servers:
+  backend-vault:

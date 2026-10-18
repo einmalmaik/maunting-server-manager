@@ -65,6 +65,7 @@ export function LesemodusAnsicht({ tab }: LesemodusAnsichtProps) {
 
   const [typografieOffen, setTypografieOffen] = useState(false)
   const [laedt, setLaedt] = useState(false)
+  const [fehler, setFehler] = useState<string | null>(null)
   const typografieKnopfRef = useRef<HTMLButtonElement | null>(null)
   const typografieMenueRef = useRef<HTMLDivElement | null>(null)
   const hauptRef = useRef<HTMLElement | null>(null)
@@ -116,20 +117,30 @@ export function LesemodusAnsicht({ tab }: LesemodusAnsichtProps) {
   useEffect(() => {
     if (cachedArtikel) {
       setArtikel(cachedArtikel)
+      setFehler(null)
       return
     }
 
     let aktiv = true
     setLaedt(true)
+    setFehler(null)
 
     void artikelExtrahieren(tab.id, tab.url)
       .then((extrahiert) => {
         if (!aktiv) return
+        if (!extrahiert || (!extrahiert.reintext && !extrahiert.inhaltHtml)) {
+          setFehler(null)
+          setArtikel(null)
+          return
+        }
         artikelCachen(cacheKey, extrahiert)
         setArtikel(extrahiert)
       })
       .catch((err) => {
+        if (!aktiv) return
         console.warn('Fehler bei der Lese-Extraktion:', err)
+        setFehler(err instanceof Error ? err.message : String(err || t('browser.lesemodus.nichtVerfuegbar')))
+        setArtikel(null)
       })
       .finally(() => {
         if (aktiv) setLaedt(false)
@@ -138,7 +149,7 @@ export function LesemodusAnsicht({ tab }: LesemodusAnsichtProps) {
     return () => {
       aktiv = false
     }
-  }, [tab.id, tab.url, cacheKey, cachedArtikel, artikelCachen])
+  }, [tab.id, tab.url, cacheKey, cachedArtikel, artikelCachen, t])
 
   const beenden = () => {
     void lesemodusUmschalten(tab.id)
@@ -551,10 +562,23 @@ export function LesemodusAnsicht({ tab }: LesemodusAnsichtProps) {
       {/* Haupt-Inhaltsbereich mit Lese-Spalte */}
       <main ref={hauptRef} className="flex-1 overflow-y-auto px-4 py-8 sm:px-8">
         <div className={`mx-auto ${breiteKlasse}`}>
-          {laedt && !artikel ? (
+          {laedt ? (
             <div className="flex h-64 flex-col items-center justify-center gap-3 text-on-surface-variant">
               <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden="true" />
               <p className="text-body-md">{t('browser.lesemodus.laedt')}</p>
+            </div>
+          ) : fehler ? (
+            <div role="alert" className="rounded-xl border border-status-destructive/30 bg-status-destructive/10 p-6 text-center">
+              <p className="text-body-md font-medium text-status-destructive">
+                {fehler}
+              </p>
+              <button
+                type="button"
+                onClick={beenden}
+                className="mt-4 rounded-lg bg-primary px-4 py-2 text-label-md font-medium text-on-primary hover:bg-primary/90"
+              >
+                {t('browser.lesemodus.beenden')}
+              </button>
             </div>
           ) : !artikel || (!artikel.reintext && !artikel.inhaltHtml) ? (
             <div className="rounded-xl border border-outline-variant bg-surface-container p-6 text-center">

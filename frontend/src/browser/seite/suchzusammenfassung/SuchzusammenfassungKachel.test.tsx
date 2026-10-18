@@ -234,5 +234,101 @@ describe('SuchzusammenfassungKachel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Top-Quellen 2 ein- oder ausblenden/ }))
     expect(await screen.findByText('Zweiter Treffer')).toBeInTheDocument()
   })
+
+  it('sendet bei der ersten Folgefrage Ausgangsfrage und Antwort als alternierenden Verlauf', async () => {
+    // Initiale Zusammenfassung
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let gesendet = false
+          return {
+            read: () => {
+              if (gesendet) return Promise.resolve({ done: true, value: undefined })
+              gesendet = true
+              const chunk = new TextEncoder().encode(
+                'data: {"type": "start", "model": "m"}\n\ndata: {"type": "content", "text": "Initiale Antwort"}\n\ndata: {"type": "done"}\n\n',
+              )
+              return Promise.resolve({ done: false, value: chunk })
+            },
+          }
+        },
+      },
+    })
+    // Folgefrage-Antwort
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: () => Promise.resolve({ done: true, value: undefined }),
+        }),
+      },
+    })
+
+    render(<SuchzusammenfassungKachel begriff="Ausgangsfrage" treffer={TREFFER} />)
+    expect(await screen.findByText('Initiale Antwort')).toBeInTheDocument()
+
+    const eingabe = screen.getByRole('textbox')
+    fireEvent.change(eingabe, { target: { value: 'Und nachts?' } })
+    fireEvent.click(screen.getByRole('button', { name: /Senden|Send/i }))
+
+    await waitFor(() => {
+      expect(apiStream).toHaveBeenCalledTimes(2)
+    })
+    const folgeBody = JSON.parse(apiStream.mock.calls[1][1].body as string)
+    // user (Ausgangsfrage) -> assistant (hauptText) -> user (Folgefrage)
+    expect(folgeBody.verlauf.map((e: { role: string }) => e.role)).toEqual(['user', 'assistant', 'user'])
+    expect(folgeBody.verlauf[0].content).toBe('Ausgangsfrage')
+    expect(folgeBody.verlauf[1].content).toBe('Initiale Antwort')
+    expect(folgeBody.verlauf[2].content).toBe('Und nachts?')
+  })
+
+  it('zeigt bei Stream-Fehler einen Wiederholen-Knopf statt ewigem Spinner', async () => {
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let gesendet = false
+          return {
+            read: () => {
+              if (gesendet) return Promise.resolve({ done: true, value: undefined })
+              gesendet = true
+              const chunk = new TextEncoder().encode(
+                'data: {"type": "start", "model": "m"}\n\ndata: {"type": "content", "text": "Initiale Antwort"}\n\ndata: {"type": "done"}\n\n',
+              )
+              return Promise.resolve({ done: false, value: chunk })
+            },
+          }
+        },
+      },
+    })
+    apiStream.mockResolvedValueOnce({
+      ok: true,
+      body: {
+        getReader: () => {
+          let gesendet = false
+          return {
+            read: () => {
+              if (gesendet) return Promise.resolve({ done: true, value: undefined })
+              gesendet = true
+              const chunk = new TextEncoder().encode('data: {"type": "error", "message": "Upstream boom"}\n\n')
+              return Promise.resolve({ done: false, value: chunk })
+            },
+          }
+        },
+      },
+    })
+
+    render(<SuchzusammenfassungKachel begriff="Ausgangsfrage" treffer={TREFFER} />)
+    expect(await screen.findByText('Initiale Antwort')).toBeInTheDocument()
+
+    const eingabe = screen.getByRole('textbox')
+    fireEvent.change(eingabe, { target: { value: 'Folgefrage?' } })
+    fireEvent.click(screen.getByRole('button', { name: /Senden|Send/i }))
+
+    // Fehlermeldung mit Retry statt "Antwort wird generiert …" im Dauer-Spinner
+    expect(await screen.findByRole('button', { name: /Erneut versuchen|Try again/i })).toBeInTheDocument()
+    expect(screen.queryByText('Upstream boom')).toBeInTheDocument()
+  })
 })
 

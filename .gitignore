@@ -63,6 +63,8 @@ frontend/.env
 frontend/.env.local
 frontend/.env.*.local
 msm-agent/.env
+livekit-sidecar/.env
+searxng-sidecar/.env
 msm-agent/.dev/
 msm-agent/venv/
 msm-agent/**/__pycache__/
