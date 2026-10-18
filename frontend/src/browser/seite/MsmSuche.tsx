@@ -200,6 +200,7 @@ async function holen(
   seite: number,
   sprache: string,
   kategorie: SuchKategorie,
+  signal?: AbortSignal,
 ): Promise<{
   treffer: Treffer[]
   vorschlaege: string[]
@@ -208,7 +209,10 @@ async function holen(
   dauerSek: number
 }> {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now()
-  const sicher = sichereSuche(await nativ.schutzStand().catch(() => null))
+  const schutzStandPromise = nativ.schutzStand().catch(() => null)
+  const schutzTimeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500))
+  const schutz = await Promise.race([schutzStandPromise, schutzTimeout])
+  const sicher = sichereSuche(schutz)
   const katParam = kategorie === 'web' ? undefined : kategorie
   const antwort = await api<{
     treffer: Treffer[]
@@ -217,6 +221,7 @@ async function holen(
     antworten?: string[]
   }>('/browser/suche', {
     method: 'POST',
+    signal,
     body: JSON.stringify({
       q: begriff,
       seite,
@@ -270,9 +275,23 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     }
     if (!begriff) return
     let aktiv = true
+    const controller = new AbortController()
+    let isTimedOut = false
+
+    const timeoutId = setTimeout(() => {
+      isTimedOut = true
+      const timeoutErr = new DOMException('Search request timed out', 'TimeoutError')
+      try {
+        controller.abort(timeoutErr)
+      } catch {
+        controller.abort()
+      }
+    }, 12000)
+
     setStand({ art: 'laedt' })
-    holen(begriff, 1, region, kategorie).then(
+    holen(begriff, 1, region, kategorie, controller.signal).then(
       ({ treffer, vorschlaege, infobox, antworten, dauerSek }) => {
+        clearTimeout(timeoutId)
         if (!aktiv) return
         const neu: Extract<Stand, { art: 'da' }> = {
           art: 'da',
@@ -289,15 +308,48 @@ export function MsmSuche({ tab }: { tab: Tab }) {
         setStand(neu)
       },
       (fehler: unknown) => {
-        if (!aktiv) return
-        const code = (fehler as { code?: string | null })?.code
-        if (code === 'BROWSER_SUCHE_NICHT_EINGERICHTET') setStand({ art: 'nichtEingerichtet' })
-        else if (!code?.startsWith('BROWSER_SUCHE_') && isNetworkOrOfflineError(fehler)) setStand({ art: 'offline' })
-        else setStand({ art: 'fehler', zuViele: code === 'BROWSER_SUCHE_ZU_VIELE' })
+        clearTimeout(timeoutId)
+
+        const fehlerObj = fehler as { name?: string; code?: string; status?: number } | null
+        const isTimeout =
+          isTimedOut ||
+          fehlerObj?.name === 'TimeoutError' ||
+          fehlerObj?.code === 'BROWSER_SUCHE_TIMEOUT' ||
+          controller.signal.reason?.name === 'TimeoutError'
+
+        const isUserAbort =
+          !isTimeout &&
+          ((fehler instanceof DOMException && fehler.name === 'AbortError') ||
+            fehlerObj?.name === 'AbortError' ||
+            controller.signal.aborted)
+
+        // If an AbortError occurs because of user navigation or category change, ignore it cleanly without flashing errors
+        if (isUserAbort) {
+          return
+        }
+
+        if (!aktiv && !isTimeout) {
+          return
+        }
+
+        const code = fehlerObj?.code
+        const status = fehlerObj?.status
+
+        if (code === 'BROWSER_SUCHE_NICHT_EINGERICHTET') {
+          setStand({ art: 'nichtEingerichtet' })
+        } else if (code === 'BROWSER_SUCHE_ZU_VIELE' || status === 429) {
+          setStand({ art: 'fehler', zuViele: true })
+        } else if (isTimeout || (!code?.startsWith('BROWSER_SUCHE_') && isNetworkOrOfflineError(fehler))) {
+          setStand({ art: 'offline' })
+        } else {
+          setStand({ art: 'fehler', zuViele: false })
+        }
       },
     )
     return () => {
       aktiv = false
+      clearTimeout(timeoutId)
+      controller.abort()
     }
   }, [speicherSchluessel, begriff, region, kategorie, versuch])
 
@@ -311,8 +363,10 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     setWissenFallback(null)
     if (!wissenNötig) return
     let aktiv = true
+    const controller = new AbortController()
     api<{ wissen?: WissensPanelDaten | null }>('/browser/suche/wissen', {
       method: 'POST',
+      signal: controller.signal,
       body: JSON.stringify({ q: begriff, sprache: region.slice(0, 2) }),
     })
       .then((res) => {
@@ -325,6 +379,7 @@ export function MsmSuche({ tab }: { tab: Tab }) {
       })
     return () => {
       aktiv = false
+      controller.abort()
     }
   }, [wissenNötig, begriff, region])
 
@@ -340,8 +395,17 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     if (stand.art !== 'da' || stand.weitereLaedt) return
     const bisher = stand
     setStand({ ...bisher, weitereLaedt: true })
-    holen(begriff, bisher.seite + 1, region, kategorie).then(
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      try {
+        controller.abort(new DOMException('Timeout', 'TimeoutError'))
+      } catch {
+        controller.abort()
+      }
+    }, 12000)
+    holen(begriff, bisher.seite + 1, region, kategorie, controller.signal).then(
       ({ treffer: neu, vorschlaege: neueVorschlaege }) => {
+        clearTimeout(timer)
         const bekannt = new Set(bisher.treffer.map((x) => x.url))
         const dazu = neu.filter((x) => !bekannt.has(x.url))
         const kombiniertVorschlaege = Array.from(new Set([...bisher.vorschlaege, ...neueVorschlaege]))
@@ -356,7 +420,10 @@ export function MsmSuche({ tab }: { tab: Tab }) {
         merken(speicherSchluessel, naechster)
         setStand(naechster)
       },
-      () => setStand({ ...bisher, weitereLaedt: false, mehr: true }),
+      () => {
+        clearTimeout(timer)
+        setStand({ ...bisher, weitereLaedt: false, mehr: true })
+      },
     )
   }
 
@@ -368,8 +435,17 @@ export function MsmSuche({ tab }: { tab: Tab }) {
     }
     const bisher = stand
     setStand({ ...bisher, weitereLaedt: true })
-    holen(begriff, zielSeite, region, kategorie).then(
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      try {
+        controller.abort(new DOMException('Timeout', 'TimeoutError'))
+      } catch {
+        controller.abort()
+      }
+    }, 12000)
+    holen(begriff, zielSeite, region, kategorie, controller.signal).then(
       ({ treffer: neu, vorschlaege: neueVorschlaege, infobox, dauerSek }) => {
+        clearTimeout(timer)
         const naechster: Extract<Stand, { art: 'da' }> = {
           ...bisher,
           treffer: neu,
@@ -383,7 +459,10 @@ export function MsmSuche({ tab }: { tab: Tab }) {
         merken(speicherSchluessel, naechster)
         setStand(naechster)
       },
-      () => setStand({ ...bisher, weitereLaedt: false }),
+      () => {
+        clearTimeout(timer)
+        setStand({ ...bisher, weitereLaedt: false })
+      },
     )
   }
 

@@ -305,6 +305,45 @@ async def suchanfragen_umschreiben(
         return {"suchanfragen": [frage], "themenwechsel": False}
 
 
+def normalisiere_dialog_verlauf(
+    messages: list[dict[str, str]],
+    aktuelle_frage: str | None = None,
+) -> list[dict[str, str]]:
+    """Stellt sicher, dass nach der System-Prompt strikt alterniert wird:
+    system -> user -> assistant -> user -> assistant.
+    Aufeinanderfolgende identische Rollen werden zusammengeführt."""
+    if not messages:
+        return []
+
+    system_msgs: list[dict[str, str]] = []
+    dialog_msgs: list[dict[str, str]] = []
+
+    for m in messages:
+        rolle = m.get("role")
+        inhalt = (m.get("content") or "").strip()
+        if not inhalt:
+            continue
+        if rolle == "system":
+            system_msgs.append({"role": "system", "content": inhalt})
+        elif rolle in ("user", "assistant"):
+            if dialog_msgs and dialog_msgs[-1]["role"] == rolle:
+                vorheriger_inhalt = dialog_msgs[-1]["content"]
+                if inhalt not in vorheriger_inhalt:
+                    dialog_msgs[-1]["content"] = f"{vorheriger_inhalt}\n\n{inhalt}"
+            else:
+                dialog_msgs.append({"role": rolle, "content": inhalt})
+
+    # Wenn der Dialog mit assistant endet und eine aktuelle Frage vorliegt,
+    # muss die Frage als finaler Nutzer-Turn angehängt werden, damit der LLM-Chat-Contract
+    # gewahrt bleibt.
+    if dialog_msgs and dialog_msgs[-1]["role"] == "assistant" and aktuelle_frage:
+        frage_text = aktuelle_frage.strip()
+        if frage_text:
+            dialog_msgs.append({"role": "user", "content": frage_text})
+
+    return system_msgs + dialog_msgs
+
+
 def baue_nachrichten(
     q: str,
     treffer: list[dict[str, Any]],
@@ -348,7 +387,7 @@ def baue_nachrichten(
         if rolle in ("user", "assistant") and inhalt:
             messages.append({"role": rolle, "content": inhalt})
 
-    return messages
+    return normalisiere_dialog_verlauf(messages, q)
 
 
 async def stream_suchzusammenfassung(

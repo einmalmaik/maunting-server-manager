@@ -256,16 +256,90 @@ describe('lesemodusService', () => {
       expect(artikel.inhaltHtml).toContain('href="#Geschichte"')
       expect(artikel.inhaltHtml).toContain('id="Geschichte"')
     })
+
+    it('entfernt Wikipedia Inhaltsverzeichnis (TOC) vollständig aus dem extrahierten Artikel', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <body>
+            <article>
+              <h1>Quantenphysik</h1>
+              <div id="toc" class="toc" role="navigation" aria-labelledby="mw-toc-heading">
+                <h2 id="mw-toc-heading">Inhaltsverzeichnis</h2>
+                <div id="toctitle" class="toctitle">TOC-Titel</div>
+                <ul>
+                  <li><a href="#abschnitt1">1 Einführung</a></li>
+                  <li><a href="#abschnitt2">2 Experimente</a></li>
+                </ul>
+              </div>
+              <nav id="mw-panel-toc" class="vector-toc mw-table-of-contents">
+                <p>Vector TOC Item</p>
+              </nav>
+              <h2 id="abschnitt1">Einführung</h2>
+              <p>Die Quantenmechanik beschreibt atomare Phänomene.</p>
+              <h2 id="abschnitt2">Experimente</h2>
+              <p>Zahlreiche Experimente belegen die Vorhersagen.</p>
+            </article>
+          </body>
+        </html>
+      `
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      const artikel = artikelAusDomExtrahieren(doc, 'https://de.wikipedia.org/wiki/Quantenphysik')
+
+      expect(artikel.inhaltHtml).not.toContain('Inhaltsverzeichnis')
+      expect(artikel.inhaltHtml).not.toContain('TOC-Titel')
+      expect(artikel.inhaltHtml).not.toContain('Vector TOC Item')
+      expect(artikel.inhaltHtml).not.toContain('1 Einführung')
+      expect(artikel.reintext).not.toContain('Inhaltsverzeichnis')
+      expect(artikel.reintext).not.toContain('TOC-Titel')
+      expect(artikel.reintext).not.toContain('Vector TOC Item')
+      expect(artikel.reintext).toContain('Die Quantenmechanik beschreibt atomare Phänomene.')
+      expect(artikel.reintext).toContain('Zahlreiche Experimente belegen die Vorhersagen.')
+    })
+
+    it('entfernt moderne News-Werbung wie inline-advertisement, advertisement-wrapper und sponsored-post', () => {
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <body>
+            <article>
+              <h1>Wichtige Entdeckung</h1>
+              <div class="inline-advertisement">
+                <p>Anzeige: Buchen Sie jetzt Ihren Urlaub!</p>
+              </div>
+              <p>Forscher haben neue Erkenntnisse publiziert.</p>
+              <div class="advertisement-wrapper">
+                <p>Werbebanner Mitte</p>
+              </div>
+              <div class="sponsored-post">
+                <p>Gesponserter Beitrag: Tolle Angebote</p>
+              </div>
+              <p>Die Studie erschien im Fachjournal.</p>
+            </article>
+          </body>
+        </html>
+      `
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      const artikel = artikelAusDomExtrahieren(doc, 'https://news.example.com/entdeckung')
+
+      expect(artikel.inhaltHtml).not.toContain('Urlaub')
+      expect(artikel.inhaltHtml).not.toContain('Werbebanner Mitte')
+      expect(artikel.inhaltHtml).not.toContain('Gesponserter Beitrag')
+      expect(artikel.reintext).toContain('Forscher haben neue Erkenntnisse publiziert.')
+      expect(artikel.reintext).toContain('Die Studie erschien im Fachjournal.')
+    })
   })
 
   describe('BROWSER_EXTRAKTION_CODE (WebView2 Runtime-Evaluate)', () => {
-    it('ist vollständig autonom und wirft in isoliertem Kontext keinen ReferenceError', async () => {
+    it('ist vollständig autonom, wirft in isoliertem Kontext keinen ReferenceError und liefert strukturierten Kontrakt', async () => {
       const { BROWSER_EXTRAKTION_CODE } = await import('./lesemodusService')
-      // Prüfen, dass der Code alle Konstanten und Hilfsfunktionen deklariert
+      // Prüfen, dass der Code alle Konstanten und Hilfsfunktionen autonom deklariert
       expect(BROWSER_EXTRAKTION_CODE).toContain('ERLAUBTE_TAGS')
       expect(BROWSER_EXTRAKTION_CODE).toContain('ZU_ENTFERNENDE_TAGS')
       expect(BROWSER_EXTRAKTION_CODE).toContain('STOERUNG_MUSTER')
+      expect(BROWSER_EXTRAKTION_CODE).toContain('CLUTTER_SELEKTOREN')
       expect(BROWSER_EXTRAKTION_CODE).toContain('artikelAusDomExtrahieren')
+      expect(BROWSER_EXTRAKTION_CODE).toContain('baumBereinigen')
 
       // In einem isolierten iframe/Dokument ausführen
       const iframe = document.createElement('iframe')
@@ -275,24 +349,97 @@ describe('lesemodusService', () => {
       doc.write(`
         <!DOCTYPE html>
         <html>
-          <head><title>Iframe Artikel</title></head>
+          <head>
+            <title>Iframe Artikel</title>
+            <meta name="author" content="Test Autor" />
+            <meta property="article:published_time" content="2026-10-18T10:00:00Z" />
+          </head>
           <body>
             <article>
               <h1>Iframe Überschrift</h1>
-              <p>Dies ist ein echter Absatz für den isolierten WebView2-Eval-Test.</p>
+              <p>Dies ist ein echter Absatz für den isolierten WebView2-Eval-Test mit ausreichend Textinhalt.</p>
             </article>
           </body>
         </html>
       `)
       doc.close()
 
-      // Ausführung wie in WebView2: evaluate(BROWSER_EXTRAKTION_CODE)
+      // Ausführung wie in WebView2 via Runtime.evaluate
       const evaluateFn = new iframe.contentWindow!.Function('return ' + BROWSER_EXTRAKTION_CODE)
       const result = evaluateFn()
 
       expect(result).toBeDefined()
-      expect(result.titel).toBe('Iframe Überschrift')
-      expect(result.reintext).toContain('Dies ist ein echter Absatz für den isolierten WebView2-Eval-Test.')
+      expect(result.ok).toBe(true)
+      expect(result.artikel).toBeDefined()
+      expect(result.artikel.titel).toBe('Iframe Überschrift')
+      expect(result.artikel.autor).toBe('Test Autor')
+      expect(result.artikel.datum).toBe('2026-10-18T10:00:00Z')
+      expect(result.artikel.publiziertAm).toBe('2026-10-18T10:00:00Z')
+      expect(result.artikel.reintext).toContain('Dies ist ein echter Absatz für den isolierten WebView2-Eval-Test')
+      expect(result.artikel.wortanzahl).toBeGreaterThan(5)
+      expect(result.artikel.lesedauerMinuten).toBe(1)
+      expect(result.artikel.url).toBeDefined()
+      iframe.remove()
+    })
+
+    it('erzeugt identische Extraktionsergebnisse wie artikelAusDomExtrahieren auf komplexen Seiten', async () => {
+      const { BROWSER_EXTRAKTION_CODE, artikelAusDomExtrahieren } = await import('./lesemodusService')
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <base href="https://example.com/paritaet" />
+            <title>Paritäts-Test</title>
+            <meta property="og:title" content="Wissenschaftlicher Artikel" />
+          </head>
+          <body>
+            <article>
+              <h1>Wissenschaftlicher Artikel</h1>
+              <div class="ad-banner">Anzeige</div>
+              <p>Erster relevanter Absatz über Forschungsmethoden.<sup class="reference"><a href="#note-1">[1]</a></sup></p>
+              <div class="mw-editsection"><a href="/edit">Quelltext bearbeiten</a></div>
+              <p>Zweiter relevanter Absatz mit <a href="/intern">internem Link</a>.</p>
+              <div class="reflist"><ol><li id="note-1">Referenz 1</li></ol></div>
+            </article>
+          </body>
+        </html>
+      `
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+      const direktExtrahiert = artikelAusDomExtrahieren(doc, 'https://example.com/paritaet')
+
+      const iframe = document.createElement('iframe')
+      document.body.appendChild(iframe)
+      const iDoc = iframe.contentDocument!
+      iDoc.open()
+      iDoc.write(html)
+      iDoc.close()
+
+      const evaluateFn = new iframe.contentWindow!.Function('return ' + BROWSER_EXTRAKTION_CODE)
+      const evalResult = evaluateFn()
+      iframe.remove()
+
+      expect(evalResult.ok).toBe(true)
+      expect(evalResult.artikel.titel).toBe(direktExtrahiert.titel)
+      expect(evalResult.artikel.reintext).toBe(direktExtrahiert.reintext)
+      expect(evalResult.artikel.inhaltHtml).toBe(direktExtrahiert.inhaltHtml)
+      expect(evalResult.artikel.wortanzahl).toBe(direktExtrahiert.wortanzahl)
+    })
+  })
+
+  describe('BROWSER_LESBAR_CODE (Schnellprüfung)', () => {
+    it('evaluiert autonom und erkennt lesbare Seiten im isolierten Kontext', async () => {
+      const { BROWSER_LESBAR_CODE } = await import('./lesemodusService')
+      const iframe = document.createElement('iframe')
+      document.body.appendChild(iframe)
+      const doc = iframe.contentDocument!
+      doc.open()
+      doc.write('<!DOCTYPE html><html><body><article>Kurzer Artikel</article></body></html>')
+      doc.close()
+
+      const evaluateFn = new iframe.contentWindow!.Function('return ' + BROWSER_LESBAR_CODE)
+      const result = evaluateFn()
+      expect(result).toBe(true)
       iframe.remove()
     })
   })
@@ -314,20 +461,25 @@ describe('lesemodusService', () => {
       spy.mockRestore()
     })
 
-    it('gibt false zurück, wenn die Schnellprüfung fehlschlägt', async () => {
+    it('gibt false zurück, wenn die Schnellprüfung fehlschlägt oder ExceptionDetails liefert', async () => {
       const { nativ } = await import('./nativ')
-      const spy = vi.spyOn(nativ, 'tabProtokoll').mockRejectedValueOnce(new Error('Fehler'))
+      const spyError = vi.spyOn(nativ, 'tabProtokoll').mockRejectedValueOnce(new Error('Fehler'))
+      expect(await istSeiteLesbarPruefen('tab-error')).toBe(false)
+      spyError.mockRestore()
 
-      const lesbar = await istSeiteLesbarPruefen('tab-error')
-      expect(lesbar).toBe(false)
-      spy.mockRestore()
+      const spyException = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce({
+        exceptionDetails: { text: 'Uncaught ReferenceError', lineNumber: 1, columnNumber: 1 },
+      })
+      expect(await istSeiteLesbarPruefen('tab-exc')).toBe(false)
+      spyException.mockRestore()
     })
 
-    it('extrahiert Artikel über tabProtokoll, wenn Ergebnis vorhanden', async () => {
+    it('extrahiert Artikel über tabProtokoll mit strukturiertem { ok: true, artikel } Rückgabewert', async () => {
       const mockArtikel = {
         titel: 'Remote Titel',
         autor: 'Remote Autor',
         datum: '2026-10-17',
+        publiziertAm: '2026-10-17',
         inhaltHtml: '<p>Remote Text</p>',
         reintext: 'Remote Text',
         wortanzahl: 2,
@@ -337,11 +489,90 @@ describe('lesemodusService', () => {
 
       const { nativ } = await import('./nativ')
       const spy = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce({
-        result: { value: mockArtikel },
+        result: { value: { ok: true, artikel: mockArtikel } },
       })
 
       const ergebnis = await artikelExtrahieren('tab-remote', 'https://example.com/remote')
       expect(ergebnis).toEqual(mockArtikel)
+      spy.mockRestore()
+    })
+
+    it('unterstützt direkte Rückgabe von ExtrahierterArtikel zur Abwärtskompatibilität', async () => {
+      const mockArtikel = {
+        titel: 'Legacy Titel',
+        autor: null,
+        datum: null,
+        inhaltHtml: '<p>Legacy Text</p>',
+        reintext: 'Legacy Text',
+        wortanzahl: 2,
+        lesedauerMinuten: 1,
+        url: 'https://example.com/legacy',
+      }
+
+      const { nativ } = await import('./nativ')
+      const spy = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce({
+        result: { value: mockArtikel },
+      })
+
+      const ergebnis = await artikelExtrahieren('tab-legacy', 'https://example.com/legacy')
+      expect(ergebnis).toEqual(mockArtikel)
+      spy.mockRestore()
+    })
+
+    it('behandelt res.exceptionDetails als Fehler und fällt NICHT stillschweigend auf document zurück', async () => {
+      const { nativ } = await import('./nativ')
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const spy = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce({
+        result: { type: 'undefined' },
+        exceptionDetails: {
+          text: 'Uncaught ReferenceError',
+          exception: { description: 'ReferenceError: Me is not defined' },
+        },
+      })
+
+      await expect(artikelExtrahieren('tab-exc-test', 'https://example.com/exc')).rejects.toThrow(
+        'ReferenceError: Me is not defined',
+      )
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[Lesemodus] CDP Runtime.evaluate Ausnahme im Tab:'),
+        expect.anything(),
+      )
+
+      spy.mockRestore()
+      consoleErrorSpy.mockRestore()
+    })
+
+    it('behandelt { ok: false, fehler } als Fehler und fällt NICHT auf document zurück', async () => {
+      const { nativ } = await import('./nativ')
+      const spy = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce({
+        result: {
+          value: { ok: false, fehler: 'Artikelbereich konnte nicht ermittelt werden' },
+        },
+      })
+
+      await expect(artikelExtrahieren('tab-fail-test', 'https://example.com/fail')).rejects.toThrow(
+        'Artikelbereich konnte nicht ermittelt werden',
+      )
+
+      spy.mockRestore()
+    })
+
+    it('schützt das Tauri Host-Fenster davor, als Lesemodus-Inhalt extrahiert zu werden', async () => {
+      const { nativ } = await import('./nativ')
+      // Außerhalb von Tauri (tabProtokoll liefert null)
+      const spy = vi.spyOn(nativ, 'tabProtokoll').mockResolvedValueOnce(null as any)
+
+      // Host-Fenster simulieren
+      const fakeRoot = document.createElement('div')
+      fakeRoot.id = 'root'
+      document.body.appendChild(fakeRoot)
+
+      await expect(artikelExtrahieren('tab-host', 'https://example.com/host')).rejects.toThrow(
+        'Für diese Seite konnte kein lesbarer Artikeltext extrahiert werden.',
+      )
+
+      fakeRoot.remove()
       spy.mockRestore()
     })
 
@@ -367,12 +598,25 @@ describe('lesemodusService', () => {
       const p1 = artikelExtrahieren('tab-parallel', 'https://example.com/parallel')
       const p2 = artikelExtrahieren('tab-parallel', 'https://example.com/parallel')
 
-      resolvePromise!({ result: { value: mockArtikel } })
+      resolvePromise!({ result: { value: { ok: true, artikel: mockArtikel } } })
       const [res1, res2] = await Promise.all([p1, p2])
 
       expect(res1).toEqual(mockArtikel)
       expect(res2).toEqual(mockArtikel)
       expect(spy).toHaveBeenCalledTimes(1)
+      spy.mockRestore()
+    })
+
+    it('behält ursprüngliche Netzwerk- oder Timeout-Fehler bei tabProtokoll-Rejection bei (z. B. AbortError)', async () => {
+      const { nativ } = await import('./nativ')
+      const spy = vi
+        .spyOn(nativ, 'tabProtokoll')
+        .mockRejectedValueOnce(new Error('AbortError: The operation was aborted due to timeout'))
+
+      await expect(
+        artikelExtrahieren('tab-timeout', 'https://example.com/timeout'),
+      ).rejects.toThrow('AbortError: The operation was aborted due to timeout')
+
       spy.mockRestore()
     })
   })

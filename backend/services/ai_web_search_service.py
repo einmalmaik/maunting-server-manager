@@ -1919,16 +1919,21 @@ def searxng_ergebnis(
         nonlocal google_hits
         if not google_creds:
             return
-        google_hits = _google_cse_treffer(
-            query,
-            api_key_val=google_creds[0],
-            cx_val=google_creds[1],
-            limit=min(10, limit),
-            seite=seite,
-            sicher=sicher,
-            sprache=sprache,
-            kategorie=kategorie,
-        )
+        try:
+            google_hits = _google_cse_treffer(
+                query,
+                api_key_val=google_creds[0],
+                cx_val=google_creds[1],
+                limit=min(10, limit),
+                seite=seite,
+                sicher=sicher,
+                sprache=sprache,
+                kategorie=kategorie,
+            )
+        except WebSearchUnavailable as exc:
+            logger.debug("Google Zusatzabfrage nicht erreichbar: %s", type(exc).__name__)
+        except Exception as exc:
+            logger.debug("Google Zusatzabfrage fehlgeschlagen: %s", type(exc).__name__)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_s = executor.submit(_abfrage_searxng) if target_url else None
@@ -1936,7 +1941,12 @@ def searxng_ergebnis(
         f_g = executor.submit(_abfrage_google) if google_creds else None
         for f in (f_s, f_b, f_g):
             if f:
-                f.result()
+                try:
+                    f.result(timeout=10.0)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("Suchmaschinen-Abfrage im ThreadPoolExecutor hat das 10.0s Timeout überschritten.")
+                except Exception as exc:
+                    logger.warning("Suchmaschinen-Abfrage fehlgeschlagen: %s", type(exc).__name__)
 
     if not searxng_hits and not brave_hits and not google_hits:
         if not target_url and not google_creds and brave_fehler is not None:
