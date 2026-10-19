@@ -96,7 +96,7 @@ jobs:
       - name: Package with Velopack
         run: |
           mkdir -p browser-velopack
-          vpk pack --packId "Pontis" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "browser/src-tauri/target/release" --mainExe "MauntingPontis.exe" --icon "browser/src-tauri/icons/icon.ico" --splashImage "browser/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "#5bc0be" --channel "pontis" --outputDir "browser-velopack"
+          vpk pack --packId "Pontis" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "browser/src-tauri/target/release" --mainExe "MauntingPontis.exe" --icon "browser/src-tauri/icons/icon.ico" --splashImage "browser/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "pontis" --outputDir "browser-velopack"
 
       - name: Collect installer and latest-msb.json
         shell: bash

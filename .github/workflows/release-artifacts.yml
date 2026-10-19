@@ -228,7 +228,7 @@ jobs:
       - name: Package with Velopack
         run: |
           mkdir -p smart-system-velopack
-          vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "smart-system/src-tauri/target/release" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "#5bc0be" --channel "mss" --outputDir "smart-system-velopack"
+          vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "smart-system/src-tauri/target/release" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "mss" --outputDir "smart-system-velopack"
 
       - name: Collect Windows installer and generate latest.json
         shell: bash
