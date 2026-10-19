@@ -139,3 +139,7 @@ browser/AUDIT_REPORT_PONTIS.md
 /crates/schluesselfach/target
 /crates/updater_core/target
 /Releases
+ 
+test_updater_server/
+Releases/
+
