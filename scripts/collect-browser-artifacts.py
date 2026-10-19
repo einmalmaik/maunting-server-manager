@@ -43,6 +43,14 @@ def main() -> None:
         shutil.copy2(main_binary, ziel / MAIN_EXE)
         print(f"Hauptprogramm kopiert: {MAIN_EXE}")
 
+    # Velopack-Artefakte einsammeln (*.nupkg, releases.*.json, Setup.exe)
+    velopack_dir = Path("browser-velopack")
+    if velopack_dir.exists():
+        for f in velopack_dir.glob("*"):
+            if f.is_file():
+                shutil.copy2(f, ziel / f.name)
+                print(f"Copied Velopack artifact: {f.name}")
+
     manifest = {
         "version": tag.lstrip("v"),
         "notes": f"Maunting Pontis {tag}",

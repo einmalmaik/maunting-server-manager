@@ -28,6 +28,14 @@ for f in release_dir.rglob("*"):
         shutil.copy2(f, desktop_dir / f.name)
         print(f"Copied updater file: {f.name}")
 
+# 2b. Velopack-Artefakte einsammeln (*.nupkg, releases.*.json, Setup.exe)
+velopack_dir = Path("smart-system-velopack")
+if velopack_dir.exists():
+    for f in velopack_dir.glob("*"):
+        if f.is_file():
+            shutil.copy2(f, desktop_dir / f.name)
+            print(f"Copied Velopack artifact: {f.name}")
+
 # Falls eine .sig für das Setup existiert, auch als MauntingSmartSystem-Setup.exe.sig bereitstellen
 for sig in desktop_dir.glob("*.sig"):
     if "setup" in sig.name.lower():

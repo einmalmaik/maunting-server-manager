@@ -30,9 +30,10 @@ import { farbwahl } from '@/config/farbpalette'
 import { useAnkerLage } from '@/Singra/UI/Ankerlage'
 import { createPortal } from 'react-dom'
 
-import { Kurzinfo } from '@/Singra/UI'
+import { Kurzinfo, UpdateBadge } from '@/Singra/UI'
 
 import { useEinstellungenStore } from '../services/einstellungenStore'
+import { useUpdateStore } from '../services/updateStore'
 import { interneSeite, msmSucheBegriff } from '../services/intern'
 import { nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
@@ -727,6 +728,18 @@ export function Kopfleiste() {
   const startseite = useTabsStore((s) => s.startseite)
   const privatAus = useEinstellungenStore((s) => s.ausgeblendet.includes('privaterTab'))
   const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
+  const updateSichtbar = useUpdateStore((s) => s.sichtbar)
+  const updateVersion = useUpdateStore((s) => s.neueVersion)
+  const updatePhase = useUpdateStore((s) => s.phase)
+  const updateProzent = useUpdateStore((s) => s.prozent)
+  const updateFehler = useUpdateStore((s) => s.fehlerText)
+  const updateInstallieren = useUpdateStore((s) => s.installieren)
+  const initialisiereUpdater = useUpdateStore((s) => s.initialisiereLauscher)
+
+  useEffect(() => {
+    initialisiereUpdater()
+  }, [initialisiereUpdater])
+
   const [dropZielIndex, setDropZielIndex] = useState<number | null>(null)
   const [fremderDragTab, setFremderDragTab] = useState<TabZiehNachricht | null>(null)
 
@@ -1086,6 +1099,17 @@ export function Kopfleiste() {
           behandleDrop(e, tabs.length)
         }}
       />
+      {updateSichtbar && (
+        <div className="flex items-center px-2">
+          <UpdateBadge
+            neueVersion={updateVersion}
+            phase={updatePhase}
+            prozent={updateProzent}
+            fehlerText={updateFehler}
+            onInstallieren={() => void updateInstallieren()}
+          />
+        </div>
+      )}
       <div className="flex h-full shrink-0 items-stretch">
         {(
           [

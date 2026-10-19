@@ -23,9 +23,9 @@ import java.io.FileInputStream
  *    verhindert FileUriExposedException).
  */
 object ApkInstaller {
-    private const val TAG = "MsbApkInstaller"
-    const val ACTION_INSTALL_STATUS = "com.mauntingstudios.secure_browser.INSTALL_STATUS"
-    const val KANAL_UPDATES = "msb_updates"
+    private const val TAG = "ApkInstaller"
+    fun getActionInstallStatus(context: Context): String = "${context.packageName}.INSTALL_STATUS"
+    const val KANAL_UPDATES = "app_updates"
     const val NOTIFICATION_ID_FALLBACK = 2004
 
     private fun sicherstelleKanal(context: Context) {
@@ -79,7 +79,7 @@ object ApkInstaller {
                 }
 
                 val intent = Intent(context, InstallStatusReceiver::class.java).apply {
-                    action = ACTION_INSTALL_STATUS
+                    action = getActionInstallStatus(context)
                     putExtra("apk_path", apkPath)
                 }
 
@@ -160,9 +160,10 @@ object ApkInstaller {
                 }
             )
 
+            val appName = context.applicationInfo.loadLabel(context.packageManager).toString()
             val notification = NotificationCompat.Builder(context, KANAL_UPDATES)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle("MSB Update bereit")
+                .setContentTitle("$appName Update bereit")
                 .setContentText("Tippe hier, um die Aktualisierung abzuschließen.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

@@ -203,12 +203,32 @@ jobs:
           # Version in tauri.conf.json und Cargo.toml angleichen (nur [package], keine Dependencies!)
           python scripts/sync-tauri-version.py "${TAG}"
 
+      - name: Set up .NET (for Velopack CLI)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install Velopack CLI
+        run: dotnet tool install -g vpk
+
       - name: Build Tauri app
         working-directory: smart-system
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
+
+      - name: Download Previous Velopack Releases (for Delta Updates)
+        continue-on-error: true
+        run: |
+          vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package with Velopack
+        run: |
+          mkdir -p smart-system-velopack
+          vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "smart-system/src-tauri/target/release" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "#5bc0be" --channel "mss" --outputDir "smart-system-velopack"
 
       - name: Collect Windows installer and generate latest.json
         shell: bash

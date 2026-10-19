@@ -13,14 +13,14 @@ import java.io.File
 
 /**
  * BroadcastReceiver zur Auswertung von PackageInstaller-Statusmeldungen.
- * - Bei USER_ACTION_REQUIRED (z.B. Erstanfrage) wird das Bestätigungs-Intent angezeigt
- *   oder als Heads-Up Notification bereitgestellt, falls die App im Hintergrund ist.
- * - Bei Erfolg werden eventuelle Update-Notifications aufgeräumt.
+ * - Bei USER_ACTION_REQUIRED wird das Bestätigungs-Intent angezeigt oder als
+ *   Notification bereitgestellt.
+ * - Bei Erfolg werden Update-Notifications aufgeräumt.
  * - Bei Fehlern erfolgt ein automatischer Fallback auf den FileProvider-Installationsdialog.
  */
 class InstallStatusReceiver : BroadcastReceiver() {
     companion object {
-        const val NOTIFICATION_ID_CONFIRM = 1003
+        const val NOTIFICATION_ID_CONFIRM = 2003
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -47,7 +47,6 @@ class InstallStatusReceiver : BroadcastReceiver() {
                         Log.w("InstallStatusReceiver", "Direkter Start fehlgeschlagen: ${e.message}")
                     }
 
-                    // Falls direkter Start im Hintergrund blockiert wurde, via Notification anbieten:
                     if (!directLaunchSucceeded) {
                         showConfirmNotification(context, confirmIntent)
                     }
@@ -90,9 +89,10 @@ class InstallStatusReceiver : BroadcastReceiver() {
                 }
             )
 
-            val notification = NotificationCompat.Builder(context, Erinnerungen.KANAL)
+            val appName = context.applicationInfo.loadLabel(context.packageManager).toString()
+            val notification = NotificationCompat.Builder(context, ApkInstaller.KANAL_UPDATES)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle("MSS Update bereit")
+                .setContentTitle("$appName Update bereit")
                 .setContentText("Tippe hier, um die Aktualisierung zu bestätigen.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

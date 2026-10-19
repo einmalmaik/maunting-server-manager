@@ -71,8 +71,9 @@ pub fn run() {
                 fenster::fenster_nach_vorn(&fenster);
             }
         }))
-    }
-    .plugin(tauri_plugin_updater::Builder::new().build());
+    };
+
+    let builder = updater_core::init_updater(builder, updater_core::UpdateConfig::pontis());
 
     #[allow(unused_mut)]
     let mut builder = builder
@@ -88,7 +89,6 @@ pub fn run() {
         builder = builder
             .plugin(tauri_plugin_biometric::init())
             .plugin(schluesselfach::biometrie::init_android_schluesselfach())
-            .plugin(aktualisieren::init_android_installer())
             .plugin(tabs::android::init())
             .plugin(widget::init());
     }
@@ -149,6 +149,7 @@ pub fn run() {
                 }
                 if !ist_neues_fenster {
                     widget::link_aufnehmen(handle, &args);
+                    updater_core::starte_hintergrund_pruefung(handle.clone());
                 }
             }
             Ok(())
@@ -223,7 +224,9 @@ pub fn run() {
             widget::standardbrowser_werden,
             widget::standardbrowser_einstellungen,
             aktualisieren::update_pruefen,
+            aktualisieren::update_herunterladen,
             aktualisieren::update_installieren,
+            aktualisieren::app_neu_starten,
             erweiterungen::erweiterungen_liste,
             erweiterungen::erweiterung_pruefen,
             erweiterungen::erweiterung_installieren,

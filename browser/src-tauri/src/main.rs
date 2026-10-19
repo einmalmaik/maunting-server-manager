@@ -2,6 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    updater_core::velopack_start();
+
     // Im Release gelten keine WebView2-Vorgaben aus der Umgebung: sie ersetzten
     // die Argumente der Tabs (etwa um einen Debug-Port oder ohne SmartScreen-
     // Schalter) oder lenkten auf eine andere Laufzeit und einen anderen
