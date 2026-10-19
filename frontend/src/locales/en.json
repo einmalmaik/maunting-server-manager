@@ -4427,7 +4427,7 @@
       "intro": "Optional browser for Windows and Android with an ad and tracker filter, parental controls and autofill from the vault. Without pairing it talks to no Maunting Studios server; once paired it shows the instance's Singra, messenger, notes, calendar and vault in its sidebar.",
       "artifact": {
         "title": "Installer",
-        "body": "release-artifacts.yml builds it on v* tags through browser-build.yml, with the same version as the panel and MSS: MauntingSecureBrowser-Setup.exe and its signature (.exe.sig). If a file is missing from the release, the run fails."
+        "body": "release-artifacts.yml builds it on v* tags through browser-build.yml, with the same version as the panel and MSS: MauntingPontis-Setup.exe and its signature (.exe.sig). If a file is missing from the release, the run fails."
       },
       "updates": {
         "title": "Updates",

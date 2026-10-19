@@ -98,8 +98,8 @@ def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
     assert "build-browser]" in release
     assert "continue-on-error" not in release
     for datei in (
-        "MauntingSecureBrowser-Setup.exe",
-        "MauntingSecureBrowser-Setup.exe.sig",
+        "MauntingPontis-Setup.exe",
+        "MauntingPontis-Setup.exe.sig",
         "latest-msb.json",
         "MauntingSecureBrowser.apk",
         "MauntingSmartSystem.apk",

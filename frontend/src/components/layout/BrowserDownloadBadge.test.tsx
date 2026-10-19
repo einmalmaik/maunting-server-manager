@@ -27,7 +27,7 @@ describe('BrowserDownloadBadge', () => {
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+      'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
     )
   })
 

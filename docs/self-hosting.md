@@ -264,7 +264,7 @@ aufgerufen von `release-artifacts.yml` auf denselben **`v*`-Tags** und mit
 derselben Version wie Panel und MSS (`scripts/sync-tauri-version.py`). Der
 Release schlägt fehl, wenn eine der folgenden Dateien fehlt:
 
-- `MauntingSecureBrowser-Setup.exe` und `MauntingSecureBrowser-Setup.exe.sig`:
+- `MauntingPontis-Setup.exe` und `MauntingPontis-Setup.exe.sig`:
   NSIS-Installer und seine Signatur für den Updater.
 - `latest-msb.json`: Manifest für den Updater des Browsers. `latest.json`
   gehört dem Smart System; beide Apps prüfen gegen denselben Schlüssel

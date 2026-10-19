@@ -16,13 +16,15 @@ import sys
 from pathlib import Path
 
 REPO = "einmalmaik/maunting-server-manager"
-INSTALLER = "MauntingSecureBrowser-Setup.exe"
+INSTALLER = "MauntingPontis-Setup.exe"
+MAIN_EXE = "MauntingPontis.exe"
 MANIFEST = "latest-msb.json"
 
 
 def main() -> None:
     tag = sys.argv[1]
-    nsis = Path("browser/src-tauri/target/release/bundle/nsis")
+    release_dir = Path("browser/src-tauri/target/release")
+    nsis = release_dir / "bundle/nsis"
     ziel = Path("browser-release")
     ziel.mkdir(parents=True, exist_ok=True)
 
@@ -36,9 +38,14 @@ def main() -> None:
     shutil.copy2(installer[0], ziel / INSTALLER)
     shutil.copy2(signatur, ziel / f"{INSTALLER}.sig")
 
+    main_binary = release_dir / MAIN_EXE
+    if main_binary.exists():
+        shutil.copy2(main_binary, ziel / MAIN_EXE)
+        print(f"Hauptprogramm kopiert: {MAIN_EXE}")
+
     manifest = {
         "version": tag.lstrip("v"),
-        "notes": f"Maunting Secure Browser {tag}",
+        "notes": f"Maunting Pontis {tag}",
         "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "platforms": {
             "windows-x86_64": {

@@ -4427,7 +4427,7 @@
       "intro": "Optionaler Browser für Windows und Android mit Werbe- und Trackerfilter, Jugendschutz und Ausfüllen aus dem Tresor. Ohne Kopplung spricht er mit keinem Server von Maunting Studios; gekoppelt zeigt er Singra, Messenger, Notizen, Kalender und Tresor der Instanz in der Seitenleiste.",
       "artifact": {
         "title": "Installer",
-        "body": "release-artifacts.yml baut ihn auf v*-Tags mit, über browser-build.yml und in derselben Version wie Panel und MSS: MauntingSecureBrowser-Setup.exe samt Signatur (.exe.sig). Fehlt eine Datei im Release, schlägt der Lauf fehl."
+        "body": "release-artifacts.yml baut ihn auf v*-Tags mit, über browser-build.yml und in derselben Version wie Panel und MSS: MauntingPontis-Setup.exe samt Signatur (.exe.sig). Fehlt eine Datei im Release, schlägt der Lauf fehl."
       },
       "updates": {
         "title": "Updates",

@@ -862,7 +862,7 @@ function Hauptseite({
       onClick: () => {
         const downloadUrl = isAndroid
           ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-          : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+          : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
         void oeffneBrowser(downloadUrl)
       },
     },
@@ -1127,7 +1127,7 @@ function Hauptseite({
                   setMobileMenuOffen(false)
                   const downloadUrl = isAndroid
                     ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-                    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+                    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
                   void oeffneBrowser(downloadUrl)
                 }}
                 className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"

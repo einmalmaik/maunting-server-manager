@@ -431,7 +431,7 @@ jobs:
           pflicht=(
             "msm-panel-$TAG.tar.gz" "msm-frontend-$TAG.tar.gz" "msm-agent-$TAG.tar.gz" SHA256SUMS
             MauntingSmartSystem-Setup.exe latest.json MauntingSmartSystem.apk
-            MauntingSecureBrowser-Setup.exe MauntingSecureBrowser-Setup.exe.sig latest-msb.json MauntingSecureBrowser.apk
+            MauntingPontis-Setup.exe MauntingPontis-Setup.exe.sig latest-msb.json MauntingSecureBrowser.apk
           )
           for datei in "${pflicht[@]}"; do
             grep -qxF "$datei" <<<"$vorhanden" || { echo "Fehlt im Release: $datei" >&2; fehlt=1; }
