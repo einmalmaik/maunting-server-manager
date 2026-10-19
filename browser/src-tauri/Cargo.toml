@@ -96,9 +96,15 @@ jni = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 webpki-roots = "1"
 
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+
 # Das Schild prüft jede Anfrage auf dem UI-Faden der WebView2. Ohne Optimierung
 # brauchte die Engine dafür bis 57 ms je Anfrage, und `tauri dev` stand beim
 # Laden einer Seite über eine Sekunde lang (10/2026). Abhängigkeiten werden
 # deshalb auch im Entwicklungsbau optimiert.
 [profile.dev.package."*"]
 opt-level = 3
+
