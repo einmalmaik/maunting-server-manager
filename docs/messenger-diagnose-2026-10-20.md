@@ -177,10 +177,19 @@ python backend/scripts/diagnose_messenger_geraete.py --konto 42 --json --nur-pro
 ```
 
 Je Gerät: `is_approved`, `approved_by`, Unterschrift vorhanden, `auth_family`, Label und ein
-**Urteil** (`gedeckt`, `erstes-geraet`, `geisterwarnung`, `wartend`), das die Regel aus
-`vertrauteGeraete` nachbaut. Für eine `geisterwarnung` nennt die Ausgabe den erwarteten
-Abdruck `sha256(public_key)` neben dem `localStorage`-Schlüssel `msm_vertraute_geraete:<userId>` —
-der letzte Vergleich bleibt Handarbeit im Browser, weil die Vertrauensliste nur dort liegt.
+**Urteil** (`gedeckt`, `erstes-geraet`, `ohne-unterschrift`, `wartend`), das den Teil der Regel
+aus `vertrauteGeraete` nachbaut, den die Datenbank beantworten kann. Für `ohne-unterschrift`
+nennt die Ausgabe den erwarteten Abdruck `sha256(public_key)` neben dem `localStorage`-Schlüssel
+`msm_vertraute_geraete:<userId>` — der Vergleich bleibt Handarbeit im Browser, weil die
+Vertrauensliste nur dort liegt.
+
+**Bis 20.10.2026 hiess dieses Urteil `geisterwarnung`** und behauptete, das Gerät bekomme nichts.
+Das war falsch: ein freigegebenes Gerät ohne Unterschrift ist beim ersten Gerät eines Kontos und
+nach `wieder_freigeben` der Normalfall, und der Client hält es für vertraut, solange sein
+Fingerabdruck in der eigenen Liste steht. Aus der Datenbank ist ein Schlüsselwechsel gar nicht
+ablesbar — `_auffrischen` setzt dabei seit 10/2026 `is_approved` zurück. Das Skript nennt jetzt
+den Kandidaten zum Gegenprüfen, statt eine Zustellung zu behaupten
+(`test_diagnose_messenger_geraete.py`).
 
 Was das Skript **nicht** kann (und nicht soll): die Kopplungssicht (`/auth/devices`) prüfen und
 Server-Logs lesen. Dafür bleiben die Schritte 3 und 4 der alten Fassung:

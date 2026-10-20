@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Diagnose: Geräteverzeichnis, Freigaben und die Geister-Warnung.
+"""Diagnose: Geräteverzeichnis, Freigaben und die Vertrauensfrage.
 
 Liest **nur**. Kein Schreibzugriff auf `user_e2ee_devices`, keine Migration,
 kein Aufräumen — das Skript beantwortet die Frage, die man vor jedem Fix
@@ -15,10 +15,19 @@ Genau daraus entsteht die Warnung aus `AGENTS.md`-Punkt A der Diagnose:
   Unterschrift über die aktuellen Schlüssel, gilt das Gerät dort als
   unbestätigt, und der Chat sagt: „Es bekommt nichts."
 
-Beide Sichten können dauerhaft auseinanderfallen, wenn ein Gerät seinen
-Schlüssel wechselt und es das einzige freigegebene Gerät ist
-(`_auffrischen` in `services/e2ee_device_service.py`): `approved_by` und
-`approval_signature` werden gelöscht, `is_approved` bleibt stehen.
+Auseinanderfallen können beide Sichten, weil der Client **zusätzlich** einen
+Fingerabdruck vergleicht, den nur er kennt: die Vertrauensliste im
+`localStorage` (`msm_vertraute_geraete:<userId>`) enthält `sha256(public_key)`.
+Ein Gerät, dessen Schlüssel sich dort verändert hat, gilt im Client als
+unbestätigt — und der Sendeweg lässt es aus, es bekommt dann wirklich nichts.
+
+**Das Skript behauptet das nicht.** Aus der Datenbank ist ein solcher Wechsel
+nicht ablesbar: seit 10/2026 setzt `_auffrischen` bei einem neuen Schlüssel
+`is_approved` zurück, eine freigegebene Zeile ohne Unterschrift ist also
+**kein** Beweis für einen Wechsel. Sie ist der Normalfall beim ersten Gerät
+eines Kontos und nach `wieder_freigeben` („freigegeben“ ≠ „beglaubigt“). Das
+Urteil lautet deshalb `ohne-unterschrift` und nennt den erwarteten Abdruck zum
+Vergleich; ob das Gerät ankommt, entscheidet erst dieser Vergleich.
 
 Aufruf:
 
@@ -57,7 +66,7 @@ from models import User, UserE2eeDevice  # noqa: E402
 #: Urteile, in der Reihenfolge, in der sie in der Zusammenfassung erscheinen.
 URTEIL_GEDECKT = "gedeckt"
 URTEIL_ERSTES = "erstes-geraet"
-URTEIL_GEIST = "geisterwarnung"
+URTEIL_UNSIGNIERT = "ohne-unterschrift"
 URTEIL_WARTEND = "wartend"
 
 URTEIL_TEXT = {
@@ -66,10 +75,11 @@ URTEIL_TEXT = {
         "einziges freigegebenes Gerät — ohne Unterschrift ist hier normal "
         "(es gab niemanden, der freigeben konnte)."
     ),
-    URTEIL_GEIST: (
-        "freigegeben, aber ohne Unterschrift eines anderen Geräts. Der Client "
-        "wertet das als unbestätigt: Warnung „Es bekommt nichts“, obwohl die "
-        "Liste es als freigegeben zeigt."
+    URTEIL_UNSIGNIERT: (
+        "freigegeben ohne Unterschrift, und es gibt weitere freigegebene "
+        "Geräte. Beim ersten Gerät und nach dem Wiederzulassen ist das normal "
+        "und sagt nichts über die Zustellung. Ob der Client es für vertraut "
+        "hält, entscheidet der gespeicherte Fingerabdruck — Vergleich unten."
     ),
     URTEIL_WARTEND: "wartet auf Freigabe — bekommt nichts, ist aber sichtbar.",
 }
@@ -101,7 +111,11 @@ def urteil(geraet: UserE2eeDevice, andere_freigegebene: int) -> str:
         return URTEIL_GEDECKT
     if andere_freigegebene == 0:
         return URTEIL_ERSTES
-    return URTEIL_GEIST
+    # Kein „Geist“: die fehlende Unterschrift allein ist beim ersten Gerät und
+    # nach `wieder_freigeben` der Normalfall. Aus der Datenbank ist nicht
+    # ablesbar, ob der Client dieses Gerät noch für vertraut hält — das steht
+    # nur in seiner eigenen Vertrauensliste.
+    return URTEIL_UNSIGNIERT
 
 
 def befund(db, user: User) -> dict:
@@ -122,9 +136,10 @@ def befund(db, user: User) -> dict:
             hinweise.append("ohne Namen — erscheint als „Unbenanntes Gerät“.")
         if e.is_approved and not (e.approval_signature or "").strip() and andere > 0:
             hinweise.append(
-                "Schlüsselwechsel ohne neue Unterschrift: `_auffrischen` löscht "
-                "`approved_by`/`approval_signature` und lässt `is_approved` stehen, "
-                "solange kein anderes Gerät freigegeben ist."
+                "Ohne Unterschrift freigegeben: normal beim ersten Gerät und nach "
+                "`wieder_freigeben`. Ein Schlüsselwechsel setzt `is_approved` "
+                "zurück (`_auffrischen`), die Zeile allein belegt also keinen "
+                "Wechsel — der Fingerabdruck unten entscheidet."
             )
         if not e.auth_family:
             hinweise.append(
@@ -192,15 +207,16 @@ def _drucke(befunde: list[dict], nur_probleme: bool) -> None:
         print()
         print(
             f"  Zusammenfassung: {z[URTEIL_GEDECKT]} gedeckt, "
-            f"{z[URTEIL_ERSTES]} erstes Gerät, {z[URTEIL_GEIST]} Geisterwarnung, "
-            f"{z[URTEIL_WARTEND]} wartend"
+            f"{z[URTEIL_ERSTES]} erstes Gerät, {z[URTEIL_UNSIGNIERT]} ohne "
+            f"Unterschrift, {z[URTEIL_WARTEND]} wartend"
         )
-        if z[URTEIL_GEIST]:
+        if z[URTEIL_UNSIGNIERT]:
             print(
-                "  → Die Zeile mit „geisterwarnung“ ist der Kandidat für die dauerhafte "
-                "Warnung. Zum Gegenprüfen im Browser dieses Kontos:"
+                "  → Ohne Unterschrift heisst nicht „kommt nicht an“. Ob der Client "
+                "das Gerät für vertraut hält, steht nur in seiner eigenen Liste. "
+                "Zum Gegenprüfen im Browser dieses Kontos:"
             )
-            g = next(g for g in geraete if g["urteil"] == URTEIL_GEIST)
+            g = next(g for g in geraete if g["urteil"] == URTEIL_UNSIGNIERT)
             print(
                 "     JSON.parse(localStorage['msm_vertraute_geraete:"
                 f"{befund_eines['user_id']}'] || 'null')"
@@ -210,7 +226,7 @@ def _drucke(befunde: list[dict], nur_probleme: bool) -> None:
             )
             print(
                 "     Weicht der gespeicherte `k` davon ab (oder fehlt der Eintrag), "
-                "ist die Warnung erklärt."
+                "gilt das Gerät im Client als unbestätigt und bekommt nichts."
             )
 
 
