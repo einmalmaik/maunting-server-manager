@@ -116,11 +116,15 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        # `npx --prefix <dir>` sucht keine lokale Ausfuehrbare und brach mit
+        # "could not determine executable to run" ab; der CLI-Einstiegspunkt
+        # des eigenen `npm ci` wird deshalb direkt mit node gestartet.
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
-          npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" browser-velopack/releases.pontis.json
+          cli="browser/node_modules/@tauri-apps/cli/tauri.js"
+          node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" browser-velopack/releases.pontis.json
           for setup in browser-velopack/*win-Setup.exe; do
-            npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
+            node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
           done
 
       - name: Collect Velopack installer and Android version manifest
