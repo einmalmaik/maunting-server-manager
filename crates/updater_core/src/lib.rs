@@ -22,12 +22,21 @@ pub use types::{UpdateInfo, UpdateStatusEvent};
 #[cfg(not(target_os = "android"))]
 pub use velopack;
 
+/// Der Velopack-Startvorgang. Wer Installations-Hooks braucht (etwa die
+/// Standardbrowser-Anmeldung des Browsers), baut ihn selbst und ruft `run()`;
+/// `velopack_start` bleibt der einfache Weg ohne Hooks.
+#[cfg(not(target_os = "android"))]
+#[inline]
+pub fn velopack_app() -> velopack::VelopackApp<'static> {
+    velopack::VelopackApp::build()
+}
+
 /// Führt VelopackApp::build().run() aus, um Update-/Installations-Hooks vor Tauri-Start abzuarbeiten.
 #[inline]
 pub fn velopack_start() {
     #[cfg(not(target_os = "android"))]
     {
-        velopack::VelopackApp::build().run();
+        velopack_app().run();
     }
 }
 
@@ -132,7 +141,10 @@ pub async fn installieren(app: &AppHandle) -> Result<(), String> {
     }
 }
 
-/// Startet eine periodische, nicht-blockierende Hintergrund-Prüfung kurz nach dem Start (Zero-Delay Kaltstart).
+/// Startet kurz nach dem Start (Zero-Delay Kaltstart) die nicht-blockierende
+/// Hintergrund-Prüfung. Auf dem Desktop **bereitet sie das Update auch vor**
+/// (still, ohne Aufforderung); auf Android meldet sie die Verfügbarkeit, weil
+/// dort erst ein Klick die APK-Installation auslösen darf.
 pub fn starte_hintergrund_pruefung(app_handle: AppHandle) {
     if !SELBST_AKTUALISIEREN {
         return;
@@ -148,7 +160,11 @@ pub fn starte_hintergrund_pruefung(app_handle: AppHandle) {
             Some(state) => state.inner().clone(),
             None => return,
         };
-        desktop::starte_hintergrund_download(app_handle.clone(), config, state.as_ref().clone());
+        desktop::starte_hintergrund_bereitstellung(
+            app_handle.clone(),
+            config,
+            state.as_ref().clone(),
+        );
     }
 
     #[cfg(target_os = "android")]
@@ -165,7 +181,6 @@ pub fn starte_hintergrund_pruefung(app_handle: AppHandle) {
                                 "notizen": info.notizen
                             });
                             let _ = handle.emit("updater:verfuegbar", &payload);
-                            let _ = handle.emit("mss:update-verfuegbar", &payload);
                         }
                     }
                 });

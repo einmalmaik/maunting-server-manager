@@ -211,12 +211,18 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk
 
+      # Velopack ist der einzige Windows-Installer und -Updater: Tauri baut nur
+      # die App (`bundle.targets: ["app"]`), kein NSIS-Paket und keine
+      # Update-Signatur. Ein zweiter Installer installierte eine Fassung, die
+      # Velopacks UpdateManager nicht kennt.
       - name: Build Tauri app
         working-directory: smart-system
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
+
+      - name: Stage app for Velopack
+        run: |
+          mkdir -p velopack-stage-mss
+          cp smart-system/src-tauri/target/release/MauntingSmartSystem.exe velopack-stage-mss/
 
       - name: Download Previous Velopack Releases (for Delta Updates)
         env:
@@ -239,9 +245,9 @@ jobs:
       - name: Package with Velopack
         run: |
           mkdir -p smart-system-velopack
-          vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "smart-system/src-tauri/target/release" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "mss" --outputDir "smart-system-velopack"
+          vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "velopack-stage-mss" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "mss" --outputDir "smart-system-velopack"
 
-      - name: Sign Velopack feed
+      - name: Sign Velopack feed and Setup.exe for legacy v5.5.1 migration
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -249,8 +255,11 @@ jobs:
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" smart-system-velopack/releases.mss.json
+          for setup in smart-system-velopack/*win-Setup.exe; do
+            npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
+          done
 
-      - name: Collect Windows installer and generate latest.json
+      - name: Collect Velopack installer and Android version manifest
         shell: bash
         env:
           TAG: ${{ steps.version.outputs.tag }}
@@ -468,10 +477,14 @@ jobs:
         run: |
           vorhanden="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
           fehlt=0
+          # Windows-Updates laufen über Velopack: Installer, signierter Feed
+          # und Vollpaket. `latest.json`/`latest-msb.json` dienen sowohl der
+          # Android-Versionsprüfung als auch der automatischen Migration
+          # bestehender v5.5.1-Installationen auf den Velopack-Installer.
           pflicht=(
             "msm-panel-$TAG.tar.gz" "msm-frontend-$TAG.tar.gz" "msm-agent-$TAG.tar.gz" SHA256SUMS
-            MauntingSmartSystem-Setup.exe latest.json MauntingSmartSystem.apk
-            MauntingSmartSystem-Setup.exe.sig releases.mss.json releases.mss.json.sig
+            MauntingSmartSystem-Setup.exe MauntingSmartSystem-Setup.exe.sig latest.json MauntingSmartSystem.apk
+            releases.mss.json releases.mss.json.sig
             "MauntingSmartSystem-${TAG#v}-full.nupkg"
             MauntingPontis-Setup.exe MauntingPontis-Setup.exe.sig latest-msb.json MauntingSecureBrowser.apk
             "Pontis-${TAG#v}-full.nupkg" releases.pontis.json releases.pontis.json.sig

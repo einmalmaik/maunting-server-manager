@@ -4,12 +4,14 @@ import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart'
 import { useTranslation } from 'react-i18next'
 
 import { Button, Switch } from '@/Singra/UI'
+import { istAndroid } from '@/lib/istAndroid'
 import { toast } from '@/stores/toastStore'
 import { OVERLAY_ZUSTAND_TEST } from '../sprachKoordination'
 import {
   konfigAendern,
   overlayTesten,
   setzeStatus,
+  updateHerunterladen,
   updatePruefen,
   type AgentStatus,
 } from '../tauri'
@@ -138,10 +140,21 @@ export function DesktopIntegration({
                 setPrueftUpdate(true)
                 try {
                   const res = await updatePruefen()
-                  if (res.verfuegbar) {
-                    toast.success(t('mss.einstellungen.updateAvailableVersion', { version: res.neue_version }))
-                  } else {
+                  if (!res.verfuegbar) {
                     toast.success(t('mss.einstellungen.updateUpToDate'))
+                    return
+                  }
+                  // Android installiert erst auf ausdrücklichen Klick im Badge.
+                  if (istAndroid()) {
+                    toast.success(t('mss.einstellungen.updateAvailableVersion', { version: res.neue_version }))
+                    return
+                  }
+                  // Windows bereitet still vor; das Badge fordert den Neustart.
+                  try {
+                    await updateHerunterladen()
+                    toast.success(t('mss.einstellungen.updatePreparing', { version: res.neue_version }))
+                  } catch {
+                    toast.error(t('mss.einstellungen.updatePrepareError'))
                   }
                 } catch {
                   toast.error(t('mss.einstellungen.updateCheckError'))

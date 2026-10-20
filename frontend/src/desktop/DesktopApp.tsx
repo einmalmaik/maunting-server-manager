@@ -52,7 +52,6 @@ import { OverlayFenster } from './OverlayFenster'
 import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
-import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
 import { kameraBeobachten } from './vault/kameraSicherung'
@@ -566,7 +565,6 @@ export function DesktopApp() {
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
         <Aufraeumkarte offenerAuftragId={offeneUebernahme} />
-        <UpdateModal />
         <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
@@ -870,19 +868,23 @@ function Hauptseite({
     }
   }, [])
 
+  // Unter Windows hat Rust das Update längst still vorbereitet; der Klick
+  // startet nur den Neustart. Unter Android gibt es diesen Weg nicht, dort
+  // lädt und installiert derselbe Klick die APK (`updater_core::android`).
   async function handleUpdateClick() {
     if (updatePhase === 'bereit') {
       await updateInstallieren()
-    } else {
-      setUpdatePhase('laedt')
-      setUpdateProzent(0)
-      setUpdateFehler(null)
-      try {
-        await updateHerunterladen()
-      } catch (e) {
-        setUpdatePhase('fehler')
-        setUpdateFehler(e instanceof Error ? e.message : String(e))
-      }
+      return
+    }
+    if (!isAndroid) return
+    setUpdatePhase('laedt')
+    setUpdateProzent(0)
+    setUpdateFehler(null)
+    try {
+      await updateHerunterladen()
+    } catch (e) {
+      setUpdatePhase('fehler')
+      setUpdateFehler(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -971,7 +973,7 @@ function Hauptseite({
 
         {/* Rechte Seite: UpdateBadge + Glocke + Profil-Avatar mit Dropdown-Menü */}
         <div className="flex items-center gap-2">
-          {updateInfo && (
+          {updateInfo && (isAndroid || updatePhase === 'bereit') && (
             <UpdateBadge
               neueVersion={updateInfo.version}
               phase={updatePhase}

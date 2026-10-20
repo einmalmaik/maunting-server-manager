@@ -562,7 +562,7 @@ describe('DesktopApp', () => {
     })
   })
 
-  it('meldet ein verfügbares Update, lädt es erst auf Klick und startet erst danach neu', async () => {
+  it('bereitet Updates still vor und fordert erst als fertiges Update zum Neustart auf', async () => {
     invokeMock.mockImplementation((befehl: string) => {
       if (befehl === 'konfig_laden') {
         return Promise.resolve({
@@ -619,30 +619,28 @@ describe('DesktopApp', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
-      expect(eventListeners.get('updater:verfuegbar')?.size).toBeGreaterThan(0)
+      expect(eventListeners.get('updater:bereit')?.size).toBeGreaterThan(0)
     })
+
+    // Eine nur „verfügbare“ Version wird unter Windows nicht beworben: Rust
+    // lädt still im Hintergrund, die Oberfläche fragt nichts ab.
     await act(async () => {
       triggerTauriEvent('updater:verfuegbar', { version: '4.3.4' })
     })
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: /neue version 4\.3\.4 verfügbar/i })).toBeInTheDocument()
-    })
+    expect(screen.queryByRole('button', { name: /version 4\.3\.4/i })).not.toBeInTheDocument()
     expect(invokeMock).not.toHaveBeenCalledWith('update_herunterladen')
     expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
 
-    fireEvent.click(screen.getByRole('button', { name: /neue version 4\.3\.4 verfügbar/i }))
-    await waitFor(() => {
-      expect(invokeMock).toHaveBeenCalledWith('update_herunterladen')
-    })
-    expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
-
+    // Fertig vorbereitet: das Badge bietet nur noch den Neustart an.
     await act(async () => {
       triggerTauriEvent('updater:bereit', { version: '4.3.4' })
     })
-    fireEvent.click(screen.getByRole('button', { name: /version 4\.3\.4 ist einsatzbereit/i }))
+    const knopf = await screen.findByRole('button', { name: /version 4\.3\.4 ist einsatzbereit/i })
+    fireEvent.click(knopf)
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('update_installieren')
     })
+    expect(invokeMock).not.toHaveBeenCalledWith('update_herunterladen')
   })
 
   it('zeigt im Offline-Modus nur Tresor, Notizen und Kalender und behält den lokalen Account', async () => {

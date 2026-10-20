@@ -28,12 +28,6 @@ pub async fn update_installieren(app: AppHandle) -> Result<(), String> {
     updater_core::installieren(&app).await
 }
 
-/// Startet die App neu.
-#[tauri::command]
-pub fn app_neu_starten(app: AppHandle) {
-    app.restart();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

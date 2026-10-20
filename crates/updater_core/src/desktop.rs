@@ -20,7 +20,20 @@ const MAX_FEED_BYTES: u64 = 8 * 1024 * 1024;
 pub struct DesktopUpdateState {
     pending_update: Arc<Mutex<Option<VpkUpdateInfo>>>,
     pending_restart: Arc<Mutex<Option<String>>>,
-    background_running: Arc<Mutex<bool>>,
+    /// Ein Download zur Zeit: Hintergrund und manueller Anstoß (Einstellungen)
+    /// können sonst dieselbe Datei gleichzeitig schreiben.
+    bereitet_vor: Arc<Mutex<bool>>,
+}
+
+/// Setzt die Downloadsperre zurück, auch wenn der Lauf mit einem Fehler endet.
+struct VorbereitungLaeuft<'a>(&'a Arc<Mutex<bool>>);
+
+impl Drop for VorbereitungLaeuft<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut laeuft) = self.0.lock() {
+            *laeuft = false;
+        }
+    }
 }
 
 /// GitHub source whose Velopack feed and signature are verified before parsing.
@@ -309,6 +322,20 @@ pub async fn lade_desktop_update(
     config: &UpdateConfig,
     state: &DesktopUpdateState,
 ) -> Result<(), String> {
+    // Läuft schon eine Vorbereitung (Hintergrund oder Einstellungen), meldet
+    // sie das Ergebnis selbst; ein zweiter Lauf ist ein No-op.
+    {
+        let mut laeuft = state
+            .bereitet_vor
+            .lock()
+            .map_err(|_| "Update-Lock-Fehler".to_string())?;
+        if *laeuft {
+            return Ok(());
+        }
+        *laeuft = true;
+    }
+    let _wache = VorbereitungLaeuft(&state.bereitet_vor);
+
     let manager = update_manager(config)?;
     let updates = state
         .pending_update
@@ -321,10 +348,6 @@ pub async fn lade_desktop_update(
         "updater:status",
         serde_json::json!({ "status": "laedt", "prozent": 0 }),
     );
-    let _ = app.emit(
-        "mss:update-status",
-        serde_json::json!({ "status": "laedt", "prozent": 0 }),
-    );
 
     let (tx, rx) = mpsc::channel::<i16>();
     let progress_app = app.clone();
@@ -333,7 +356,6 @@ pub async fn lade_desktop_update(
             let payload =
                 serde_json::json!({ "status": "laedt", "prozent": percent.clamp(0, 100) as u32 });
             let _ = progress_app.emit("updater:status", &payload);
-            let _ = progress_app.emit("mss:update-status", &payload);
         }
     });
     let result =
@@ -349,15 +371,7 @@ pub async fn lade_desktop_update(
         .map_err(|_| "Update-Lock-Fehler".to_string())? = Some(version.clone());
     let _ = app.emit("updater:bereit", serde_json::json!({ "version": version }));
     let _ = app.emit(
-        "mss:update-bereit",
-        serde_json::json!({ "version": version }),
-    );
-    let _ = app.emit(
         "updater:status",
-        serde_json::json!({ "status": "bereit", "prozent": 100 }),
-    );
-    let _ = app.emit(
-        "mss:update-status",
         serde_json::json!({ "status": "bereit", "prozent": 100 }),
     );
     Ok(())
@@ -389,7 +403,14 @@ pub async fn installiere_desktop_update(state: &DesktopUpdateState) -> Result<()
         .map_err(|e| format!("Fehler beim Anwenden des Updates und Neustart: {e}"))
 }
 
-pub fn starte_hintergrund_download(
+/// Prüft kurz nach dem Start und **bereitet** ein gefundenes Update still vor:
+/// Download und Prüfsumme laufen ohne Hinweis, gemeldet wird erst `updater:bereit`,
+/// wenn nur noch der Neustart fehlt. Es gibt keine „Update verfügbar“-Meldung
+/// mehr, die zum Herunterladen auffordert — das Badge erscheint erst danach.
+///
+/// Velopack wendet ein so vorbereitetes Paket beim nächsten Start selbst an
+/// (`VelopackApp` mit Standard-Auto-Apply); der Knopf im Badge startet sofort neu.
+pub fn starte_hintergrund_bereitstellung(
     app: AppHandle,
     config: UpdateConfig,
     state: DesktopUpdateState,
@@ -398,34 +419,30 @@ pub fn starte_hintergrund_download(
         let _ = tauri::async_runtime::block_on(async move {
             std::thread::sleep(std::time::Duration::from_secs(45));
             loop {
-                let already_running = match state.background_running.lock() {
-                    Ok(mut running) if !*running => {
-                        *running = true;
-                        false
+                // Liegt schon ein Paket für den Neustart bereit, gibt es nichts zu tun.
+                let schon_bereit = state
+                    .pending_restart
+                    .lock()
+                    .map(|restart| restart.is_some())
+                    .unwrap_or(true);
+                if !schon_bereit {
+                    match pruefe_desktop_update(&app, &config, &state).await {
+                        Ok(info) if info.verfuegbar => {
+                            if let Err(error) =
+                                lade_desktop_update(&app, &config, &state).await
+                            {
+                                let failure =
+                                    serde_json::json!({ "status": "fehler", "fehler": error });
+                                let _ = app.emit("updater:status", &failure);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            let failure =
+                                serde_json::json!({ "status": "fehler", "fehler": error });
+                            let _ = app.emit("updater:status", &failure);
+                        }
                     }
-                    _ => true,
-                };
-                if already_running {
-                    std::thread::sleep(std::time::Duration::from_secs(2 * 3600));
-                    continue;
-                }
-
-                match pruefe_desktop_update(&app, &config, &state).await {
-                    Ok(info) if info.verfuegbar => {
-                        let version = info.neue_version.clone().unwrap_or_default();
-                        let payload = serde_json::json!({ "version": version });
-                        let _ = app.emit("updater:verfuegbar", &payload);
-                        let _ = app.emit("mss:update-verfuegbar", &payload);
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        let failure = serde_json::json!({ "status": "fehler", "fehler": error });
-                        let _ = app.emit("updater:status", &failure);
-                        let _ = app.emit("mss:update-status", &failure);
-                    }
-                }
-                if let Ok(mut running) = state.background_running.lock() {
-                    *running = false;
                 }
                 std::thread::sleep(std::time::Duration::from_secs(2 * 3600));
             }
@@ -436,7 +453,309 @@ pub fn starte_hintergrund_download(
 #[cfg(test)]
 mod tests {
     use super::SignedGithubSource;
-    use velopack::VelopackAsset;
+    use velopack::sources::UpdateSource;
+    use velopack::{VelopackAsset, VelopackAssetFeed};
+
+    /// Feed, Signatur, Paket und Schlüssel stammen aus `tauri signer sign --app-version`
+    /// (CLI 2.12.1) und liegen unter `tests/fixtures/velopack`. Der Testschlüssel
+    /// ist ein Wegwerfschlüssel; der Vertrauensanker im Betrieb bleibt
+    /// `FEED_PUBLIC_KEY`.
+    const FEED: &str = include_str!("../tests/fixtures/velopack/feed.json");
+    const FEED_SIGNATUR: &str = include_str!("../tests/fixtures/velopack/feed.sig");
+    const FEED_SIGNATUR_FALSCHE_VERSION: &str =
+        include_str!("../tests/fixtures/velopack/feed.falsche-version.sig");
+    const FEED_SIGNATUR_FREMDER_SCHLUESSEL: &str =
+        include_str!("../tests/fixtures/velopack/feed.fremder-schluessel.sig");
+    const TEST_SCHLUESSEL: &str = include_str!("../tests/fixtures/velopack/test-schluessel.pub");
+    const FREMDER_SCHLUESSEL: &str =
+        include_str!("../tests/fixtures/velopack/fremder-schluessel.pub");
+    const PAKET: &[u8] = include_bytes!("../tests/fixtures/velopack/paket.bin");
+
+    /// Steht für GitHub, das bei einem fehlenden Asset 404 antwortet.
+    mod server {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread::JoinHandle;
+        use std::time::Duration;
+
+        pub struct FeedServer {
+            pub base_url: String,
+            stop: Arc<AtomicBool>,
+            lauf: Option<JoinHandle<()>>,
+        }
+
+        impl FeedServer {
+            pub fn starte(antworten: Vec<(String, Vec<u8>)>) -> Self {
+                let listener = TcpListener::bind("127.0.0.1:0").expect("freier Port");
+                let adresse = listener.local_addr().expect("Adresse");
+                listener.set_nonblocking(true).expect("nicht blockierend");
+                let stop = Arc::new(AtomicBool::new(false));
+                let wache = Arc::clone(&stop);
+                let lauf = std::thread::spawn(move || {
+                    while !wache.load(Ordering::Relaxed) {
+                        match listener.accept() {
+                            Ok((strom, _)) => bediene(strom, &antworten),
+                            Err(_) => std::thread::sleep(Duration::from_millis(5)),
+                        }
+                    }
+                });
+                Self {
+                    base_url: format!("http://{adresse}"),
+                    stop,
+                    lauf: Some(lauf),
+                }
+            }
+        }
+
+        impl Drop for FeedServer {
+            fn drop(&mut self) {
+                self.stop.store(true, Ordering::Relaxed);
+                if let Some(lauf) = self.lauf.take() {
+                    let _ = lauf.join();
+                }
+            }
+        }
+
+        fn bediene(mut strom: TcpStream, antworten: &[(String, Vec<u8>)]) {
+            let mut kopf = Vec::new();
+            let mut puffer = [0_u8; 512];
+            while !kopf.windows(4).any(|fenster| fenster == b"\r\n\r\n") {
+                match strom.read(&mut puffer) {
+                    Ok(0) | Err(_) => return,
+                    Ok(gelesen) => kopf.extend_from_slice(&puffer[..gelesen]),
+                }
+            }
+            let kopf = String::from_utf8_lossy(&kopf);
+            let pfad = kopf
+                .lines()
+                .next()
+                .and_then(|zeile| zeile.split(' ').nth(1))
+                .unwrap_or_default()
+                .trim_start_matches('/')
+                .to_string();
+            let ergebnis = match antworten.iter().find(|(name, _)| *name == pfad) {
+                Some((_, inhalt)) => {
+                    let kopfzeilen = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        inhalt.len()
+                    );
+                    strom
+                        .write_all(kopfzeilen.as_bytes())
+                        .and_then(|_| strom.write_all(inhalt))
+                }
+                None => strom.write_all(
+                    b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ),
+            };
+            let _ = ergebnis.and_then(|_| strom.flush());
+        }
+    }
+
+    fn quelle(server: &server::FeedServer, schluessel: &str) -> SignedGithubSource {
+        SignedGithubSource {
+            download_base: server.base_url.clone(),
+            trusted_key: minisign_verify::PublicKey::decode(schluessel.trim())
+                .expect("Test-Schlüssel ist lesbar"),
+            package_id: "Pontis",
+            package_prefix: "Pontis-",
+        }
+    }
+
+    fn paket_asset() -> VelopackAsset {
+        paket_asset_mit(PAKET, PAKET.len() as u64)
+    }
+
+    fn paket_asset_mit(hash_daten: &[u8], groesse: u64) -> VelopackAsset {
+        use sha2::Digest;
+        VelopackAsset {
+            PackageId: "Pontis".to_string(),
+            Version: "5.5.2".to_string(),
+            Type: "Full".to_string(),
+            FileName: "Pontis-5.5.2-full.nupkg".to_string(),
+            SHA256: sha2::Sha256::digest(hash_daten)
+                .iter()
+                .map(|byte| format!("{byte:02X}"))
+                .collect(),
+            Size: groesse,
+            ..Default::default()
+        }
+    }
+
+    fn zielordner(name: &str) -> std::path::PathBuf {
+        let ordner =
+            std::env::temp_dir().join(format!("updater_core_{}_{name}", std::process::id()));
+        std::fs::create_dir_all(&ordner).expect("Zielordner");
+        ordner
+    }
+
+    fn feed_von(signatur: &str) -> Result<VelopackAssetFeed, velopack::Error> {
+        let server = server::FeedServer::starte(vec![
+            ("releases.pontis.json".to_string(), FEED.as_bytes().to_vec()),
+            (
+                "releases.pontis.json.sig".to_string(),
+                signatur.trim().as_bytes().to_vec(),
+            ),
+        ]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        quelle.get_release_feed("pontis", &velopack::bundle::Manifest::default(), "")
+    }
+
+    /// Der Betriebsweg: Feed und Signatur über HTTP, Prüfung gegen den
+    /// hinterlegten Schlüssel, Bindung der Signatur an die App-Version.
+    #[test]
+    fn nimmt_einen_echt_signierten_feed_an() {
+        let feed = feed_von(FEED_SIGNATUR).expect("signierter Feed");
+        assert_eq!(feed.Assets.len(), 2);
+        assert_eq!(feed.Assets[0].FileName, "Pontis-5.5.2-full.nupkg");
+        assert_eq!(feed.Assets[0].Version, "5.5.2");
+        assert_eq!(feed.Assets[1].Type, "Delta");
+    }
+
+    #[test]
+    fn weist_einen_feed_ohne_signatur_ab() {
+        let server = server::FeedServer::starte(vec![(
+            "releases.pontis.json".to_string(),
+            FEED.as_bytes().to_vec(),
+        )]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let fehler = quelle
+            .get_release_feed("pontis", &velopack::bundle::Manifest::default(), "")
+            .expect_err("ohne Signatur kein Feed");
+        assert!(
+            fehler.to_string().contains("nicht erreichbar"),
+            "unerwarteter Fehler: {fehler}"
+        );
+    }
+
+    #[test]
+    fn weist_einen_nach_traeumt_signierten_feed_ab() {
+        let manipuliert = FEED.replace("Pontis-5.5.2-full.nupkg", "Pontis-5.5.2-delta.nupkg");
+        let server = server::FeedServer::starte(vec![
+            ("releases.pontis.json".to_string(), manipuliert.into_bytes()),
+            (
+                "releases.pontis.json.sig".to_string(),
+                FEED_SIGNATUR.trim().as_bytes().to_vec(),
+            ),
+        ]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let fehler = quelle
+            .get_release_feed("pontis", &velopack::bundle::Manifest::default(), "")
+            .expect_err("manipulierter Feed");
+        assert!(
+            fehler
+                .to_string()
+                .contains("Signaturprüfung fehlgeschlagen"),
+            "unerwarteter Fehler: {fehler}"
+        );
+    }
+
+    #[test]
+    fn weist_eine_signatur_eines_fremden_schluessels_ab() {
+        let fehler = feed_von(FEED_SIGNATUR_FREMDER_SCHLUESSEL).expect_err("fremde Signatur");
+        assert!(
+            fehler
+                .to_string()
+                .contains("Signaturprüfung fehlgeschlagen"),
+            "unerwarteter Fehler: {fehler}"
+        );
+    }
+
+    /// `tauri signer sign --app-version` bindet die Version in den signierten
+    /// Kommentar. Steht sie nicht im Feed, ist der Feed nicht der gemeinte.
+    #[test]
+    fn weist_eine_signatur_fuer_eine_andere_app_version_ab() {
+        let fehler = feed_von(FEED_SIGNATUR_FALSCHE_VERSION)
+            .expect_err("Signatur passt zu keiner Version im Feed");
+        assert!(
+            fehler
+                .to_string()
+                .contains("signierte Version ist nicht im Velopack-Feed enthalten"),
+            "unerwarteter Fehler: {fehler}"
+        );
+    }
+
+    #[test]
+    fn laedt_das_signierte_paket_und_meldet_den_fortschritt() {
+        let server = server::FeedServer::starte(vec![(
+            "Pontis-5.5.2-full.nupkg".to_string(),
+            PAKET.to_vec(),
+        )]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let ziel = zielordner("richtig").join("Pontis-5.5.2-full.nupkg");
+        let (sender, empfaenger) = std::sync::mpsc::channel();
+        quelle
+            .download_release_entry(&paket_asset(), &ziel, Some(sender))
+            .expect("Paket geladen");
+        assert_eq!(std::fs::read(&ziel).expect("Paket liegt bereit"), PAKET);
+        assert_eq!(empfaenger.recv().expect("Fortschritt"), 100);
+        let _ = std::fs::remove_file(&ziel);
+    }
+
+    #[test]
+    fn weist_ein_paket_mit_falscher_pruefsumme_ab() {
+        let server = server::FeedServer::starte(vec![(
+            "Pontis-5.5.2-full.nupkg".to_string(),
+            PAKET.to_vec(),
+        )]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let ziel = zielordner("hash").join("Pontis-5.5.2-full.nupkg");
+        let fehler = quelle
+            .download_release_entry(
+                &paket_asset_mit(b"anderes Paket", PAKET.len() as u64),
+                &ziel,
+                None,
+            )
+            .expect_err("falsche Prüfsumme");
+        assert!(
+            fehler.to_string().contains("Paket-Hash"),
+            "unerwarteter Fehler: {fehler}"
+        );
+        assert!(!ziel.exists(), "abgelehntes Paket bleibt nicht liegen");
+    }
+
+    #[test]
+    fn weist_ein_paket_mit_falscher_groesse_ab() {
+        let server = server::FeedServer::starte(vec![(
+            "Pontis-5.5.2-full.nupkg".to_string(),
+            PAKET.to_vec(),
+        )]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let ziel = zielordner("groesse").join("Pontis-5.5.2-full.nupkg");
+        let mut asset = paket_asset();
+        asset.Size = 3;
+        let fehler = quelle
+            .download_release_entry(&asset, &ziel, None)
+            .expect_err("falsche Größe");
+        assert!(
+            fehler.to_string().contains("Paketgröße"),
+            "unerwarteter Fehler: {fehler}"
+        );
+        assert!(!ziel.exists(), "abgelehntes Paket bleibt nicht liegen");
+    }
+
+    #[test]
+    fn laedt_keinen_pfad_ausserhalb_des_paketordners() {
+        let server = server::FeedServer::starte(vec![]);
+        let quelle = quelle(&server, TEST_SCHLUESSEL);
+        let mut asset = paket_asset();
+        asset.FileName = "../../evil-full.nupkg".to_string();
+        let ziel = zielordner("pfad").join("Pontis-5.5.2-full.nupkg");
+        let fehler = quelle
+            .download_release_entry(&asset, &ziel, None)
+            .expect_err("Pfad im Dateinamen");
+        assert!(
+            fehler.to_string().contains("abgelehnt"),
+            "unerwarteter Fehler: {fehler}"
+        );
+    }
+
+    #[test]
+    fn test_schluessel_ist_nicht_der_vertrauensanker_des_betriebs() {
+        assert!(!TEST_SCHLUESSEL.contains("15B13465D5161352"));
+        assert!(!FREMDER_SCHLUESSEL.contains("15B13465D5161352"));
+    }
 
     fn asset(package_id: &str, asset_type: &str, file_name: &str) -> VelopackAsset {
         VelopackAsset {
@@ -448,6 +767,26 @@ mod tests {
             Size: 42,
             ..Default::default()
         }
+    }
+
+    /// Desktop meldet nur noch das fertig vorbereitete Paket. Eine zweite
+    /// Ereignisfamilie mit `mss`-Präfix hatte bis 10/2026 einen eigenen Dialog
+    /// gefüttert, der neben dem Badge zum Herunterladen aufforderte.
+    #[test]
+    fn meldet_nur_bereite_updates_und_nur_unter_einem_ereignisnamen() {
+        let quelle = include_str!("desktop.rs");
+        let verfuegbar = ["updater", "verfuegbar"].join(":");
+        let zweitname = ["mss", "update"].join(":");
+        assert!(!quelle.contains(&verfuegbar));
+        assert!(!quelle.contains(&zweitname));
+        let bereitstellung = quelle
+            .split("pub fn starte_hintergrund_bereitstellung")
+            .nth(1)
+            .unwrap();
+        assert!(
+            bereitstellung.contains("lade_desktop_update"),
+            "die Hintergrundprüfung muss das Update selbst vorbereiten"
+        );
     }
 
     #[test]

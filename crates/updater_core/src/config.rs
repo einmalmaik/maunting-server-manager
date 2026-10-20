@@ -6,7 +6,9 @@ pub struct UpdateConfig {
     pub app_name: &'static str,
     /// Android Package-ID (z. B. "com.mauntingstudios.secure_browser" oder "com.mauntingstudios.smart_system")
     pub android_package: &'static str,
-    /// Statisches Release-Asset JSON (z. B. "latest-msb.json" oder "latest.json")
+    /// Versionsauskunft für **Android** (Version und Hinweise); Windows liest
+    /// sie nicht mehr, dort gilt der signierte Velopack-Feed. Der Name blieb
+    /// `latest-msb.json`/`latest.json`, damit installierte Geräte ihn finden.
     pub asset_json_name: &'static str,
     /// Name der APK-Datei im Release (z. B. "MauntingSecureBrowser.apk" oder "MauntingSmartSystem.apk")
     pub apk_file_name: &'static str,

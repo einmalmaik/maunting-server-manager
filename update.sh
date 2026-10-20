@@ -10,7 +10,8 @@ umask 077
 #  Prüft zuerst GitHub-Releases, falls keine existieren
 #  wird der neueste main-Branch-Commit verwendet.
 #
-#  Für Tauri: derselbe Release-Feed (latest.json auf GitHub).
+#  Die Desktop-Apps aktualisieren sich über Velopack
+#  (releases.mss.json / releases.pontis.json auf GitHub).
 # ═══════════════════════════════════════════════════════════════
 
 MSM_DIR="/opt/msm"

@@ -1,5 +1,8 @@
 import { forwardRef, useState, useEffect, type HTMLAttributes } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Download, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
+
+import { Kurzinfo } from './Kurzinfo'
 
 export type UpdatePhase = 'verfuegbar' | 'laedt' | 'bereit' | 'installiert_android' | 'fehler'
 
@@ -21,9 +24,11 @@ export interface UpdateBadgeProps extends HTMLAttributes<HTMLButtonElement> {
 /**
  * Zentrales UpdateBadge der Maunting Design-DNA.
  *
- * Einheitlicher, barrierefreier Indikator für App-Aktualisierungen (Pontis Browser & MSS).
- * Zeigt den Status unaufdringlich an und führt erst bei bewusster Nutzerinteraktion
- * zur Installation oder zum Neustart. Keine nativen Dialoge oder Popups.
+ * Einheitlicher, barrierefreier Indikator für App-Aktualisierungen (Pontis
+ * Browser & MSS). Unter Windows bereitet die App Aktualisierungen still im
+ * Hintergrund vor; das Badge erscheint deshalb erst als `bereit` und fordert
+ * zum Neustart auf. Unter Android meldet es die Verfügbarkeit und startet auf
+ * Klick die APK-Installation. Keine nativen Dialoge, kein `title`.
  */
 export const UpdateBadge = forwardRef<HTMLButtonElement, UpdateBadgeProps>(
   (
@@ -40,6 +45,7 @@ export const UpdateBadge = forwardRef<HTMLButtonElement, UpdateBadgeProps>(
     },
     ref,
   ) => {
+    const { t } = useTranslation()
     const [animationAktiv, setAnimationAktiv] = useState(false)
 
     useEffect(() => {
@@ -59,6 +65,31 @@ export const UpdateBadge = forwardRef<HTMLButtonElement, UpdateBadgeProps>(
       fehler: 'border-status-destructive/40 bg-status-destructive/15 text-status-destructive hover:bg-status-destructive/25',
     }
 
+    const version = neueVersion ?? ''
+    const titelText =
+      phase === 'fehler'
+        ? (fehlerText ?? t('common.updateBadge.fehlerTitel'))
+        : phase === 'bereit'
+          ? t('common.updateBadge.bereit', { version })
+          : phase === 'laedt'
+            ? t('common.updateBadge.laedt', { prozent })
+            : phase === 'installiert_android'
+              ? t('common.updateBadge.installiertAndroid')
+              : t('common.updateBadge.verfuegbar', { version })
+
+    const kurzText =
+      phase === 'laedt'
+        ? t('common.updateBadge.kurzLaedt', { prozent })
+        : phase === 'bereit'
+          ? t('common.updateBadge.kurzBereit')
+          : phase === 'installiert_android'
+            ? t('common.updateBadge.kurzAndroid')
+            : phase === 'fehler'
+              ? t('common.updateBadge.kurzFehler')
+              : neueVersion
+                ? t('common.updateBadge.kurzVerfuegbar', { version })
+                : t('common.updateBadge.kurzOhneVersion')
+
     const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
       if (onClick) onClick(e)
       if (phase !== 'laedt' && onInstallieren) {
@@ -66,19 +97,10 @@ export const UpdateBadge = forwardRef<HTMLButtonElement, UpdateBadgeProps>(
       }
     }
 
-    const titelText = fehlerText
-      ? fehlerText
-      : phase === 'bereit'
-        ? `Version ${neueVersion ?? ''} ist einsatzbereit. Jetzt neu starten.`
-        : phase === 'laedt'
-          ? `Aktualisierung lädt: ${prozent}%`
-          : `Neue Version ${neueVersion ?? ''} verfügbar. Zum Laden tippen.`
-
-    return (
+    const knopf = (
       <button
         ref={ref}
         type="button"
-        title={titelText}
         aria-label={titelText}
         onClick={handleClick}
         className={`group relative inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all select-none ${statusFarben[phase]} ${
@@ -101,26 +123,22 @@ export const UpdateBadge = forwardRef<HTMLButtonElement, UpdateBadgeProps>(
         )}
 
         {/* Textanzeige */}
-        {!kompakt && (
-          <span className="truncate max-w-[160px]">
-            {phase === 'laedt' && `Lädt ${prozent}%`}
-            {phase === 'verfuegbar' && (neueVersion ? `Update v${neueVersion}` : 'Update verfügbar')}
-            {phase === 'bereit' && 'Neu starten'}
-            {phase === 'installiert_android' && 'Wird installiert'}
-            {phase === 'fehler' && 'Update wiederholen'}
-          </span>
-        )}
+        {!kompakt && <span className="max-w-[160px] truncate">{kurzText}</span>}
 
         {/* Fortschritts-Füllung im Hintergrund beim Laden */}
         {phase === 'laedt' && prozent > 0 && (
           <span
-            className="absolute inset-y-0 left-0 rounded-full bg-status-warning/20 transition-all pointer-events-none"
+            className="pointer-events-none absolute inset-y-0 left-0 rounded-full bg-status-warning/20 transition-all"
             style={{ width: `${Math.min(100, Math.max(0, prozent))}%` }}
             aria-hidden="true"
           />
         )}
       </button>
     )
+
+    // Nur das reine Symbol braucht den Namen zusätzlich in der Kurzinfo; mit
+    // sichtbarem Text steht er da und `aria-label` trägt den vollen Hinweis.
+    return kompakt ? <Kurzinfo text={titelText}>{knopf}</Kurzinfo> : knopf
   },
 )
 

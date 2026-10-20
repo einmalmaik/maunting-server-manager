@@ -149,7 +149,10 @@ pub fn run() {
                 }
                 if !ist_neues_fenster {
                     widget::link_aufnehmen(handle, &args);
-                    updater_core::starte_hintergrund_pruefung(handle.clone());
+                    // Updates prüft die Oberfläche (`aktualisierung.ts`) kurz
+                    // nach dem Start, damit der Schalter „beim Start nach
+                    // Updates suchen“ gilt; unter Windows lädt sie das Paket
+                    // danach still (Velopack), gemeldet wird nur `bereit`.
                 }
             }
             Ok(())
@@ -226,7 +229,6 @@ pub fn run() {
             aktualisieren::update_pruefen,
             aktualisieren::update_herunterladen,
             aktualisieren::update_installieren,
-            aktualisieren::app_neu_starten,
             erweiterungen::erweiterungen_liste,
             erweiterungen::erweiterung_pruefen,
             erweiterungen::erweiterung_installieren,

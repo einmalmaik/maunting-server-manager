@@ -18,7 +18,9 @@ pub async fn update_pruefen(app: AppHandle) -> Result<UpdateInfo, String> {
     updater_core::pruefen(&app).await
 }
 
-/// Lädt das Update im Hintergrund herunter.
+/// Bereitet das Update vor. Unter Windows tut das die Hintergrundprüfung von
+/// selbst (still, ohne Aufforderung, alle zwei Stunden); der Befehl bleibt für
+/// Android, wo `update_herunterladen` die APK lädt und installiert.
 #[tauri::command(async)]
 pub async fn update_herunterladen(app: AppHandle) -> Result<(), String> {
     updater_core::herunterladen(&app).await
@@ -36,7 +38,8 @@ pub fn app_neu_starten(app: AppHandle) {
     app.restart();
 }
 
-/// Startet die nicht-blockierende Hintergrund-Prüfung nach dem Kaltstart.
+/// Startet nach dem Kaltstart die stille Hintergrund-Bereitstellung: prüfen,
+/// laden, prüfen — gemeldet wird erst das fertige Paket (`updater:bereit`).
 pub fn pruefe_und_installiere_update_hintergrund(app_handle: AppHandle) {
     updater_core::starte_hintergrund_pruefung(app_handle);
 }

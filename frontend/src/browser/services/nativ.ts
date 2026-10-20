@@ -22,6 +22,16 @@ export function istTauri(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
+/** Antwort von `update_pruefen` (`updater_core::UpdateInfo`). */
+export interface UpdateInfo {
+  verfuegbar: boolean
+  aktuelle_version: string
+  neue_version: string | null
+  download_url: string | null
+  notizen: string | null
+  ist_android: boolean
+}
+
 async function rufen<T = void>(befehl: string, args?: Record<string, unknown>): Promise<T | null> {
   if (!istTauri()) return null
   try {
@@ -270,11 +280,11 @@ export const nativ = {
   /** Schickt das Foto des Widgets im Tab `id` an die Bildsuche. */
   bildsuche: (id: string, privat: boolean, bild: { url: string; feld: string; base64?: boolean }) =>
     nacheinander('bildsuche', { id, privat, url: bild.url, feld: bild.feld, base64: bild.base64 ?? false }),
-  /** Die neuere Version aus dem jüngsten Release, sonst `null` (`aktualisieren.rs`). */
-  updatePruefen: () => rufen<string | null>('update_pruefen'),
-  /** Lädt das Update nach erfolgreicher Hintergrundprüfung herunter. */
+  /** Fragt den signierten Velopack-Feed, ob eine neuere Version da ist. */
+  updatePruefen: () => rufen<UpdateInfo>('update_pruefen'),
+  /** Lädt das Update still im Hintergrund (Android: startet die APK-Installation). */
   updateHerunterladen: () => rufen('update_herunterladen'),
-  /** Installiert das vorbereitete Update und startet den Browser neu. */
+  /** Wendet das vorbereitete Update an und startet den Browser neu. */
   updateInstallieren: () => rufen('update_installieren'),
 }
 

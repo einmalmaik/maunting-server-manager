@@ -79,12 +79,18 @@ jobs:
       - name: Install Velopack CLI
         run: dotnet tool install -g vpk
 
-      - name: Build installer
+      # Velopack ist der einzige Windows-Installer und -Updater: Tauri baut nur
+      # die App (`bundle.targets: ["app"]`), kein NSIS-Paket und keine
+      # Update-Signatur. Die Standardbrowser-Anmeldung schreiben jetzt die
+      # Velopack-Hooks (`main.rs`), nicht mehr `windows/hooks.nsh`.
+      - name: Build app
         working-directory: browser
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build
+
+      - name: Stage app for Velopack
+        run: |
+          mkdir -p velopack-stage-msb
+          cp browser/src-tauri/target/release/MauntingPontis.exe velopack-stage-msb/
 
       - name: Download Previous Velopack Releases (for Delta Updates)
         env:
@@ -101,9 +107,9 @@ jobs:
       - name: Package with Velopack
         run: |
           mkdir -p browser-velopack
-          vpk pack --packId "Pontis" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "browser/src-tauri/target/release" --mainExe "MauntingPontis.exe" --icon "browser/src-tauri/icons/icon.ico" --splashImage "browser/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "pontis" --outputDir "browser-velopack"
+          vpk pack --packId "Pontis" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "velopack-stage-msb" --mainExe "MauntingPontis.exe" --icon "browser/src-tauri/icons/icon.ico" --splashImage "browser/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "pontis" --outputDir "browser-velopack"
 
-      - name: Sign Velopack feed
+      - name: Sign Velopack feed and Setup.exe for legacy v5.5.1 migration
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -111,8 +117,11 @@ jobs:
         run: |
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" browser-velopack/releases.pontis.json
+          for setup in browser-velopack/*win-Setup.exe; do
+            npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
+          done
 
-      - name: Collect installer and latest-msb.json
+      - name: Collect Velopack installer and Android version manifest
         shell: bash
         run: python scripts/collect-browser-artifacts.py "${{ steps.version.outputs.tag }}"
 

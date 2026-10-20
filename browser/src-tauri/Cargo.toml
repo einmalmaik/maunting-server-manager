@@ -45,8 +45,6 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"] 
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"
-# Updates unter Windows (`aktualisieren.rs`), dasselbe Plugin wie im Smart System.
-tauri-plugin-updater = "2"
 # Ein Link von außen öffnet als Tab im laufenden Browser, nicht als zweites
 # Fenster, das um dasselbe WebView2-Profil streitet (`widget/ohne.rs`).
 tauri-plugin-single-instance = "2"

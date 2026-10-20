@@ -1,8 +1,11 @@
 /**
  * Zentraler Update-Store für Pontis (Browser).
  *
- * Verwaltet den Status der Hintergrund-Prüfung, den Ladefortschritt
- * und steuert die Anzeige des zentralen Design-DNA `UpdateBadge`.
+ * Unter Windows bereitet Rust das Update still im Hintergrund vor
+ * (`updater_core::desktop`); sichtbar wird nur das fertige Paket, dann fordert
+ * das `UpdateBadge` zum Neustart auf. Die Ladephase bleibt unsichtbar, ein
+ * Fehler erscheint am Badge und lässt sich von dort wiederholen. Unter Android
+ * meldet sich die Verfügbarkeit als Meldung (`aktualisierung.ts`).
  */
 import { create } from 'zustand'
 import { listen } from '@tauri-apps/api/event'
@@ -11,15 +14,6 @@ import { istTauri } from './nativ'
 
 export type UpdatePhase = 'verfuegbar' | 'laedt' | 'bereit' | 'installiert_android' | 'fehler'
 
-export interface UpdateInfo {
-  verfuegbar: boolean
-  aktuelle_version: string
-  neue_version: string | null
-  download_url: string | null
-  notizen: string | null
-  ist_android: boolean
-}
-
 export interface UpdateStatusEvent {
   status: 'laedt' | 'bereit' | 'installiert_android' | 'fehler'
   prozent?: number
@@ -27,15 +21,14 @@ export interface UpdateStatusEvent {
 }
 
 interface UpdateStoreZustand {
+  /** Nur ein fertig vorbereitetes Update oder ein Fehler werden gezeigt. */
   sichtbar: boolean
   neueVersion: string | null
   phase: UpdatePhase
   prozent: number
   fehlerText: string | null
   initialisiert: boolean
-  pruefen: () => Promise<void>
   installieren: () => Promise<void>
-  schliessen: () => void
   initialisiereLauscher: () => void
 }
 
@@ -54,93 +47,76 @@ export const useUpdateStore = create<UpdateStoreZustand>((set, get) => ({
 
     set({ initialisiert: true })
 
-    // Auf Hintergrund-Events lauschen
     try {
+      // Eine nur verfügbare Version wird nicht beworben: Rust lädt sie still.
       void listen<{ version: string; notizen?: string }>('updater:verfuegbar', (event) => {
-      set({
-        sichtbar: true,
-        neueVersion: event.payload.version,
-        phase: 'verfuegbar',
-        prozent: 0,
-        fehlerText: null,
-      })
-    })
-
-    void listen<{ version: string }>('updater:bereit', (event) => {
-      set({
-        sichtbar: true,
-        neueVersion: event.payload.version,
-        phase: 'bereit',
-        prozent: 100,
-        fehlerText: null,
-      })
-    })
-
-    void listen<UpdateStatusEvent>('updater:status', (event) => {
-      if (event.payload.status === 'laedt') {
         set({
-          sichtbar: true,
-          phase: 'laedt',
-          prozent: event.payload.prozent ?? 0,
+          neueVersion: event.payload.version,
+          phase: 'verfuegbar',
+          prozent: 0,
           fehlerText: null,
+          sichtbar: false,
         })
-      } else if (event.payload.status === 'bereit') {
+      })
+
+      void listen<{ version: string }>('updater:bereit', (event) => {
         set({
           sichtbar: true,
+          neueVersion: event.payload.version,
           phase: 'bereit',
           prozent: 100,
           fehlerText: null,
         })
-      } else if (event.payload.status === 'installiert_android') {
-        set({
-          sichtbar: true,
-          phase: 'installiert_android',
-          fehlerText: null,
-        })
-      } else if (event.payload.status === 'fehler') {
-        set({
-          sichtbar: true,
-          phase: 'fehler',
-          fehlerText: event.payload.fehler ?? 'Fehler beim Update',
-        })
-      }
-    })
+      })
+
+      void listen<UpdateStatusEvent>('updater:status', (event) => {
+        if (event.payload.status === 'laedt') {
+          set({
+            phase: 'laedt',
+            prozent: event.payload.prozent ?? 0,
+            fehlerText: null,
+            sichtbar: false,
+          })
+        } else if (event.payload.status === 'bereit') {
+          set({
+            sichtbar: true,
+            phase: 'bereit',
+            prozent: 100,
+            fehlerText: null,
+          })
+        } else if (event.payload.status === 'installiert_android') {
+          set({
+            phase: 'installiert_android',
+            fehlerText: null,
+            sichtbar: false,
+          })
+        } else if (event.payload.status === 'fehler') {
+          set({
+            sichtbar: true,
+            phase: 'fehler',
+            fehlerText: event.payload.fehler ?? null,
+          })
+        }
+      })
     } catch {
       // Ignoriert in Testumgebungen ohne vollständigen Webview-Eventkanal
     }
   },
 
-  pruefen: async () => {
-    if (!istTauri()) return
-    try {
-      const info = await invoke<UpdateInfo>('update_pruefen')
-      if (info && info.verfuegbar && info.neue_version) {
-        set({
-          sichtbar: true,
-          neueVersion: info.neue_version,
-          phase: 'verfuegbar',
-          prozent: 0,
-          fehlerText: null,
-        })
-      }
-    } catch {
-      // Stille Behandlung bei Verbindungsproblemen
-    }
-  },
-
   installieren: async () => {
     if (!istTauri()) return
-    const installieren = get().phase === 'bereit'
-    set({ phase: 'laedt', prozent: 0, fehlerText: null })
+    // „bereit“ heißt: nur noch neu starten. Nach einem Fehler lädt der Klick
+    // erneut; unter Android startet `update_herunterladen` die APK-Installation.
+    const bereit = get().phase === 'bereit'
+    set({ phase: 'laedt', prozent: 0, fehlerText: null, sichtbar: false })
     try {
-      await invoke(installieren ? 'update_installieren' : 'update_herunterladen')
+      await invoke(bereit ? 'update_installieren' : 'update_herunterladen')
     } catch (e) {
       set({
+        sichtbar: true,
         phase: 'fehler',
         fehlerText: e instanceof Error ? e.message : String(e),
       })
     }
   },
-
-  schliessen: () => set({ sichtbar: false }),
 }))

@@ -1028,7 +1028,8 @@ pub fn run() {
                     konfig.discord_state,
                 );
             }
-            // Automatischer Updater: prüft asynchron im Hintergrund auf neuere GitHub Releases
+            // Automatischer Updater: prüft im Hintergrund und bereitet ein
+            // neueres Velopack-Paket still vor (gemeldet wird erst `bereit`).
             updater::pruefe_und_installiere_update_hintergrund(app.handle().clone());
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.
