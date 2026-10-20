@@ -228,6 +228,22 @@ def test_release_prueft_das_vollpaket_mit_kanal_im_namen() -> None:
     assert "MauntingSmartSystem-${TAG#v}-full.nupkg" not in pruefung
 
 
+def test_ein_zweiter_lauf_fuer_denselben_tag_laedt_kein_delta() -> None:
+    """Beim Wiederholen eines Tags liegt das eigene Paket schon im Release.
+
+    `vpk download` holte es als "vorheriges", und `vpk pack` brach mit "exists"
+    ab; beim Smart System fehlte zudem der Zielordner vor dem Schreiben des
+    Feeds (20.10.2026, v5.6.0). Jetzt bauen beide Apps ohne Delta.
+    """
+    for name in ("release-artifacts.yml", "browser-build.yml"):
+        text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        assert '!= "${{ steps.version.outputs.clean_version }}"' in text, name
+    release = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "mkdir -p smart-system-velopack" in release
+
+
 def test_beide_apps_signieren_mit_derselben_tauri_cli() -> None:
     """Feed und Setup.exe signiert die CLI aus dem eigenen `npm ci` der App.
 

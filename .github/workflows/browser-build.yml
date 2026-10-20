@@ -100,10 +100,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           previous_feed="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[].name] | any(. == "releases.pontis.json") | select(.)')"
+          previous_version=""
           if [[ -n "$previous_feed" ]]; then
+            previous_version="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.pontis.json"))] | last | .tag_name // empty' | sed 's/^v//')"
+          fi
+          # Ein zweiter Lauf fuer denselben Tag findet das eigene Paket als
+          # "vorheriges"; vpk pack bricht dann mit "exists" ab (20.10.2026).
+          if [[ -n "$previous_version" && "$previous_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
             vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "browser-velopack" --channel "pontis"
           else
-            echo "Kein vorheriger Pontis-Feed; das erste Paket wird als Vollpaket erstellt."
+            echo "Kein aelterer Pontis-Feed; das Paket wird als Vollpaket gebaut."
           fi
 
       - name: Package with Velopack
