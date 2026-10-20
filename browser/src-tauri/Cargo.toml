@@ -1,6 +1,6 @@
 [package]
 name = "maunting-secure-browser"
-version = "5.5.1"
+version = "5.6.0"
 description = "Maunting Pontis auf Tauri v2"
 edition = "2021"
 rust-version = "1.88"
@@ -20,6 +20,7 @@ tauri-plugin-dialog = "2"
 # System (`tabs::weg::extern_oeffnen`); derselbe offizielle Weg wie im Smart System.
 tauri-plugin-opener = "2"
 schluesselfach = { path = "../../crates/schluesselfach" }
+updater_core = { path = "../../crates/updater_core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
@@ -44,8 +45,6 @@ image = { version = "0.25", default-features = false, features = ["png", "ico"] 
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 keyring = "4"
-# Updates unter Windows (`aktualisieren.rs`), dasselbe Plugin wie im Smart System.
-tauri-plugin-updater = "2"
 # Ein Link von außen öffnet als Tab im laufenden Browser, nicht als zweites
 # Fenster, das um dasselbe WebView2-Profil streitet (`widget/ohne.rs`).
 tauri-plugin-single-instance = "2"
@@ -95,9 +94,15 @@ jni = "0.21"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 webpki-roots = "1"
 
+[features]
+# This feature is used for production builds or when a dev server is not
+# specified, DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]
+
 # Das Schild prüft jede Anfrage auf dem UI-Faden der WebView2. Ohne Optimierung
 # brauchte die Engine dafür bis 57 ms je Anfrage, und `tauri dev` stand beim
 # Laden einer Seite über eine Sekunde lang (10/2026). Abhängigkeiten werden
 # deshalb auch im Entwicklungsbau optimiert.
 [profile.dev.package."*"]
 opt-level = 3
+

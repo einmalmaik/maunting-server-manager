@@ -8,6 +8,7 @@ import { DATENSCHUTZ_VERSION } from '@/pages/datenschutzStand'
 import { installieren, updatesMoeglich } from '../services/aktualisierung'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { istTauri, nativ } from '../services/nativ'
+import { istAndroid } from '../services/plattform'
 import { useTabsStore } from '../services/tabsStore'
 import { Abschnitt, Aktionszeile, Schalterzeile } from './bausteine'
 import { DATENSCHUTZ_TEIL } from './kategorien'
@@ -40,7 +41,13 @@ export function Ueber() {
   )
 }
 
-type Stand = { art: 'offen' } | { art: 'sucht' } | { art: 'aktuell' } | { art: 'neu'; version: string } | { art: 'fehler' }
+type Stand =
+  | { art: 'offen' }
+  | { art: 'sucht' }
+  | { art: 'aktuell' }
+  | { art: 'neu'; version: string }
+  | { art: 'bereit'; version: string }
+  | { art: 'fehler' }
 
 function Updates() {
   const { t } = useTranslation()
@@ -48,22 +55,37 @@ function Updates() {
   const setzen = useEinstellungenStore((s) => s.setzen)
   const [stand, setStand] = useState<Stand>({ art: 'offen' })
 
-  const pruefen = () => {
+  // Windows bereitet hier nur vor; installiert wird über das Badge (Neustart).
+  // Android behält den Knopf, weil dort erst der System-Dialog installiert.
+  const pruefen = async () => {
     setStand({ art: 'sucht' })
-    nativ
-      .updatePruefen()
-      .then((neu) => setStand(neu ? { art: 'neu', version: neu } : { art: 'aktuell' }))
-      .catch(() => setStand({ art: 'fehler' }))
+    try {
+      const info = await nativ.updatePruefen()
+      if (!info?.verfuegbar || !info.neue_version) {
+        setStand({ art: 'aktuell' })
+        return
+      }
+      if (istAndroid()) {
+        setStand({ art: 'neu', version: info.neue_version })
+        return
+      }
+      await nativ.updateHerunterladen()
+      setStand({ art: 'bereit', version: info.neue_version })
+    } catch {
+      setStand({ art: 'fehler' })
+    }
   }
 
   const hinweis =
     stand.art === 'neu'
       ? t('browser.update.da', { version: stand.version })
-      : stand.art === 'aktuell'
-        ? t('browser.update.aktuell')
-        : stand.art === 'fehler'
-          ? t('browser.update.nichtErreicht')
-          : t('browser.update.hinweis')
+      : stand.art === 'bereit'
+        ? t('browser.update.bereit', { version: stand.version })
+        : stand.art === 'aktuell'
+          ? t('browser.update.aktuell')
+          : stand.art === 'fehler'
+            ? t('browser.update.nichtErreicht')
+            : t('browser.update.hinweis')
 
   return (
     <>
@@ -73,7 +95,7 @@ function Updates() {
             {t('browser.update.installieren')}
           </Button>
         ) : (
-          <Button variant="secondary" size="sm" disabled={stand.art === 'sucht'} onClick={pruefen}>
+          <Button variant="secondary" size="sm" disabled={stand.art === 'sucht'} onClick={() => void pruefen()}>
             {t('browser.update.pruefen')}
           </Button>
         )}

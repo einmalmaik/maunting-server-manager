@@ -1,5 +1,7 @@
 package com.mauntingstudios.smart_system
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -16,14 +18,31 @@ import java.io.FileInputStream
 /**
  * Zuverlässiger APK-Installer für Android:
  * 1. Primär: Android PackageInstaller.Session mit USER_ACTION_NOT_REQUIRED (ab Android 12)
- *    ermöglicht vollautomatische Hintergrund-Updates ohne Nutzerinteraktion für Self-Updates.
- * 2. Sekundär / Fallback: FileProvider-Intent mit content:// URI (Android 7-14+ sicher,
+ *    ermöglicht Self-Updates ohne unnötige Nutzerinteraktion.
+ * 2. Sekundär / Fallback: FileProvider-Intent mit content:// URI (Android 10+ sicher,
  *    verhindert FileUriExposedException).
  */
 object ApkInstaller {
-    private const val TAG = "MsmApkInstaller"
-    const val ACTION_INSTALL_STATUS = "com.mauntingstudios.smart_system.INSTALL_STATUS"
-    const val NOTIFICATION_ID_FALLBACK = 1004
+    private const val TAG = "ApkInstaller"
+    fun getActionInstallStatus(context: Context): String = "${context.packageName}.INSTALL_STATUS"
+    const val KANAL_UPDATES = "app_updates"
+    const val NOTIFICATION_ID_FALLBACK = 2004
+
+    private fun sicherstelleKanal(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            if (nm.getNotificationChannel(KANAL_UPDATES) == null) {
+                val kanal = NotificationChannel(
+                    KANAL_UPDATES,
+                    "Updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Benachrichtigungen zu Aktualisierungen"
+                }
+                nm.createNotificationChannel(kanal)
+            }
+        }
+    }
 
     fun installApk(context: Context, apkPath: String): Boolean {
         val apkFile = File(apkPath)
@@ -32,6 +51,7 @@ object ApkInstaller {
             return false
         }
 
+        sicherstelleKanal(context)
 
         // 1. Primär: PackageInstaller.Session
         try {
@@ -59,7 +79,7 @@ object ApkInstaller {
                 }
 
                 val intent = Intent(context, InstallStatusReceiver::class.java).apply {
-                    action = ACTION_INSTALL_STATUS
+                    action = getActionInstallStatus(context)
                     putExtra("apk_path", apkPath)
                 }
 
@@ -116,7 +136,7 @@ object ApkInstaller {
                 Log.i(TAG, "FileProvider Installation gestartet für: ${apkFile.name}")
                 true
             } catch (e: Exception) {
-                Log.w(TAG, "Direkter Start fehlgeschlagen (Hintergrund-Beschränkung), zeige Notification: ${e.message}")
+                Log.w(TAG, "Direkter Start fehlgeschlagen, zeige Benachrichtigung: ${e.message}")
                 showInstallNotification(context, intent)
                 true
             }
@@ -128,6 +148,7 @@ object ApkInstaller {
 
     fun showInstallNotification(context: Context, intent: Intent) {
         try {
+            sicherstelleKanal(context)
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 NOTIFICATION_ID_FALLBACK,
@@ -139,9 +160,10 @@ object ApkInstaller {
                 }
             )
 
-            val notification = NotificationCompat.Builder(context, Erinnerungen.KANAL)
+            val appName = context.applicationInfo.loadLabel(context.packageManager).toString()
+            val notification = NotificationCompat.Builder(context, KANAL_UPDATES)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle("MSS Update bereit")
+                .setContentTitle("$appName Update bereit")
                 .setContentText("Tippe hier, um die Aktualisierung abzuschließen.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

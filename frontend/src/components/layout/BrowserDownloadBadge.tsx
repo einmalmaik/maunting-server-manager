@@ -38,7 +38,7 @@ export function BrowserDownloadBadge() {
 
   const downloadUrl = isAndroid
     ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
 
   const titleText = isAndroid ? 'Pontis Mobile' : 'Maunting Pontis'
   const subtext = isAndroid

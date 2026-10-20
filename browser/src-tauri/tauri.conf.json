@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Maunting Pontis",
-  "mainBinaryName": "MauntingSecureBrowser",
-  "version": "5.5.1",
+  "mainBinaryName": "MauntingPontis",
+  "version": "5.6.0",
   "identifier": "com.mauntingstudios.secure-browser",
   "build": {
     "beforeDevCommand": "npm --prefix ../frontend run dev:browser",
@@ -33,30 +33,16 @@
   },
   "bundle": {
     "active": true,
-    "createUpdaterArtifacts": true,
     "publisher": "MauntingStudios",
     "copyright": "© 2026 MauntingStudios",
     "targets": [
-      "nsis"
+      "app"
     ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
-    ],
-    "windows": {
-      "nsis": {
-        "installerHooks": "./windows/hooks.nsh"
-      }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1QjEzNDY1RDUxNjEzNTIKUldSU0V4YlZaVFN4RldBU3BTdmZxVWc2bXkzYUloYmxBWGl0czUrTk9ESFhiclp1U2pEYkNBWFoK",
-      "endpoints": [
-        "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/latest-msb.json"
-      ]
-    }
+    ]
   }
 }

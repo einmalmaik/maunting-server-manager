@@ -1,10 +1,9 @@
 /**
- * Läuft der Browser auf einem Android-Gerät? Eine Stelle für die Frage statt
- * Prüfungen des User-Agents über den Code verteilt. Am Handy steht die
- * Leiste unten (`kopf/HandyLeiste.tsx`), und was Android nicht kann
- * (Entwicklerwerkzeuge, Ton je Tab, Ordnerwahl, Seitenrechte, Löschen ab
- * einem Zeitpunkt), bietet die Oberfläche dort nicht an.
+ * Läuft der Browser auf einem Android-Gerät? Die Frage stellt
+ * `lib/istAndroid.ts` für beide Apps; hier bleibt der Pfad, den der Browser
+ * schon überall importiert. Am Handy steht die Leiste unten
+ * (`kopf/HandyLeiste.tsx`), und was Android nicht kann (Entwicklerwerkzeuge,
+ * Ton je Tab, Ordnerwahl, Seitenrechte, Löschen ab einem Zeitpunkt), bietet
+ * die Oberfläche dort nicht an.
  */
-export function istAndroid(): boolean {
-  return /\bAndroid\b/.test(navigator.userAgent)
-}
+export { istAndroid } from '@/lib/istAndroid'

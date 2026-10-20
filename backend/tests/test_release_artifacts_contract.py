@@ -98,11 +98,12 @@ def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
     assert "build-browser]" in release
     assert "continue-on-error" not in release
     for datei in (
-        "MauntingSecureBrowser-Setup.exe",
-        "MauntingSecureBrowser-Setup.exe.sig",
+        "MauntingPontis-Setup.exe",
         "latest-msb.json",
         "MauntingSecureBrowser.apk",
         "MauntingSmartSystem.apk",
+        "releases.pontis.json",
+        "releases.mss.json",
     ):
         assert datei in release.split("name: Verify release assets", 1)[1], datei
 
@@ -113,12 +114,51 @@ def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
     assert '"${MSB_ANDROID_KEYSTORE_B64:?fehlt}"' in signieren
     assert "APK Signature Scheme v3): true" in signieren
 
-    # Der Updater des Browsers liest die Datei, die das Sammelskript schreibt.
-    sammeln = (ROOT / "scripts" / "collect-browser-artifacts.py").read_text(encoding="utf-8")
-    assert 'MANIFEST = "latest-msb.json"' in sammeln
-    konfig = (ROOT / "browser" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
-    assert "releases/latest/download/latest-msb.json" in konfig
+    # Der Velopack-Feed wird mit dem Secret signiert (nicht mehr der Installer).
     assert "TAURI_SIGNING_PRIVATE_KEY" in bau
+    assert "tauri signer sign" in bau
+
+
+def test_windows_updates_laufen_nur_ueber_velopack() -> None:
+    """Ein zweiter Installer neben Velopack machte Updates unmöglich.
+
+    Bis 10/2026 lag der NSIS-Installer von Tauri neben Velopack. Wer den
+    NSIS-Installer nahm, hatte eine Installation, die Velopacks `UpdateManager`
+    nicht findet („Velopack-Installation konnte nicht gefunden werden“).
+    Jetzt baut Tauri nur die App (`bundle.targets: ["app"]`); der einzige
+    Installer ist Velopacks `*-Setup.exe`. Damit bestehende v5.5.1-Installationen
+    automatisch auf Velopack gehoben werden, wird Velopacks `Setup.exe` mit
+    `tauri signer` signiert und in `latest.json`/`latest-msb.json` unter
+    `platforms.windows-x86_64` eingetragen.
+    """
+    for app in ("smart-system", "browser"):
+        konfig = (ROOT / app / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
+        assert "createUpdaterArtifacts" not in konfig, app
+        assert '"plugins"' not in konfig, app
+        assert '"nsis"' not in konfig, app
+        assert '"app"' in konfig, app
+
+    release = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(
+        encoding="utf-8"
+    )
+    bau = (ROOT / ".github" / "workflows" / "browser-build.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "MauntingSmartSystem-Setup.exe.sig" in release
+    assert "MauntingPontis-Setup.exe.sig" in release
+    # Beide Apps bauen nur die App; den Installer packt `vpk pack`.
+    assert "npx tauri build" in release and "npx tauri build" in bau
+    assert "vpk pack" in release and "vpk pack" in bau
+
+    for skript in ("collect-desktop-artifacts.py", "collect-browser-artifacts.py"):
+        sammeln = (ROOT / "scripts" / skript).read_text(encoding="utf-8")
+        # Ein NSIS-Paket daneben bricht den Lauf, statt es still mitzunehmen.
+        assert "Tauri-NSIS-Installer gefunden" in sammeln, skript
+        # Die Manifestdatei migriert v5.5.1-Bestandsnutzer auf die Velopack-Setup.exe.
+        manifest = sammeln.split("manifest = {", 1)[1].split("\n}\n", 1)[0]
+        assert "platforms" in manifest, skript
+        assert "windows-x86_64" in manifest, skript
+        assert "signature" in manifest, skript
 
 def test_android_webview_hears_network_changes() -> None:
     """Ohne ACCESS_NETWORK_STATE bleibt navigator.onLine im WebView immer true.

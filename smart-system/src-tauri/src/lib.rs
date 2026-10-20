@@ -897,9 +897,10 @@ pub fn run() {
             // Die Handler hängen an den einzelnen Hotkeys (`on_shortcut` in
             // `hotkeys_registrieren`) — ein globaler Handler müsste selbst
             // auseinanderhalten, welcher der beiden gedrückt wurde.
-            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-            .plugin(tauri_plugin_updater::Builder::new().build());
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
+
+    let builder = updater_core::init_updater(builder, updater_core::UpdateConfig::mss());
 
     #[cfg(target_os = "android")]
     {
@@ -911,7 +912,6 @@ pub fn run() {
             // aber nichts verwahren; dieses hier hängt am Android-Keystore und
             // ist das Gegenstück zum Credential Store auf Windows.
             .plugin(biometrie::init_android_schluesselfach())
-            .plugin(updater::init_android_installer())
             // Kameraaufnahmen für die Kamera-Sicherung des Tresors.
             .plugin(medien::init_android_medien())
             // Terminerinnerungen, die Android auch bei geschlossener App zeigt.
@@ -987,6 +987,7 @@ pub fn run() {
             medien::medien_einstellungen,
             erinnerung::erinnerungen_planen,
             updater::update_pruefen,
+            updater::update_herunterladen,
             updater::update_installieren,
             updater::app_neu_starten
         ])
@@ -1027,7 +1028,8 @@ pub fn run() {
                     konfig.discord_state,
                 );
             }
-            // Automatischer Updater: prüft asynchron im Hintergrund auf neuere GitHub Releases
+            // Automatischer Updater: prüft im Hintergrund und bereitet ein
+            // neueres Velopack-Paket still vor (gemeldet wird erst `bereit`).
             updater::pruefe_und_installiere_update_hintergrund(app.handle().clone());
             // Sanfter Start: beim Boot-Autostart bleibt das Fenster im Tray —
             // niemand will nach dem Hochfahren eine Boot-Sequenz vor der Nase.

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-herunterladen"
+description = "Enables the update_herunterladen command without any pre-configured scope."
+commands.allow = ["update_herunterladen"]
+
+[[permission]]
+identifier = "deny-update-herunterladen"
+description = "Denies the update_herunterladen command without any pre-configured scope."
+commands.deny = ["update_herunterladen"]

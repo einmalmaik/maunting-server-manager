@@ -1,6 +1,6 @@
 //! Auf dem Desktop gibt es kein Widget. Von außen kommen nur Links: Windows
 //! startet den Browser mit der Adresse als Argument, wenn er der
-//! Standardbrowser ist (`windows/hooks.nsh`). Läuft er schon, reicht das
+//! Standardbrowser ist (`standardbrowser_registrieren`). Läuft er schon, reicht das
 //! Single-Instance-Plugin die Argumente des zweiten Aufrufs herüber.
 
 use std::sync::Mutex;
@@ -73,10 +73,36 @@ pub fn standardbrowser(_: &AppHandle) -> Result<bool, String> {
     Ok(windows_standard::ist_standard())
 }
 
+/// Meldet den Browser bei Windows als `StartMenuInternet`-Client an. Das
+/// gehörte bis 10/2026 in den NSIS-Installer; seit Velopack der einzige
+/// Installer ist, rufen es dessen Hooks (`main.rs`) und der Knopf
+/// „Standardbrowser werden“. Ohne Anmeldung listet Windows den Browser nicht.
+#[cfg(windows)]
+pub fn standardbrowser_registrieren() -> Result<(), String> {
+    // Ein Debug-Bau fässt die installierte App nicht an (AGENTS.md, Punkt 67):
+    // er liefe sonst als Standardbrowser und jede besuchte Adresse öffnete
+    // die Dev-Sitzung samt Debug-Port.
+    if cfg!(debug_assertions) {
+        return Ok(());
+    }
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("Eigener Programmpfad nicht lesbar: {e}"))?;
+    windows_standard::registrieren(&exe)
+}
+
+/// Nimmt die Anmeldung bei der Deinstallation zurück.
+#[cfg(windows)]
+pub fn standardbrowser_entfernen() -> Result<(), String> {
+    windows_standard::entfernen()
+}
+
 /// Windows lässt eine App sich nicht selbst festlegen; es zeigt die
-/// Standard-Apps des Browsers, dort wählt man ihn.
+/// Standard-Apps des Browsers, dort wählt man ihn. Vorher die eigene
+/// Anmeldung nachholen: Installationen vor dem Velopack-Wechsel haben sie
+/// nur im NSIS-Installer geschrieben.
 #[cfg(windows)]
 pub fn standardbrowser_werden(_: &AppHandle) -> Result<bool, String> {
+    standardbrowser_registrieren()?;
     windows_standard::einstellungen_oeffnen()?;
     Ok(windows_standard::ist_standard())
 }

@@ -1,6 +1,6 @@
 [package]
 name = "maunting-smart-system"
-version = "5.5.1"
+version = "5.6.0"
 description = "MSS - Maunting Smart System, Desktop Companion fuer das MSM-Panel"
 edition = "2021"
 # Die Zahl muss stimmen, sonst ist sie schaedlich: hier stand 1.77, und ein
@@ -39,6 +39,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-biometric = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+updater_core = { path = "../../crates/updater_core" }
 
 # Refresh-Token im OS-Tresor (Windows Credential Manager / macOS Keychain) —
 # Projektregel: Tokens nie im Klartext auf der Platte. keyring ist die
@@ -132,8 +133,6 @@ tauri-plugin-global-shortcut = "2"
 # Windows-Autostart; das Argument "--autostart" markiert Boot-Starts, damit
 # spaeter Crash-Guard und sanfter Start unterscheiden koennen, wer gestartet hat.
 tauri-plugin-autostart = "2"
-# Automatischer Updater fuer echte GitHub Releases
-tauri-plugin-updater = "2"
 # Papierkorb statt endgueltig: Geloeschtes in der Sandbox bleibt
 # wiederherstellbar. Ein `fs::remove_file` waere die unumkehrbare Fassung
 # derselben Zeile.

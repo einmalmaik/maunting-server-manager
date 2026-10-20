@@ -29,7 +29,7 @@ import { ToastContainer } from '@/components/ui/ToastContainer'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
 import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { CrossDeviceCallBanner } from '@/components/calling/CrossDeviceCallBanner'
-import { Avatar, BenachrichtigungsGlocke, Button, Kurzinfo, ProfileDropdown, type ProfileDropdownItem } from '@/Singra/UI'
+import { Avatar, BenachrichtigungsGlocke, Button, Kurzinfo, ProfileDropdown, UpdateBadge, type ProfileDropdownItem } from '@/Singra/UI'
 import { useHasPermission } from '@/hooks/useHasPermission'
 import { KI_NAME } from '@/lib/kiName'
 import { Ai } from '@/pages/Ai'
@@ -52,7 +52,6 @@ import { OverlayFenster } from './OverlayFenster'
 import { Aufraeumkarte } from './Aufraeumkarte'
 import { DesktopAktionKarte } from './DesktopAktionKarte'
 import { Uebernahmekarte } from './Uebernahmekarte'
-import { UpdateModal } from './UpdateModal'
 import { Wizard } from './Wizard'
 import { VaultView } from './vault/VaultView'
 import { kameraBeobachten } from './vault/kameraSicherung'
@@ -65,13 +64,12 @@ import {
 } from './sprachKoordination'
 import {
   appBeenden,
-  appNeuStarten,
   hauptfensterVerstecken,
   konfigAendern,
   konfigLaden,
   oeffneBrowser,
+  updateHerunterladen,
   updateInstallieren,
-  updatePruefen,
   type AppKonfig,
   type UpdateStatusEvent,
 } from './tauri'
@@ -129,8 +127,6 @@ function getInitialRoute(offline = false): string {
 export function DesktopApp() {
   const { t } = useTranslation()
   const [phase, setPhase] = useState<Phase>('laedt')
-  const [startText, setStartText] = useState<string | null>(null)
-  const [updateProgress, setUpdateProgress] = useState<number | null>(null)
   const [konfig, setKonfig] = useState<AppKonfig | null>(null)
   const [isOffline, setIsOffline] = useState(() => (typeof navigator !== 'undefined' ? !navigator.onLine : false))
   const [splash, setSplash] = useState(() => {
@@ -251,51 +247,8 @@ export function DesktopApp() {
           setIsOffline(true)
         }
 
-        // Sichtbare Startup-Update-Prüfung
-        try {
-          setStartText(t('mss.app.sucheNachUpdates'))
-          const updateCheck = updatePruefen().catch(() => null)
-          const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000))
-          const info = await Promise.race([updateCheck, timeout])
-
-          if (info && info.verfuegbar && info.neue_version) {
-            setStartText(t('mss.app.updateGefunden', { version: info.neue_version }))
-            setUpdateProgress(0)
-
-            let unlistenStatus: (() => void) | undefined
-            let neustartGeplant = false
-            try {
-              unlistenStatus = await listen<UpdateStatusEvent>('mss:update-status', (event) => {
-                if (event.payload.status === 'laedt' && event.payload.prozent !== undefined) {
-                  setUpdateProgress(event.payload.prozent)
-                  setStartText(t('mss.app.updateDownloadProzent', { prozent: event.payload.prozent }))
-                } else if (event.payload.status === 'bereit') {
-                  setUpdateProgress(100)
-                  setStartText(t('mss.app.updateBereitNeustart', { version: info.neue_version }))
-                  if (!isAndroid) {
-                    neustartGeplant = true
-                    setTimeout(() => void appNeuStarten(), 1200)
-                  }
-                } else if (event.payload.status === 'installiert_android') {
-                  setUpdateProgress(100)
-                  setStartText(t('mss.app.updateBereitNeustart', { version: info.neue_version }))
-                }
-              })
-
-              await updateInstallieren()
-            } catch {
-              // Bei Installationsfehler normal zur App fortfahren
-            } finally {
-              if (unlistenStatus) unlistenStatus()
-            }
-
-            if (neustartGeplant) {
-              return
-            }
-          }
-        } catch {
-          // Stiller Übergang bei Offline / Fehlern
-        }
+        // Zero-Delay Kaltstart: Die Update-Prüfung erfolgt nicht-blockierend
+        // im Hintergrund (updater_core). Kein Kaltstart-Verzug und kein Auto-Restart.
 
         if (!isAndroid && !geladen.sandbox_pfad) {
           setPhase('sandbox')
@@ -415,7 +368,7 @@ export function DesktopApp() {
 
   let inhalt: ReactNode
   if (phase === 'laedt' || konfig === null) {
-    inhalt = <Startbild text={startText} progress={updateProgress} />
+    inhalt = <Startbild />
   } else if (phase === 'einrichtung' || phase === 'kopplung' || phase === 'sandbox') {
     inhalt = (
       <Wizard
@@ -612,7 +565,6 @@ export function DesktopApp() {
         <DesktopAktionKarte offenerAuftragId={offeneUebernahme} />
         <Uebernahmekarte offenerAuftragId={offeneUebernahme} />
         <Aufraeumkarte offenerAuftragId={offeneUebernahme} />
-        <UpdateModal />
         <SchliessenDialog />
         <ToastContainer />
         <ConfirmDialog />
@@ -862,7 +814,7 @@ function Hauptseite({
       onClick: () => {
         const downloadUrl = isAndroid
           ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-          : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+          : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
         void oeffneBrowser(downloadUrl)
       },
     },
@@ -874,6 +826,67 @@ function Hauptseite({
       tone: 'danger',
     },
   ]
+
+  const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
+  const [updatePhase, setUpdatePhase] = useState<'verfuegbar' | 'laedt' | 'bereit' | 'installiert_android' | 'fehler'>('verfuegbar')
+  const [updateProzent, setUpdateProzent] = useState(0)
+  const [updateFehler, setUpdateFehler] = useState<string | null>(null)
+
+  useEffect(() => {
+    let unlistenVerfuegbar: (() => void) | undefined
+    let unlistenBereit: (() => void) | undefined
+    let unlistenStatus: (() => void) | undefined
+
+    void (async () => {
+      unlistenVerfuegbar = await listen<{ version: string }>('updater:verfuegbar', (e) => {
+        setUpdateInfo({ version: e.payload.version })
+        setUpdatePhase('verfuegbar')
+      })
+      unlistenBereit = await listen<{ version: string }>('updater:bereit', (e) => {
+        setUpdateInfo({ version: e.payload.version })
+        setUpdatePhase('bereit')
+      })
+      unlistenStatus = await listen<UpdateStatusEvent>('updater:status', (e) => {
+        if (e.payload.status === 'laedt') {
+          setUpdatePhase('laedt')
+          if (e.payload.prozent !== undefined) setUpdateProzent(e.payload.prozent)
+        } else if (e.payload.status === 'bereit') {
+          setUpdatePhase('bereit')
+        } else if (e.payload.status === 'installiert_android') {
+          setUpdatePhase('installiert_android')
+        } else if (e.payload.status === 'fehler') {
+          setUpdatePhase('fehler')
+          setUpdateFehler(e.payload.fehler ?? 'Fehler beim Update')
+        }
+      })
+    })()
+
+    return () => {
+      if (unlistenVerfuegbar) unlistenVerfuegbar()
+      if (unlistenBereit) unlistenBereit()
+      if (unlistenStatus) unlistenStatus()
+    }
+  }, [])
+
+  // Unter Windows hat Rust das Update längst still vorbereitet; der Klick
+  // startet nur den Neustart. Unter Android gibt es diesen Weg nicht, dort
+  // lädt und installiert derselbe Klick die APK (`updater_core::android`).
+  async function handleUpdateClick() {
+    if (updatePhase === 'bereit') {
+      await updateInstallieren()
+      return
+    }
+    if (!isAndroid) return
+    setUpdatePhase('laedt')
+    setUpdateProzent(0)
+    setUpdateFehler(null)
+    try {
+      await updateHerunterladen()
+    } catch (e) {
+      setUpdatePhase('fehler')
+      setUpdateFehler(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   useEffect(() => {
     onKonfigAenderung?.()
@@ -958,8 +971,18 @@ function Hauptseite({
           )}
         </nav>
 
-        {/* Rechte Seite: Glocke + Profil-Avatar mit Dropdown-Menü */}
+        {/* Rechte Seite: UpdateBadge + Glocke + Profil-Avatar mit Dropdown-Menü */}
         <div className="flex items-center gap-2">
+          {updateInfo && (isAndroid || updatePhase === 'bereit') && (
+            <UpdateBadge
+              neueVersion={updateInfo.version}
+              phase={updatePhase}
+              prozent={updateProzent}
+              fehlerText={updateFehler}
+              onInstallieren={() => void handleUpdateClick()}
+            />
+          )}
+
           <BenachrichtigungsGlocke placement="bottom" align="right" />
 
           {/* Profil-Avatar Dropdown */}
@@ -1127,7 +1150,7 @@ function Hauptseite({
                   setMobileMenuOffen(false)
                   const downloadUrl = isAndroid
                     ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-                    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser-Setup.exe'
+                    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
                   void oeffneBrowser(downloadUrl)
                 }}
                 className="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-on-surface hover:bg-surface-container-high transition-colors"

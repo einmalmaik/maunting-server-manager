@@ -4055,6 +4055,19 @@
     "loading": "Laden …",
     "error": "Fehler",
     "close": "Schließen",
+    "updateBadge": {
+      "verfuegbar": "Neue Version {{version}} verfügbar.",
+      "bereit": "Version {{version}} ist einsatzbereit. Jetzt neu starten.",
+      "laedt": "Aktualisierung lädt: {{prozent}} %",
+      "installiertAndroid": "Update wird installiert.",
+      "fehlerTitel": "Update fehlgeschlagen",
+      "kurzLaedt": "Lädt {{prozent}} %",
+      "kurzBereit": "Neu starten",
+      "kurzAndroid": "Wird installiert",
+      "kurzFehler": "Update wiederholen",
+      "kurzVerfuegbar": "Update v{{version}}",
+      "kurzOhneVersion": "Update verfügbar"
+    },
     "copy": "Kopieren",
     "copied": "Kopiert",
     "confirm": "Bestätigen",
@@ -4390,7 +4403,7 @@
       "intro": "Optionale Desktop-App für Windows: derselbe Dauerchat wie im Browser, ein offline trainiertes Wake-Wort und Arbeit in einem Ordner, den der Benutzer selbst freigibt. Die App ersetzt das Panel nicht — sie ist ein zweiter Weg in dieselbe Unterhaltung, mit denselben Rechten und einem Rechner daran.",
       "artifact": {
         "title": "Installer",
-        "body": "release-artifacts.yml baut den NSIS-Installer auf v*-Tags mit (MauntingSmartSystem-Setup.exe), dazu latest.json für den Updater der App. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
+        "body": "release-artifacts.yml baut die Windows-App auf v*-Tags. Installiert und aktualisiert wird ausschließlich über Velopack: MauntingSmartSystem-Setup.exe samt signiertem Feed releases.mss.json und MauntingSmartSystem-<Version>-full.nupkg. Ein zweiter Installer (Tauri-NSIS) entfällt, weil seine Installation Velopack nicht kennt. latest.json nennt nur noch die Android-Version. Nur Windows: Audio-Ducking, Übernahme und Tresor sind Windows-Funktionen."
       },
       "oberflaeche": {
         "title": "Eine Oberfläche",
@@ -4427,11 +4440,11 @@
       "intro": "Optionaler Browser für Windows und Android mit Werbe- und Trackerfilter, Jugendschutz und Ausfüllen aus dem Tresor. Ohne Kopplung spricht er mit keinem Server von Maunting Studios; gekoppelt zeigt er Singra, Messenger, Notizen, Kalender und Tresor der Instanz in der Seitenleiste.",
       "artifact": {
         "title": "Installer",
-        "body": "release-artifacts.yml baut ihn auf v*-Tags mit, über browser-build.yml und in derselben Version wie Panel und MSS: MauntingSecureBrowser-Setup.exe samt Signatur (.exe.sig). Fehlt eine Datei im Release, schlägt der Lauf fehl."
+        "body": "release-artifacts.yml baut ihn auf v*-Tags mit, über browser-build.yml und in derselben Version wie Panel und MSS: MauntingPontis-Setup.exe samt Signatur (.exe.sig). Fehlt eine Datei im Release, schlägt der Lauf fehl."
       },
       "updates": {
         "title": "Updates",
-        "body": "Der Browser liest latest-msb.json aus dem jüngsten Release und prüft die Signatur gegen denselben Schlüssel wie MSS (Secret TAURI_SIGNING_PRIVATE_KEY); latest.json gehört dem Smart System. Installiert wird erst auf Klick, ein Entwicklungsbau installiert nie."
+        "body": "Windows aktualisiert der Browser ausschließlich über Velopack: MauntingPontis-Setup.exe und der signierte Feed releases.pontis.json mit Pontis-<Version>-full.nupkg (Schlüssel aus TAURI_SIGNING_PRIVATE_KEY). latest-msb.json und latest.json nennen nur noch die Android-Version, ohne Windows-Signatur. Unter Windows lädt der Browser das Update still im Hintergrund und fordert erst als fertiges Badge zum Neustart auf; unter Android fragt er vor der Installation. Ein Entwicklungsbau installiert nie."
       },
       "android": {
         "title": "Android-App",
@@ -6178,28 +6191,6 @@
       "browserDownloadSubtext": "Gehärteter, privater Webbrowser für Windows",
       "browserDownloadSubtextAndroid": "Gehärteter, privater Webbrowser für Android"
     },
-    "updateModal": {
-      "titelVerfuegbar": "Update verfügbar",
-      "titelLaedt": "Update wird geladen",
-      "titelBereit": "Update bereit",
-      "titelAndroid": "Installation gestartet",
-      "versionInfo": "Version v{{neu}} (aktuell: v{{alt}})",
-      "textDesktop": "Eine Aktualisierung steht bereit und wird beim nächsten Start aktiv.",
-      "textAndroid": "Eine Aktualisierung steht bereit und kann direkt installiert werden.",
-      "textLaedt": "Paket wird geladen …",
-      "textBereit": "Version v{{version}} ist vorbereitet. Starte die App neu, um das Update abzuschließen.",
-      "textAndroidGestartet": "Der Android-Paketmanager wurde geöffnet. Bitte bestätige die Aktualisierung im System-Dialog.",
-      "fehlerStandard": "Das Update konnte nicht geladen werden.",
-      "spaeter": "Später",
-      "jetztAktualisieren": "Jetzt aktualisieren",
-      "ladenUndInstallieren": "Herunterladen & Installieren",
-      "neuStarten": "Jetzt neu starten",
-      "beimNaechstenStart": "Beim nächsten Start",
-      "erneutOeffnen": "Erneut öffnen",
-      "schliessen": "Schließen",
-      "erneutVersuchen": "Erneut versuchen",
-      "spaeterErinnern": "Später erinnern"
-    },
     "vault": {
       "titel": "Tresor-Sicherheit",
       "autoSperre": "Automatische Sperre",
@@ -6933,6 +6924,8 @@
       },
       "overlayTesten": "Overlay testen",
       "updateAvailableVersion": "Version v{{version}} ist verfügbar.",
+      "updatePreparing": "Version v{{version}} wird im Hintergrund vorbereitet. Neu starten über die Update-Anzeige.",
+      "updatePrepareError": "Das Update konnte nicht vorbereitet werden.",
       "updateCheckError": "Konnte nicht nach Updates suchen.",
       "updateUpToDate": "Maunting Smart System ist auf dem neuesten Stand.",
       "checkingUpdates": "Prüft …",
@@ -8868,10 +8861,11 @@
 
     "update": {
       "name": "Updates",
-      "hinweis": "Fragt bei GitHub nach einer neuen Version. Installiert wird erst auf deinen Klick.",
+      "hinweis": "Fragt bei GitHub nach einer neuen Version. Unter Windows lädt sie sich still im Hintergrund; neu gestartet wird erst auf deinen Klick.",
       "pruefen": "Jetzt prüfen",
       "aktuell": "Du hast die neueste Version.",
       "da": "Version {{version}} ist da.",
+    "bereit": "Version {{version}} wird im Hintergrund vorbereitet. Neu starten über die Update-Anzeige.",
       "installieren": "Installieren und neu starten",
       "nichtErreicht": "GitHub war nicht erreichbar. Versuch es später noch einmal.",
       "fehler": "Das Update ließ sich nicht installieren.",

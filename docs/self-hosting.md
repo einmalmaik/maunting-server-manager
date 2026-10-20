@@ -111,12 +111,25 @@ Cookie-Einstellungen; Details stehen in `frontend/.env.example` und
 `.github/workflows/release-artifacts.yml` baut den Windows-Installer der
 Desktop-App auf **`v*`-Tags** mit, in derselben Version wie das Panel.
 
-- `MauntingSmartSystem-Setup.exe`: NSIS-Installer, nur Windows.
+Velopack ist der **einzige** Windows-Installer und Update-Weg. Ein zweiter
+Installer (etwa Tauri-NSIS) installiert eine Fassung, die Velopacks
+`UpdateManager` nicht findet; seine Signatur gehörte außerdem nicht zu dem
+Paket, das Velopack prüft.
+
+- `MauntingSmartSystem-Setup.exe`: Velopacks Installer, nur Windows.
   Die App ist Windows-spezifisch (Audio-Ducking über WASAPI, Übernahme von
   Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
-- `latest.json`: Manifest für den Updater der App, signiert mit dem Secret
-  `TAURI_SIGNING_PRIVATE_KEY`.
+- `releases.mss.json` und `releases.mss.json.sig`: der signierte Update-Feed
+  (Secret `TAURI_SIGNING_PRIVATE_KEY`) und seine Signatur.
+- `MauntingSmartSystem-<VERSION>-full.nupkg` (bei Bedarf `-delta`): das
+  Updatepaket, dessen SHA-256 im signierten Feed steht.
+- `latest.json`: nur noch Version und Hinweise für die **Android**-Prüfung,
+  ohne Signatur und ohne Plattform-Einträge.
 - `SHA256SUMS`: Prüfsummen aller Dateien des Releases.
+
+Unter Windows prüft und lädt die App ein Update **still im Hintergrund**; erst
+wenn nur der Neustart fehlt, erscheint das Badge in der Kopfleiste. Velopack
+wendet ein vorbereitetes Paket auch beim nächsten regulären Start an.
 
 **Android-App.** Das APK (`MauntingSmartSystem.apk`) baut
 `.github/workflows/release-artifacts.yml` auf `v*`-Tags mit. Gradle liefert es
@@ -264,11 +277,14 @@ aufgerufen von `release-artifacts.yml` auf denselben **`v*`-Tags** und mit
 derselben Version wie Panel und MSS (`scripts/sync-tauri-version.py`). Der
 Release schlägt fehl, wenn eine der folgenden Dateien fehlt:
 
-- `MauntingSecureBrowser-Setup.exe` und `MauntingSecureBrowser-Setup.exe.sig`:
-  NSIS-Installer und seine Signatur für den Updater.
-- `latest-msb.json`: Manifest für den Updater des Browsers. `latest.json`
-  gehört dem Smart System; beide Apps prüfen gegen denselben Schlüssel
-  (`TAURI_SIGNING_PRIVATE_KEY`). Installiert wird erst auf Klick, ein
+- `MauntingPontis-Setup.exe`: Velopacks Installer (der einzige Windows-Weg).
+- `releases.pontis.json` und `releases.pontis.json.sig`: der signierte
+  Update-Feed des Browsers (`TAURI_SIGNING_PRIVATE_KEY`), dazu
+  `Pontis-<VERSION>-full.nupkg` mit dem Paket.
+- `latest-msb.json`: nur noch Version und Hinweise für die
+  **Android**-Prüfung, ohne Signatur; `latest.json` gehört dem Smart System.
+  Unter Windows lädt der Browser das Update still im Hintergrund und das Badge
+  bietet nur den Neustart an; unter Android fragt er vor der Installation. Ein
   Entwicklungsbau installiert nie.
 - `MauntingSecureBrowser.apk`: Gradle liefert es unsigniert;
   `scripts/android-apk-signieren-msb.sh` signiert es (APK Signature Scheme v3, ab Android 10) aus den Secrets

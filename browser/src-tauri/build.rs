@@ -87,6 +87,7 @@ const BEFEHLE: &[&str] = &[
     "standardbrowser_werden",
     "standardbrowser_einstellungen",
     "update_pruefen",
+    "update_herunterladen",
     "update_installieren",
 ];
 

@@ -89,9 +89,10 @@ class InstallStatusReceiver : BroadcastReceiver() {
                 }
             )
 
+            val appName = context.applicationInfo.loadLabel(context.packageManager).toString()
             val notification = NotificationCompat.Builder(context, ApkInstaller.KANAL_UPDATES)
                 .setSmallIcon(R.mipmap.ic_launcher_foreground)
-                .setContentTitle("MSB Update bereit")
+                .setContentTitle("$appName Update bereit")
                 .setContentText("Tippe hier, um die Aktualisierung zu bestätigen.")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setContentIntent(pendingIntent)

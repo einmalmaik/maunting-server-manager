@@ -75,6 +75,20 @@ pub fn standardbrowser_einstellungen(app: AppHandle) -> Result<bool, String> {
     plattform::standardbrowser_einstellungen(&app)
 }
 
+/// Meldet den Browser unter Windows als `StartMenuInternet`-Client an. Gerufen
+/// aus den Velopack-Installations-Hooks (`main.rs`), nicht aus der Oberfläche:
+/// ein Knopf, der die Registry schreibt, wäre eine stille Systemänderung.
+#[cfg(windows)]
+pub fn standardbrowser_registrieren() -> Result<(), String> {
+    plattform::standardbrowser_registrieren()
+}
+
+/// Nimmt die Anmeldung bei der Deinstallation zurück.
+#[cfg(windows)]
+pub fn standardbrowser_entfernen() -> Result<(), String> {
+    plattform::standardbrowser_entfernen()
+}
+
 /// Ein Formularfeld der Suchmaschine: nur Buchstaben und `_`.
 fn feld_pruefen(feld: &str) -> Result<(), String> {
     let gut = (1..=32).contains(&feld.len()) && feld.chars().all(|c| c.is_ascii_alphabetic() || c == '_');
