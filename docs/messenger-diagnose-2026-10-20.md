@@ -286,9 +286,20 @@ jeweils reparierten Code geprüft (Sperre entfernt, Vorabprüfung entfernt, Nach
   Gerät bekommt das Geheimnis damit mit der nächsten Nachricht — vorher lief die Verteilung genau
   einmal im Leben eines Chats, und das neue Gerät las eine Mailbox, in die niemand mehr schrieb.
 - `merkeDmVerteilung` wächst nur (Liste wird vereinigt, `verteiltAm` nie zurückgenommen).
+- **Weitergabe auf der grösseren Kennung (`DmGeheimnis.beleg`).** Erzeugen darf nur das kleinere
+  Konto, und `nimmDmGeheimnis` prüft das am Absender. Das galt bis 20.10.2026 auch für den
+  Nachtrag an ein eigenes Gerät: hatte die **grössere** Seite das Geheimnis von der kleineren
+  bekommen, trug ihr Umschlag an das eigene Zweitgerät ihre eigene Kennung — das Gerät wies ihn
+  ab, während der Absender es in `verteiltAn` vermerkte. Kein späterer Versand versuchte es je
+  wieder, und das neue Gerät blieb für immer ohne Geheimnis. Jetzt merkt sich der Empfänger den
+  **unveränderten Originalumschlag** (`beleg`) und gibt genau den weiter; die Unterschrift bleibt
+  die der kleineren Kennung, und die Erzeugungsregel bleibt unangetastet. Fehlt der Beleg, wird
+  nicht gesendet — lieber beim nächsten Versand erneut als das Gerät fälschlich als bedient
+  vermerken.
 
 Tests: `gruppenSchluessel.test.ts` — „holt ein eigenes Gerät nach, das erst nach der Zustellung
-dazukommt“ (**am alten Stand rot**).
+dazukommt“ und „holt ein eigenes Gerät auch auf der grösseren Kontokennung nach“ (**beide am
+Stand davor rot**).
 
 ### Phase 4 — Steuerkanal für eigene Geräte (**offen**)
 - Quittungen, Bearbeiten, Löschen, Reaktionen zusätzlich als Steuerumschlag in die **eigene Geräte-Mailbox** (`deriveUserDeviceMailboxId`), nicht in die Chat-Mailbox. `holeGeraeteSteuerung` verarbeitet bereits `dm_secret`/Gruppenschlüssel — ein weiterer `typ` genügt.

@@ -238,6 +238,23 @@ export interface DmGeheimnis {
    * Was hier fehlt, wird beim nächsten Versand nachgetragen.
    */
   verteiltAn?: string[]
+  /**
+   * Der Umschlag, mit dem das Geheimnis kam — unverändert, mit der
+   * Unterschrift dessen, der es erzeugt hat.
+   *
+   * **Erzeugen darf nur die kleinere Kennung** (`darfDmGeheimnisErzeugen`),
+   * und das prüft auch der Empfänger. Ein später gekoppeltes Gerät auf der
+   * **grösseren** Seite bekam den Umschlag deshalb von seinem Geschwistergerät
+   * — und der trug die grössere Kennung, also wies das neue Gerät ihn ab. Der
+   * Absender vermerkte es trotzdem in `verteiltAn`, und kein späterer Versand
+   * versuchte es je wieder (bis 20.10.2026).
+   *
+   * Darum reist das Geheimnis in diesem Fall mit dem **Original** weiter: die
+   * Unterschrift der Gegenseite gilt unverändert, und die Regel bleibt, wie
+   * sie ist. Nur dieses Gerät kann den Umschlag weitergeben — es hat ihn
+   * selbst geprüft bekommen.
+   */
+  beleg?: Record<string, unknown>
 }
 
 export interface GruppenAblage {
@@ -875,7 +892,7 @@ async function verteileDmGeheimnis(
   eigeneId: number,
   peerId: number,
   geheimnis: string,
-  nurEigene?: readonly string[],
+  { nurEigene, beleg }: { nurEigene?: readonly string[]; beleg?: Record<string, unknown> } = {},
 ): Promise<{ gegenstelle: number; eigene: string[] }> {
   // Beglaubigt, und zwar gebunden an die **abgeleitete Gesprächskennung** und
   // nicht an die Geräte-Mailbox, in die der Umschlag fällt: das Paket geht an
@@ -883,14 +900,18 @@ async function verteileDmGeheimnis(
   // abgeleitete Kennung nennt genau dieses Gespräch, beide Seiten können sie
   // ausrechnen, und dieselbe Unterschrift lässt sich damit in kein anderes
   // umhängen.
-  const gespraech = await deriveBlindMailboxId(eigeneId, peerId)
-  const nutzlast = await signiereNutzlast(gespraech, eigeneId, {
-    typ: DM_GEHEIMNIS_TYP,
-    v: 1,
-    peerId,
-    eigeneId,
-    geheimnis,
-  })
+  // Ein weitergegebener Umschlag bleibt **der der Gegenseite**: nur er trägt
+  // die Unterschrift der kleineren Kennung, und nur die nimmt
+  // `nimmDmGeheimnis` an (siehe `DmGeheimnis.beleg`).
+  const nutzlast =
+    beleg ??
+    (await signiereNutzlast(await deriveBlindMailboxId(eigeneId, peerId), eigeneId, {
+      typ: DM_GEHEIMNIS_TYP,
+      v: 1,
+      peerId,
+      eigeneId,
+      geheimnis,
+    }))
   const kontext: GruppenKontext = {
     groupId: 0,
     blindMailboxId: '',
@@ -1038,6 +1059,9 @@ async function nimmDmGeheimnis(eigeneId: number, roh: Record<string, unknown>): 
     // Beim Empfänger steht die Marke sofort: er hat es ja. Sie fragt „wissen
     // es beide?", nicht „habe ich es verschickt?".
     verteiltAm: jetzt,
+    // Der geprüfte Umschlag, für die Weitergabe an ein eigenes Gerät. Er
+    // wird nicht neu unterschrieben — die Unterschrift gehört der Gegenseite.
+    beleg: roh,
   })
   if (vorhanden) return false
 
@@ -1136,13 +1160,18 @@ export async function dmZiele(
       // danach gekoppeltes oder zurückgesetztes Gerät las die neue Mailbox und
       // sah nichts, während jedes andere Gerät ausschließlich dorthin schrieb.
       const fehlend = await eigeneGeraeteOhne(eigeneId, eintrag.verteiltAn ?? [])
-      if (fehlend.length > 0) {
-        const { eigene } = await verteileDmGeheimnis(
-          eigeneId,
-          peerId,
-          eintrag.geheimnis,
-          fehlend,
-        )
+      // Erzeugen darf nur die kleinere Kennung — hat die Gegenseite es
+      // erzeugt, geht ihr **Originalumschlag** weiter, sonst nichts. Selbst
+      // unterschrieben trüge er die grössere Kennung und würde abgewiesen; das
+      // Gerät als bedient zu vermerken hiesse, es für immer ohne Geheimnis zu
+      // lassen (bis 20.10.2026).
+      const darfSelbst = darfDmGeheimnisErzeugen(eigeneId, peerId)
+      const beleg = darfSelbst ? undefined : eintrag.beleg
+      if (fehlend.length > 0 && (darfSelbst || beleg)) {
+        const { eigene } = await verteileDmGeheimnis(eigeneId, peerId, eintrag.geheimnis, {
+          nurEigene: fehlend,
+          beleg,
+        })
         if (eigene.length > 0) {
           await ablage.merkeDmVerteilung(peerId, eintrag.verteiltAm ?? new Date().toISOString(), eigene)
           eintrag = { ...eintrag, verteiltAn: [...(eintrag.verteiltAn ?? []), ...eigene] }

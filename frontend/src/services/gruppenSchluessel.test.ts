@@ -1644,6 +1644,46 @@ describe('Chatgeheimnis des Direktchats', () => {
     expect(mailbox).toHaveLength(0)
   })
 
+  it('holt ein eigenes Gerät auch auf der grösseren Kontokennung nach', async () => {
+    /*
+     * Die Erzeugungsregel gilt fürs **Erzeugen**, nicht fürs Weiterreichen.
+     * Bob (die grössere Kennung) hat das Geheimnis von Alice bekommen; sein
+     * neu gekoppeltes Gerät braucht es von ihm. Bis 20.10.2026 trug der
+     * Umschlag dabei Bobs Kennung, sein eigenes Gerät wies ihn als „von der
+     * grösseren Kennung" ab — und weil Bob das Gerät trotzdem in `verteiltAn`
+     * vermerkte, versuchte es kein späterer Versand je wieder.
+     */
+    // Bobs Tablet ist noch nicht gekoppelt — es bekommt also nichts von Alice.
+    verzeichnis.set(
+      BOB,
+      (verzeichnis.get(BOB) ?? []).filter((g) => g.device_id !== bobZweit.kennung),
+    )
+
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    expect(await dmZiele(BOB, ALICE, ALT, { erzeuge: true })).toEqual(beiAlice)
+
+    // Erst jetzt koppelt Bob sein Tablet.
+    const tablett = geraet(BOB, 'bob-tablet')
+    mailbox.length = 0
+
+    await dmZiele(BOB, ALICE, ALT, { erzeuge: true })
+
+    // Genau ein Umschlag, an das eigene Gerät — und keiner an Alice.
+    expect(mailbox.map((u) => u.mailboxId)).toEqual(['dev:2'])
+    expect((await bob.ablage.liesDmGeheimnis(ALICE))?.verteiltAn).toEqual([
+      tablett.kennung,
+    ])
+
+    // Das neue Gerät nimmt es an und landet auf derselben Mailbox.
+    aktiviere(tablett)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(tablett))).toBe(1)
+    expect(await dmZiele(BOB, ALICE, ALT)).toEqual(beiAlice)
+  })
+
   it('hinterlegt den Besitznachweis auf der neuen Kennung, nie auf der alten', async () => {
     /*
      * Ein Nachweis auf der alten Kennung wäre der Fehler aus 3b: durch sie
