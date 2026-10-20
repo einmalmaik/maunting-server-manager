@@ -234,13 +234,20 @@ jobs:
         run: |
           feed_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json")] | last | .url // empty')"
           if [[ -n "$feed_asset" ]]; then
-            gh api "$feed_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json
-            feed_sig_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json.sig")] | last | .url // empty')"
-            [[ -n "$feed_sig_asset" ]] || { echo "Vorhandene MSS-Feed-Signatur fehlt." >&2; exit 1; }
-            gh api "$feed_sig_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json.sig
             feed_version="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.mss.json"))] | last | .tag_name // empty' | sed 's/^v//')"
             [[ -n "$feed_version" ]] || { echo "Version des MSS-Feeds fehlt." >&2; exit 1; }
-            vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss" --release "$feed_version"
+            # Ein zweiter Lauf fuer denselben Tag findet das eigene Paket als
+            # "vorheriges"; vpk pack bricht dann mit "exists" ab (20.10.2026).
+            if [[ "$feed_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
+              mkdir -p smart-system-velopack
+              gh api "$feed_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json
+              feed_sig_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json.sig")] | last | .url // empty')"
+              [[ -n "$feed_sig_asset" ]] || { echo "Vorhandene MSS-Feed-Signatur fehlt." >&2; exit 1; }
+              gh api "$feed_sig_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json.sig
+              vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss" --release "$feed_version"
+            else
+              echo "Der MSS-Feed im Release ist bereits diese Version; das Paket wird ohne Delta gebaut."
+            fi
           else
             echo "Kein vorheriger MSS-Feed; das erste Paket wird als Vollpaket erstellt."
           fi
