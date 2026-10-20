@@ -28,8 +28,13 @@ function installiereLocalStorage() {
   }
 }
 
-const { hochgeladen, fremdeGeraete, uebernommen, umbenennen } = vi.hoisted(() => ({
+const { hochgeladen, fremdeGeraete, uebernommen, umbenennen, gespeicherterName, wiederFreigegeben } =
+  vi.hoisted(() => ({
   hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
+  /** Was `self/reapprove` bekommen hat — Kennung und Nachweis. */
+  wiederFreigegeben: [] as { deviceId: string; nachweis: unknown }[],
+  /** Was serverseitig schon als Label steht — der Name überlebt einen Neustart. */
+  gespeicherterName: { wert: '' },
   fremdeGeraete: {
     liste: [] as { device_id: string; public_key: string }[],
     rufe: 0,
@@ -50,12 +55,23 @@ vi.mock('./ratchetSpeicher', () => ({
 vi.mock('@/api/social', () => ({
   putEigenesGeraet: vi.fn(async (req: { deviceId: string; publicKey: string; label: string }) => {
     hochgeladen.push(req)
-    return { device_id: req.deviceId, public_key: req.publicKey, label: req.label }
+    // Der Server überschreibt ein Label nur mit einem nicht-leeren Wert
+    // (`_auffrischen`); ein leerer Aufruf lässt den gespeicherten stehen.
+    if (!gespeicherterName.wert && req.label) gespeicherterName.wert = req.label
+    return {
+      device_id: req.deviceId,
+      public_key: req.publicKey,
+      label: gespeicherterName.wert || req.label,
+    }
   }),
   getE2eeGeraete: vi.fn(async () => {
     fremdeGeraete.rufe += 1
     if (fremdeGeraete.fehler) throw fremdeGeraete.fehler
     return fremdeGeraete.liste
+  }),
+  reapproveEigenesGeraet: vi.fn(async (deviceId: string, nachweis: unknown) => {
+    wiederFreigegeben.push({ deviceId, nachweis })
+    return { ok: true, is_approved: true }
   }),
 }))
 
@@ -131,6 +147,8 @@ const {
   verlangeGeraeteVon,
   E2eeKeinGeraetError,
   freigabeDaten,
+  eigenesGeraetFreigegeben,
+  gibMichSelbstFrei,
   onSchluesselWarnung,
   vertrauteGeraete,
   pruefeGeraeteBeleg,
@@ -145,6 +163,8 @@ describe('e2eeGeraet', () => {
     installiereIdb(platte)
     clearGeraeteMemory()
     hochgeladen.length = 0
+    wiederFreigegeben.length = 0
+    gespeicherterName.wert = ''
     fremdeGeraete.liste = []
     fremdeGeraete.rufe = 0
     setzeAngemeldetesKonto(10)
@@ -245,11 +265,66 @@ describe('e2eeGeraet', () => {
   }, 60_000)
 
   it('meldet sich nicht zweimal in derselben Sitzung', async () => {
+    // Der zweite Aufruf darf nichts mehr senden — auch nicht den Namen, der
+    // beim ersten Mal nachgetragen wurde. Gemessen wird deshalb der Zuwachs
+    // des zweiten Aufrufs, nicht die Gesamtzahl: der erste besteht seit
+    // 10/2026 aus Melden und Nachreichen der Bezeichnung.
     platte.clear()
     await geraetVeroeffentlichen()
+    const nachErstemAufruf = hochgeladen.length
     await geraetVeroeffentlichen()
-    expect(hochgeladen).toHaveLength(1)
+    expect(hochgeladen).toHaveLength(nachErstemAufruf)
   }, 60_000)
+
+  describe('Der Name in der Geräteliste', () => {
+    it('füllt ein leeres Label mit einer erkennbaren Bezeichnung', async () => {
+      // Bis 10/2026 meldete der Web-Client ohne Label, und der Server
+      // überschreibt ein leeres Feld nie — das Gerät stand dauerhaft als
+      // „Unbenanntes Gerät“ in der Liste, direkt neben „Dieses Gerät“.
+      platte.clear()
+      await geraetVeroeffentlichen()
+
+      expect(hochgeladen).toHaveLength(2)
+      expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toMatch(/^(Web-Frontend|MSS-App|Pondys Browser)/)
+      expect(hochgeladen[1].label.length).toBeLessThanOrEqual(64)
+    }, 60_000)
+
+    it('überschreibt einen vorhandenen Namen nicht', async () => {
+      // Ein gekoppeltes Gerät heißt wie seine Einladung („Arbeitsrechner“).
+      // Beim nächsten Start ruft die App ohne Argument — der Name muss stehen
+      // bleiben, sonst heißt das Gerät plötzlich „MSS-App · Windows“.
+      platte.clear()
+      gespeicherterName.wert = 'Arbeitsrechner'
+      await geraetVeroeffentlichen()
+
+      expect(hochgeladen).toHaveLength(1)
+      expect(hochgeladen[0].label).toBe('')
+    }, 60_000)
+
+    it('nimmt einen ausdrücklich genannten Namen unverändert', async () => {
+      platte.clear()
+      await geraetVeroeffentlichen('Telefon')
+
+      expect(hochgeladen).toHaveLength(1)
+      expect(hochgeladen[0].label).toBe('Telefon')
+    }, 60_000)
+  })
+
+  describe('Ein wartendes Gerät wieder zulassen', () => {
+    it('schickt den Nachweis für die eigene Kennung, nicht für eine genannte', async () => {
+      // Die Kennung kommt aus der lokalen Identität: ein Aufrufer darf nicht
+      // bestimmen, welches Gerät freigegeben wird.
+      platte.clear()
+      const meins = await eigenesGeraet()
+      await gibMichSelbstFrei({ password: 'geheim' })
+
+      expect(wiederFreigegeben).toEqual([
+        { deviceId: meins.kennung, nachweis: { password: 'geheim' } },
+      ])
+      expect(eigenesGeraetFreigegeben()).toBe(true)
+    }, 60_000)
+  })
 
   describe('Ein Schlüssel je Konto', () => {
     it('gibt zwei Konten in einem Browser verschiedene Schlüssel', async () => {

@@ -283,6 +283,30 @@ export async function approveEigenesGeraet(
   })
 }
 
+export interface ReapproveEigenesGeraetInput {
+  password?: string | null
+  confirmation?: string | null
+  otp_code?: string | null
+  /** Unterschriebene Passkey-Antwort (`passkeyNachweis('e2ee_reapprove')`). */
+  passkey?: Zweitnachweis | null
+}
+
+/**
+ * Holt das eigene Geraet zurueck, wenn es das einzige ist (`gibMichSelbstFrei`).
+ *
+ * Nur ohne ein anderes freigegebenes Geraet — sonst antwortet der Server 403,
+ * weil die Unterschrift der vorgesehene Weg ist. Der Nachweis ist Pflicht.
+ */
+export async function reapproveEigenesGeraet(
+  deviceId: string,
+  input: ReapproveEigenesGeraetInput = {},
+): Promise<{ ok: boolean; is_approved: boolean }> {
+  return api<{ ok: boolean; is_approved: boolean }>('/social/e2ee/devices/self/reapprove', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: deviceId, ...input }),
+  })
+}
+
 export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
   return api<E2eeGeraetItem[]>('/social/e2ee/devices/self/pending')
 }

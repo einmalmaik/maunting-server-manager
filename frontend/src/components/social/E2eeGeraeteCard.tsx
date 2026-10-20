@@ -1,15 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Clock, Fingerprint, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock, Fingerprint, ShieldCheck, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { getE2eeGeraete, type E2eeGeraetItem } from '@/api/social'
-import { Button, Input } from '@/Singra/UI'
+import {
+  getE2eeGeraete,
+  type E2eeGeraetItem,
+  type ReapproveEigenesGeraetInput,
+} from '@/api/social'
+import { Button, Input, PasswordInput } from '@/Singra/UI'
 import {
   eigenesGeraet,
   entferneGeraet,
   gebeGeraetFrei,
   geraeteZuruecksetzen,
+  gibMichSelbstFrei,
   sicherheitsnummer,
+  vertrauteGeraete,
 } from '@/services/e2eeGeraet'
 import { FaktorWechsel, useZweitfaktor } from '@/components/auth/ZweitfaktorNachweis'
 import { useAuthStore } from '@/stores/authStore'
@@ -41,6 +47,18 @@ export function E2eeGeraeteCard() {
   const isSocialAccount = user?.has_password === false
   const eigeneId = user?.id
   const [geraete, setGeraete] = useState<E2eeGeraetItem[] | null>(null)
+  /**
+   * Freigegebene Geräte, deren Freigabe **keine** Unterschrift trägt.
+   *
+   * `is_approved` ist ein Wort des Servers. Die Warnung im Chat glaubt ihm
+   * nicht, sondern prüft die Signaturkette (`vertrauteGeraete`), und deshalb
+   * konnte die Liste „freigegeben“ zeigen, während der Chat sagte: „Es bekommt
+   * nichts.“ Genau dieser Widerspruch stand bis 10/2026 im Fehlerbericht.
+   *
+   * `null` heißt: noch nicht geprüft (oder die Prüfung ist gescheitert). Dann
+   * steht hier kein Abzeichen — lieber nichts behaupten als etwas Falsches.
+   */
+  const [nichtGedeckt, setNichtGedeckt] = useState<Set<string> | null>(null)
   const [sicherheitsnummern, setSicherheitsnummern] = useState<Record<string, string>>({})
   const [fehler, setFehler] = useState(false)
   const [meineKennung, setMeineKennung] = useState<string | null>(null)
@@ -58,6 +76,20 @@ export function E2eeGeraeteCard() {
       const liste = await getE2eeGeraete(eigeneId, true)
       setGeraete(liste)
       setFehler(false)
+      // Welche freigegebenen Geräte deckt eine Unterschrift? Geprüft wird nur
+      // die freigegebene Teilmenge: ein wartendes Gerät hat nie etwas bekommen
+      // und darf durch bloßes Anzeigen auch nicht in die Vertrauensliste
+      // wandern (der erste Abruf schreibt sie fest).
+      const freigegeben = liste.filter((g) => g.is_approved !== false)
+      try {
+        const gedeckt = await vertrauteGeraete(eigeneId, freigegeben)
+        const gedeckteIds = new Set(gedeckt.map((g) => g.device_id))
+        setNichtGedeckt(
+          new Set(freigegeben.filter((g) => !gedeckteIds.has(g.device_id)).map((g) => g.device_id)),
+        )
+      } catch {
+        setNichtGedeckt(null)
+      }
       const nummern: Record<string, string> = {}
       for (const item of liste) {
         if (item.public_key) {
@@ -146,6 +178,33 @@ export function E2eeGeraeteCard() {
     }
   }
 
+  /**
+   * Holt dieses Gerät zurück, weil es das einzige ist — ohne Neuanfang.
+   *
+   * Der Nachweis kommt von `useZweitfaktor`, also vom eingerichteten Faktor
+   * oder vom Passwort; was das Konto nicht hat, wird nicht angeboten.
+   */
+  const wiederFreigeben = async (nachweis: ReapproveEigenesGeraetInput) => {
+    setLaeuft('reapprove')
+    try {
+      await gibMichSelbstFrei(nachweis)
+      setPasswort('')
+      setConfirmationWord('')
+      faktor.setCode('')
+      toast.success(t('profile.e2eeDevices.reapproveDone'))
+      await laden()
+    } catch (err: any) {
+      toast.error(err?.message || t('common.error'))
+    } finally {
+      setLaeuft(null)
+    }
+  }
+
+  const wiederFreigebenMitFaktor = async () => {
+    if (!faktor.bereit) return
+    await wiederFreigeben(await faktor.nachweis('e2ee_reapprove'))
+  }
+
   const neuBeginnenMitPasskey = async () => {
     setLaeuft('reset')
     try {
@@ -193,6 +252,11 @@ export function E2eeGeraeteCard() {
   // Freigeben und Entfernen freigegebener Geräte unterschreibt dieses Gerät;
   // der Server nimmt das nur von einem freigegebenen an.
   const ichBinFrei = meinEintrag?.is_approved !== false
+  // Gibt es noch ein anderes freigegebenes Gerät, ist die Unterschrift der
+  // vorgesehene Weg — der Server lehnt „wieder zulassen" dann mit 403 ab.
+  const andereFrei = geraete?.some(
+    (g) => g.device_id !== meinEintrag?.device_id && g.is_approved !== false,
+  ) === true
 
   return (
     <section className="msm-card space-y-4 p-6" aria-labelledby="e2ee-devices-title">
@@ -213,22 +277,36 @@ export function E2eeGeraeteCard() {
       {meinEintrag && !ichBinFrei && (
         <div className="space-y-3 rounded-lg border border-status-warning/30 bg-status-warning/10 p-4">
           <p className="text-sm text-on-surface">{t('profile.e2eeDevices.thisDevicePending')}</p>
+          <p className="text-sm text-on-surface-variant">
+            {t(andereFrei ? 'profile.e2eeDevices.reapproveOtherDevice' : 'profile.e2eeDevices.reapproveHelp')}
+          </p>
           <div className="space-y-2">
             <p className="text-sm font-medium text-on-surface">{t('profile.e2eeDevices.resetTitle')}</p>
             <p className="text-sm text-on-surface-variant">{t('profile.e2eeDevices.resetHelp')}</p>
 
             {faktor.wahl === 'passkey' ? (
               <div className="space-y-2 pt-2">
-                <Button
-                  variant="primary"
-                  disabled={laeuft === 'reset'}
-                  onClick={() => void neuBeginnenMitPasskey()}
-                  className="w-full sm:w-auto"
-                >
-                  <Fingerprint className="h-4 w-4 mr-2" />
-                  {t('profile.e2eeDevices.resetPasskey')}
-                </Button>
-                <FaktorWechsel faktor={faktor} disabled={laeuft === 'reset'} />
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  {!andereFrei && (
+                    <Button
+                      variant="primary"
+                      disabled={laeuft !== null}
+                      onClick={() => void wiederFreigebenMitFaktor()}
+                    >
+                      <ShieldCheck className="h-4 w-4 mr-2" aria-hidden="true" />
+                      {t('profile.e2eeDevices.reapprove')}
+                    </Button>
+                  )}
+                  <Button
+                    variant="secondary"
+                    disabled={laeuft !== null}
+                    onClick={() => void neuBeginnenMitPasskey()}
+                  >
+                    <Fingerprint className="h-4 w-4 mr-2" />
+                    {t('profile.e2eeDevices.resetPasskey')}
+                  </Button>
+                </div>
+                <FaktorWechsel faktor={faktor} disabled={laeuft !== null} />
               </div>
             ) : faktor.wahl === 'totp' ? (
               <div className="space-y-3 pt-2">
@@ -244,9 +322,18 @@ export function E2eeGeraeteCard() {
                       onChange={(e) => faktor.setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="font-mono tracking-widest"
                     />
+                    {!andereFrei && (
+                      <Button
+                        variant="primary"
+                        disabled={!faktor.bereit || laeuft !== null}
+                        onClick={() => void wiederFreigebenMitFaktor()}
+                      >
+                        {t('profile.e2eeDevices.reapprove')}
+                      </Button>
+                    )}
                     <Button
                       variant="secondary"
-                      disabled={!faktor.bereit || laeuft === 'reset'}
+                      disabled={!faktor.bereit || laeuft !== null}
                       onClick={() => void neuBeginnenMitTotp()}
                       className="text-error hover:bg-error/10 hover:text-error"
                     >
@@ -254,7 +341,7 @@ export function E2eeGeraeteCard() {
                     </Button>
                   </div>
                 </div>
-                <FaktorWechsel faktor={faktor} disabled={laeuft === 'reset'} />
+                <FaktorWechsel faktor={faktor} disabled={laeuft !== null} />
               </div>
             ) : isSocialAccount ? (
               <div className="space-y-2 pt-2">
@@ -262,17 +349,25 @@ export function E2eeGeraeteCard() {
                   {t('profile.e2eeDevices.resetSocialHelp')}
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="text"
+                  <Input
                     aria-label={t('profile.e2eeDevices.resetSocialConfirmation')}
                     placeholder={t('profile.e2eeDevices.resetSocialConfirmation')}
                     value={confirmationWord}
                     onChange={(e) => setConfirmationWord(e.target.value)}
-                    className="msm-input min-w-0 flex-1 font-mono"
+                    className="min-w-0 flex-1 font-mono"
                   />
+                  {!andereFrei && (
+                    <Button
+                      variant="primary"
+                      disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft !== null}
+                      onClick={() => void wiederFreigeben({ confirmation: 'RESET' })}
+                    >
+                      {t('profile.e2eeDevices.reapprove')}
+                    </Button>
+                  )}
                   <Button
                     variant="secondary"
-                    disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft === 'reset'}
+                    disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft !== null}
                     onClick={() => void neuBeginnenMitConfirmation()}
                     className="text-error hover:bg-error/10 hover:text-error"
                   >
@@ -282,18 +377,26 @@ export function E2eeGeraeteCard() {
               </div>
             ) : (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center pt-2">
-                <input
-                  type="password"
+                <PasswordInput
                   autoComplete="current-password"
                   aria-label={t('profile.e2eeDevices.resetPassword')}
                   placeholder={t('profile.e2eeDevices.resetPassword')}
                   value={passwort}
                   onChange={(e) => setPasswort(e.target.value)}
-                  className="msm-input min-w-0 flex-1"
+                  className="min-w-0 flex-1"
                 />
+                {!andereFrei && (
+                  <Button
+                    variant="primary"
+                    disabled={!passwort || laeuft !== null}
+                    onClick={() => void wiederFreigeben({ password: passwort })}
+                  >
+                    {t('profile.e2eeDevices.reapprove')}
+                  </Button>
+                )}
                 <Button
                   variant="secondary"
-                  disabled={!passwort || laeuft === 'reset'}
+                  disabled={!passwort || laeuft !== null}
                   onClick={() => void neuBeginnen()}
                   className="text-error hover:bg-error/10 hover:text-error"
                 >
@@ -343,6 +446,12 @@ export function E2eeGeraeteCard() {
                         {t('profile.e2eeDevices.pending')}
                       </span>
                     )}
+                    {geraet.is_approved !== false && nichtGedeckt?.has(geraet.device_id) && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-error/30 bg-error/10 px-2 py-0.5 text-xs font-medium text-error">
+                        <AlertTriangle className="w-3 h-3" aria-hidden="true" />
+                        {t('profile.e2eeDevices.notCovered')}
+                      </span>
+                    )}
                   </div>
                   {/* Die Kennung steht im Klartext in jedem Umschlag. Sie hier
                       zu zeigen verrät nichts und ist der einzige Weg, zwei
@@ -358,6 +467,11 @@ export function E2eeGeraeteCard() {
                       </>
                     )}
                   </div>
+                  {geraet.is_approved !== false && nichtGedeckt?.has(geraet.device_id) && (
+                    <p className="max-w-2xl text-xs text-on-surface-variant">
+                      {t('profile.e2eeDevices.notCoveredHelp')}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 self-start sm:self-auto">
                   {!istMeins && ichBinFrei && geraet.is_approved === false && (

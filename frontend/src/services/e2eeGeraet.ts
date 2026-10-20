@@ -47,6 +47,7 @@ import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { erzeugeSignaturPaar, pruefe, signiere, type SignaturPaar } from './absenderSignatur'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
+import { geraeteBezeichnung } from './geraeteBezeichnung'
 import {
   MessengerVerschlossenError,
   entsiegleZeile,
@@ -58,9 +59,11 @@ import {
   approveEigenesGeraet,
   getE2eeGeraete,
   putEigenesGeraet,
+  reapproveEigenesGeraet,
   removeEigenesGeraet,
   resetEigeneGeraete,
   type E2eeGeraetItem,
+  type ReapproveEigenesGeraetInput,
   type ResetEigeneGeraeteInput,
 } from '@/api/social'
 
@@ -443,22 +446,49 @@ async function holeSitzungenNach(kontoId: number, geraet: EigenesGeraet): Promis
 
 let veroeffentlichtAls: string | null = null
 
+async function veroeffentliche(
+  geraet: EigenesGeraet,
+  label: string,
+): Promise<E2eeGeraetItem> {
+  return putEigenesGeraet({
+    deviceId: geraet.kennung,
+    publicKey: geraet.paar.publicKeyJwk,
+    signingPublicKey: geraet.signaturPaar.publicKeyJwk,
+    label,
+  })
+}
+
 /**
  * Meldet dieses Gerät beim Konto an. Idempotent und bei jedem Start fällig.
  *
  * Das erneute Melden ist kein Selbstzweck: es frischt `last_seen_at` auf, und
  * danach richtet sich der Gerätedeckel im Backend. Ein Gerät, das sich nie
  * wieder meldet, soll irgendwann Platz machen.
+ *
+ * **Ein Name wird nur gefüllt, nie überschrieben.** Ein gekoppeltes Gerät hat
+ * seinen Namen aus der Einladung; riefe dieser Aufruf beim nächsten Start ohne
+ * Argument, stünde danach `<App> · <System>` statt „Arbeitsrechner“ in der
+ * Liste, denn `_auffrischen` übernimmt jedes nicht-leere Label. Deshalb wird
+ * erst nachgesehen, was der Server führt, und nur ein leeres Feld bekommt die
+ * abgeleitete Bezeichnung — einmal, danach ist sie da.
  */
 export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet> {
   const geraet = await eigenesGeraet()
   if (veroeffentlichtAls === geraet.kennung) return geraet
-  const antwort = await putEigenesGeraet({
-    deviceId: geraet.kennung,
-    publicKey: geraet.paar.publicKeyJwk,
-    signingPublicKey: geraet.signaturPaar.publicKeyJwk,
-    label,
-  })
+
+  const eigenerName = (label || '').trim()
+  let antwort = await veroeffentliche(geraet, eigenerName)
+  if (!eigenerName && !(antwort?.label || '').trim()) {
+    const abgeleitet = geraeteBezeichnung()
+    if (abgeleitet) {
+      try {
+        antwort = await veroeffentliche(geraet, abgeleitet)
+      } catch {
+        // Der Eintrag steht bereits. Der Name ist Komfort, kein Zugang.
+      }
+    }
+  }
+
   setzeEigeneFreigabe(antwort?.is_approved !== false)
   veroeffentlichtAls = geraet.kennung
   return geraet
@@ -937,6 +967,27 @@ export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
   }
   await removeEigenesGeraet(geraet.device_id, unterschrift?.kennung, unterschrift?.sig)
   vergessenGeraete(konto)
+}
+
+/**
+ * Holt dieses Gerät zurück, weil es das einzige ist.
+ *
+ * Der Fall dahinter: der Geräteschlüssel wurde neu erzeugt (verlorene Ablage,
+ * neuer Browser), das Gerät wartet auf Freigabe — und es gibt kein zweites
+ * freigegebenes Gerät, das unterschreiben könnte. Ohne diesen Weg bliebe nur
+ * der Neuanfang, der alle Sitzungen sperrt.
+ *
+ * **Freigegeben ist nicht beglaubigt.** Der Server gibt die Zustellung frei,
+ * aber `approved_by` bleibt leer: niemand hat diesen Schlüssel unterschrieben.
+ * Die Gegenstellen sehen genau das und warnen, bis der Mensch die
+ * Sicherheitsnummer verglichen hat. Deshalb ist der Nachweis hier Pflicht —
+ * sonst wäre es ein Weg an der Unterschrift vorbei.
+ */
+export async function gibMichSelbstFrei(nachweis: ReapproveEigenesGeraetInput): Promise<void> {
+  const meins = await eigenesGeraet()
+  await reapproveEigenesGeraet(meins.kennung, nachweis)
+  setzeEigeneFreigabe(true)
+  vergessenGeraete(meinKonto())
 }
 
 /**

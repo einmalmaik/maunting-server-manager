@@ -179,6 +179,7 @@ export type PasskeyZweck =
   | '2fa_disable'
   | 'device_pairing'
   | 'e2ee_reset'
+  | 'e2ee_reapprove'
   | 'password_change'
   | 'email_change'
   | 'account_delete'

@@ -3,14 +3,27 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import i18n from '@/i18n'
 import { getE2eeGeraete } from '@/api/social'
-import { entferneGeraet, gebeGeraetFrei, geraeteZuruecksetzen } from '@/services/e2eeGeraet'
+import {
+  entferneGeraet,
+  gebeGeraetFrei,
+  geraeteZuruecksetzen,
+  gibMichSelbstFrei,
+  vertrauteGeraete,
+} from '@/services/e2eeGeraet'
 import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { E2eeGeraeteCard } from './E2eeGeraeteCard'
 
 const { liste } = vi.hoisted(() => ({
   liste: {
-    inhalt: [] as { device_id: string; public_key: string; label: string; is_approved?: boolean }[],
+    inhalt: [] as {
+      device_id: string
+      public_key: string
+      label: string
+      is_approved?: boolean
+      approved_by?: string
+      approval_signature?: string
+    }[],
     fehler: null as Error | null,
   },
 }))
@@ -31,6 +44,8 @@ vi.mock('@/services/e2eeGeraet', () => ({
   entferneGeraet: vi.fn(async () => undefined),
   gebeGeraetFrei: vi.fn(async () => undefined),
   geraeteZuruecksetzen: vi.fn(async () => undefined),
+  gibMichSelbstFrei: vi.fn(async () => undefined),
+  vertrauteGeraete: vi.fn(async (_id: number, liste: any[]) => liste),
 }))
 
 /** Beantwortet den nächsten Bestätigungsdialog. */
@@ -49,6 +64,8 @@ describe('E2eeGeraeteCard', () => {
       { device_id: 'fremdes-geraet-02', public_key: 'pub-2', label: 'Arbeitsrechner' },
     ]
     useAuthStore.setState({ user: { id: 10, username: 'anna' } as any })
+    // Im Normalfall deckt jede Freigabe — die Ausnahmen setzt der Test.
+    vi.mocked(vertrauteGeraete).mockImplementation(async (_id: number, liste: any[]) => liste)
   })
 
   it('markiert das eigene Gerät und bietet dafür kein Entfernen an', async () => {
@@ -194,6 +211,100 @@ describe('E2eeGeraeteCard', () => {
     await waitFor(() =>
       expect(geraeteZuruecksetzen).toHaveBeenCalledWith({ confirmation: 'RESET' }),
     )
+  })
+
+  it('markiert ein freigegebenes Gerät, dessen Freigabe keine Unterschrift trägt', async () => {
+    // Der Widerspruch aus dem Fehlerbericht: die Liste zeigte „freigegeben“,
+    // der Chat sagte „es bekommt nichts“. Beides ist richtig — `is_approved`
+    // ist ein Wort des Servers, die Warnung hängt an der Signaturkette.
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: true },
+      {
+        device_id: 'geister-geraet-02',
+        public_key: 'pub-2',
+        label: 'Altes Handy',
+        is_approved: true,
+        approved_by: '',
+        approval_signature: '',
+      },
+    ]
+    vi.mocked(vertrauteGeraete).mockImplementation(async (_id: number, geraete: any[]) =>
+      geraete.filter((g) => g.device_id !== 'geister-geraet-02'),
+    )
+
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText('Ohne gültige Freigabe')).toBeInTheDocument()
+    expect(
+      screen.getByText(/keines deiner Geräte hat die Freigabe unterschrieben/),
+    ).toBeInTheDocument()
+  })
+
+  it('zeigt kein Abzeichen, wenn die Signaturkette alle Freigaben deckt', async () => {
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: true },
+      {
+        device_id: 'gedecktes-geraet-02',
+        public_key: 'pub-2',
+        label: 'Telefon',
+        is_approved: true,
+        approved_by: 'dieses-geraet-0001',
+        approval_signature: 'sig',
+      },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText('Telefon')).toBeInTheDocument()
+    expect(screen.queryByText('Ohne gültige Freigabe')).toBeNull()
+  })
+
+  it('prüft nur freigegebene Geräte gegen die Signaturkette', async () => {
+    // Der erste Abruf schreibt die Vertrauensliste fest. Ein wartendes Gerät
+    // hat nie etwas bekommen und darf dort nicht vorab hineinrutschen.
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: true },
+      { device_id: 'wartendes-geraet-03', public_key: 'pub-3', label: '', is_approved: false },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    await waitFor(() => expect(vertrauteGeraete).toHaveBeenCalled())
+    const [, geprueft] = vi.mocked(vertrauteGeraete).mock.calls[0]
+    expect(geprueft.map((g: any) => g.device_id)).toEqual(['dieses-geraet-0001'])
+  })
+
+  it('bietet einem einzigen wartenden Gerät den Weg zurück ohne Neuanfang', async () => {
+    // Der Fall aus Phase 2: das Gerät hat seinen Schlüssel neu erzeugt, es gibt
+    // kein zweites freigegebenes Gerät, das unterschreiben könnte. Bis 10/2026
+    // blieb nur der Neuanfang — der alle Sitzungen sperrt.
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(await screen.findByText(/Dieses Gerät wartet auf Freigabe/)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Passwort'), { target: { value: 'geheim' } })
+
+    const zurueck = screen.getByRole('button', { name: 'Dieses Gerät wieder zulassen' })
+    fireEvent.click(zurueck)
+
+    await waitFor(() => expect(gibMichSelbstFrei).toHaveBeenCalledWith({ password: 'geheim' }))
+    // Kein Neuanfang: die anderen Sitzungen bleiben, nur das Verzeichnis nicht.
+    expect(geraeteZuruecksetzen).not.toHaveBeenCalled()
+  })
+
+  it('verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift', async () => {
+    // Dort ist der Weg die Unterschrift — „wieder zulassen" lehnt der Server
+    // ab, und ein Knopf, der nur 403 erzeugt, gehörte nicht auf den Schirm.
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
+      { device_id: 'altes-geraet-0002', public_key: 'pub-2', label: 'Telefon', is_approved: true },
+    ]
+    render(<E2eeGeraeteCard />)
+
+    expect(
+      await screen.findByText(/Ein anderes freigegebenes Gerät muss dieses hier freigeben/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Dieses Gerät wieder zulassen' })).toBeNull()
   })
 
   it('bietet bei aktiver 2FA die Eingabe des OTP-Codes an', async () => {
