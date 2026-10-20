@@ -203,11 +203,18 @@ function neueAblage(): TestAblage {
       if (dmGeheimnisse.has(eintrag.peerId)) return
       dmGeheimnisse.set(eintrag.peerId, eintrag)
     },
-    async merkeDmVerteilung(peerId, wann) {
-      // Wie die echte Ablage: nur die Marke, nie das Geheimnis.
+    async merkeDmVerteilung(peerId, wann, eigeneGeraete = []) {
+      // Wie die echte Ablage: nur die Marke und die Liste der eigenen Geräte,
+      // nie das Geheimnis. `verteiltAm` wird nicht zurückgenommen.
       const vorhanden = dmGeheimnisse.get(peerId)
-      if (!vorhanden || vorhanden.verteiltAm) return
-      dmGeheimnisse.set(peerId, { ...vorhanden, verteiltAm: wann })
+      if (!vorhanden) return
+      const bekannt = vorhanden.verteiltAn ?? []
+      const verteiltAn = [...new Set([...bekannt, ...eigeneGeraete])]
+      dmGeheimnisse.set(peerId, {
+        ...vorhanden,
+        verteiltAm: vorhanden.verteiltAm ?? wann,
+        verteiltAn,
+      })
     },
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
@@ -1597,6 +1604,44 @@ describe('Chatgeheimnis des Direktchats', () => {
     aktiviere(aliceZweit)
     expect(await holeGeraeteSteuerung(ALICE, entsiegleFuer(aliceZweit))).toBe(1)
     expect(await dmZiele(ALICE, BOB, ALT, { erzeuge: true })).toEqual(beiAlice)
+  })
+
+  it('holt ein eigenes Gerät nach, das erst nach der Zustellung dazukommt', async () => {
+    /*
+     * Der Kern von Problem B: bis 10/2026 bediente die Verteilung die eigenen
+     * Geräte genau einmal. `verteiltAm` stand danach, und ein später
+     * gekoppeltes Gerät las die neue Mailbox, ohne das Geheimnis je zu
+     * bekommen — jedes andere Gerät schrieb ausschließlich dorthin, und sein
+     * Verlauf blieb für immer leer.
+     */
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    // Nur ein eigenes Gerät (dieses hier): nichts nachzutragen.
+    expect((await alice.ablage.liesDmGeheimnis(BOB))?.verteiltAn ?? []).toEqual([])
+
+    // Alice koppelt ein zweites Gerät.
+    const aliceZweit = geraet(ALICE, 'alice-handy')
+    mailbox.length = 0
+
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    // Genau ein Umschlag, in die Geräte-Mailbox der eigenen Seite — und nicht
+    // ein zweiter an die Gegenstelle, die es längst hat.
+    expect(mailbox.map((u) => u.mailboxId)).toEqual(['dev:1'])
+    expect((await alice.ablage.liesDmGeheimnis(BOB))?.verteiltAn).toEqual([
+      aliceZweit.kennung,
+    ])
+
+    // Das neue Gerät kann es damit öffnen und landet auf derselben Mailbox.
+    aktiviere(aliceZweit)
+    expect(await holeGeraeteSteuerung(ALICE, entsiegleFuer(aliceZweit))).toBe(1)
+    expect(await dmZiele(ALICE, BOB, ALT)).toEqual(beiAlice)
+
+    // Und ein weiterer Versand schickt nichts mehr: es hat es jetzt.
+    aktiviere(alice)
+    mailbox.length = 0
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(mailbox).toHaveLength(0)
   })
 
   it('hinterlegt den Besitznachweis auf der neuen Kennung, nie auf der alten', async () => {

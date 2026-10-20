@@ -229,6 +229,15 @@ export interface DmGeheimnis {
    * Beim Empfänger steht hier der Augenblick des Empfangs: er hat es ja.
    */
   verteiltAm?: string | null
+  /**
+   * Welche **eigenen** Geräte es bekommen haben.
+   *
+   * Ohne diese Liste wusste der Absender nur, *dass* er die eigenen Geräte
+   * einmal bedient hatte — nicht welche. Ein später gekoppeltes Gerät fiel
+   * damit durch jedes Raster, und der Verlauf lief auseinander (bis 10/2026).
+   * Was hier fehlt, wird beim nächsten Versand nachgetragen.
+   */
+  verteiltAn?: string[]
 }
 
 export interface GruppenAblage {
@@ -241,10 +250,17 @@ export interface GruppenAblage {
   /** Legt es ab und überschreibt ein vorhandenes **nie** — wie bei der Gruppe. */
   schreibeDmGeheimnis(eintrag: DmGeheimnis): Promise<void>
   /**
-   * Trägt nach, dass die Gegenstelle es hat. Der einzige erlaubte Nachtrag:
-   * das Geheimnis selbst bleibt unberührt.
+   * Trägt nach, dass die Gegenstelle es hat — und welche eigenen Geräte.
+   *
+   * Der einzige erlaubte Nachtrag: das Geheimnis selbst bleibt unberührt, und
+   * `verteiltAm` wird nie zurückgenommen. Die Liste der eigenen Geräte wächst
+   * nur, damit ein später dazugekommenes Gerät beim nächsten Versand drankommt.
    */
-  merkeDmVerteilung(peerId: number, wann: string): Promise<void>
+  merkeDmVerteilung(
+    peerId: number,
+    wann: string,
+    eigeneGeraete?: readonly string[],
+  ): Promise<void>
   /**
    * Legt das Geheimnis ab — und überschreibt ein vorhandenes **nie**.
    *
@@ -509,12 +525,17 @@ const indexedDbAblage: GruppenAblage = {
     if (await indexedDbAblage.liesDmGeheimnis(eintrag.peerId)) return
     await dmZeileSchreiben(eintrag)
   },
-  async merkeDmVerteilung(peerId, wann) {
+  async merkeDmVerteilung(peerId, wann, eigeneGeraete = []) {
     // Der einzige erlaubte Nachtrag an einem abgelegten Chatgeheimnis: das
-    // Geheimnis selbst bleibt, nur die Zustellmarke kommt dazu.
+    // Geheimnis selbst bleibt, nur die Zustellmarke und die Liste der eigenen
+    // Geräte kommen dazu. `verteiltAm` wird nie zurückgenommen.
     const vorhanden = await indexedDbAblage.liesDmGeheimnis(peerId)
-    if (!vorhanden || vorhanden.verteiltAm) return
-    await dmZeileSchreiben({ ...vorhanden, verteiltAm: wann })
+    if (!vorhanden) return
+    const bekannt = vorhanden.verteiltAn ?? []
+    const verteiltAn = [...new Set([...bekannt, ...eigeneGeraete])]
+    const verteiltAm = vorhanden.verteiltAm ?? wann
+    if (vorhanden.verteiltAm === verteiltAm && bekannt.length === verteiltAn.length) return
+    await dmZeileSchreiben({ ...vorhanden, verteiltAm, verteiltAn })
   },
   async loescheGruppe(groupId) {
     const db = await oeffneDatenbank()
@@ -843,12 +864,19 @@ function darfDmGeheimnisErzeugen(eigeneId: number, peerId: number): boolean {
  * darüber, ob der Umzug tragfähig ist — und genau diese Zahl entscheidet
  * darüber (siehe `verteiltAm`). Eine Summe über beide Seiten wäre hier ein
  * stilles Ja auf eine Frage, die niemand gestellt hat.
+ *
+ * **Die eigenen Geräte werden namentlich zurückgegeben.** Bis 10/2026 war das
+ * eine stille Nebenwirkung ohne Gedächtnis: ein Gerät, das erst nach der
+ * ersten Zustellung dazukam, erfuhr das Geheimnis nie wieder — es las die neue
+ * Mailbox und sah nichts. Mit den Kennungen in `verteiltAn` weiß der nächste
+ * Versand, wem noch etwas fehlt (siehe `eigeneGeraeteOhne`).
  */
 async function verteileDmGeheimnis(
   eigeneId: number,
   peerId: number,
   geheimnis: string,
-): Promise<number> {
+  nurEigene?: readonly string[],
+): Promise<{ gegenstelle: number; eigene: string[] }> {
   // Beglaubigt, und zwar gebunden an die **abgeleitete Gesprächskennung** und
   // nicht an die Geräte-Mailbox, in die der Umschlag fällt: das Paket geht an
   // viele Mailboxen, eine Unterschrift je Ziel wäre eine je Gerät. Die
@@ -872,24 +900,64 @@ async function verteileDmGeheimnis(
   }
   const text = JSON.stringify(nutzlast)
 
+  // Nachtrag an einzelne eigene Geräte: die Gegenstelle hat es längst, und ein
+  // erneuter Umschlag an sie wäre nur Rauschen.
+  if (nurEigene) {
+    try {
+      const { kennungen } = await anJedesGeraet(
+        kontext,
+        [eigeneId],
+        text,
+        DM_GEHEIMNIS_TYP,
+        nurEigene,
+      )
+      return { gegenstelle: 0, eigene: kennungen }
+    } catch {
+      return { gegenstelle: 0, eigene: [] }
+    }
+  }
+
   // Zuerst die Gegenstelle — diese Zahl zählt.
-  let erreicht = 0
+  let gegenstelle = 0
   try {
-    erreicht = await anJedesGeraet(kontext, [peerId], text, DM_GEHEIMNIS_TYP)
+    gegenstelle = (await anJedesGeraet(kontext, [peerId], text, DM_GEHEIMNIS_TYP)).anzahl
   } catch {
     // `anJedesGeraet` wirft, wenn es Ziele gab und keines erreicht wurde. Für
     // die Gruppe ist das ein Abbruch; hier ist es schlicht eine Null.
-    erreicht = 0
+    gegenstelle = 0
   }
 
   // Dann die eigenen Zweitgeräte. Bestes Bemühen: erreicht es keines, schreibt
   // das Handy vorerst in die alte Mailbox — und die wird ohnehin mitgelesen.
+  let eigene: string[] = []
   try {
-    await anJedesGeraet(kontext, [eigeneId], text, DM_GEHEIMNIS_TYP)
+    eigene = (await anJedesGeraet(kontext, [eigeneId], text, DM_GEHEIMNIS_TYP)).kennungen
   } catch {
     /* nachholbar */
   }
-  return erreicht
+  return { gegenstelle, eigene }
+}
+
+/**
+ * Eigene Geräte, die das Chatgeheimnis noch nicht bekommen haben.
+ *
+ * Das eigene Gerät steht nicht in der Liste — es hat es. Ein **wartendes**
+ * Gerät fehlt hier ebenfalls, weil `geraeteVon` es noch nicht führt: es bekommt
+ * nichts, bis es freigegeben ist, und danach steht es hier als fehlend.
+ */
+async function eigeneGeraeteOhne(
+  eigeneId: number,
+  bekannt: readonly string[],
+): Promise<string[]> {
+  const meins = await eigenesGeraet()
+  let kennungen: string[]
+  try {
+    kennungen = (await geraeteVon(eigeneId)).map((g) => g.device_id)
+  } catch {
+    return []
+  }
+  const hat = new Set(bekannt)
+  return kennungen.filter((id) => id !== meins.kennung && !hat.has(id))
 }
 
 /**
@@ -1046,16 +1114,39 @@ export async function dmZiele(
     // lässt einen Steuerumschlag in eine fremde Geräte-Mailbox nur bei
     // bestehender Beziehung durch, und die entsteht erst mit dieser Nachricht.
     if (eintrag && erzeuge && !eintrag.verteiltAm) {
-      let erreicht = 0
+      let gegenstelle = 0
+      let eigene: string[] = []
       try {
-        erreicht = await verteileDmGeheimnis(eigeneId, peerId, eintrag.geheimnis)
+        ;({ gegenstelle, eigene } = await verteileDmGeheimnis(
+          eigeneId,
+          peerId,
+          eintrag.geheimnis,
+        ))
       } catch {
         // Kein Netz. Nächster Versand, nächster Versuch.
       }
-      if (erreicht > 0) {
+      if (gegenstelle > 0) {
         const wann = new Date().toISOString()
-        await ablage.merkeDmVerteilung(peerId, wann)
-        eintrag = { ...eintrag, verteiltAm: wann }
+        await ablage.merkeDmVerteilung(peerId, wann, eigene)
+        eintrag = { ...eintrag, verteiltAm: wann, verteiltAn: eigene }
+      }
+    } else if (eintrag && erzeuge) {
+      // Die Gegenstelle hat es — **die eigenen Geräte darum noch lange nicht.**
+      // Bis 10/2026 lief die Verteilung genau einmal im Leben eines Chats. Ein
+      // danach gekoppeltes oder zurückgesetztes Gerät las die neue Mailbox und
+      // sah nichts, während jedes andere Gerät ausschließlich dorthin schrieb.
+      const fehlend = await eigeneGeraeteOhne(eigeneId, eintrag.verteiltAn ?? [])
+      if (fehlend.length > 0) {
+        const { eigene } = await verteileDmGeheimnis(
+          eigeneId,
+          peerId,
+          eintrag.geheimnis,
+          fehlend,
+        )
+        if (eigene.length > 0) {
+          await ablage.merkeDmVerteilung(peerId, eintrag.verteiltAm ?? new Date().toISOString(), eigene)
+          eintrag = { ...eintrag, verteiltAn: [...(eintrag.verteiltAn ?? []), ...eigene] }
+        }
       }
     }
   } catch {
@@ -1283,22 +1374,27 @@ async function anJedesGeraet(
   empfaengerIds: readonly number[],
   nutzlast: string,
   kontrolltyp: string,
-): Promise<number> {
+  nur?: readonly string[],
+): Promise<{ anzahl: number; kennungen: string[] }> {
   const meins = await eigenesGeraet()
   const basis =
     typeof crypto !== 'undefined' && crypto.randomUUID
       ? crypto.randomUUID()
       : `gk-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+  // Für ein Nachtragen an **einzelne** Geräte: die übrigen haben es schon.
+  const erlaubt = nur ? new Set(nur) : null
 
   let lfd = 0
   let zugestellt = 0
   let ziele = 0
+  const kennungen: string[] = []
   for (const empfaengerId of empfaengerIds) {
     const geraete = await geraeteVon(empfaengerId)
     const ziel = await deriveUserDeviceMailboxId(empfaengerId)
     for (const geraet of geraete) {
       // Das eigene Gerät hat den Schlüssel schon.
       if (empfaengerId === kontext.eigeneId && geraet.device_id === meins.kennung) continue
+      if (erlaubt && !erlaubt.has(geraet.device_id)) continue
       ziele += 1
       const nummer = lfd++
       try {
@@ -1313,6 +1409,7 @@ async function anJedesGeraet(
           control_type: kontrolltyp,
         })
         zugestellt += 1
+        kennungen.push(geraet.device_id)
       } catch {
         // Ein Gerät, das sich nicht erreichen lässt, hält die übrigen nicht auf.
         // Es sieht später eine unbekannte Kennung und fordert nach.
@@ -1327,7 +1424,7 @@ async function anJedesGeraet(
   if (ziele > 0 && zugestellt === 0) {
     throw new GruppenSchluesselNichtZugestelltError(kontext.groupId, ziele)
   }
-  return zugestellt
+  return { anzahl: zugestellt, kennungen }
 }
 
 async function schluesselNutzlast(
@@ -1357,12 +1454,14 @@ async function verteileSchluessel(
   empfaenger: readonly number[],
   geheimnis: string | null,
 ): Promise<number> {
-  return anJedesGeraet(
-    kontext,
-    empfaenger,
-    await schluesselNutzlast(kontext, eintrag, geheimnis),
-    GRUPPEN_SCHLUESSEL_TYP,
-  )
+  return (
+    await anJedesGeraet(
+      kontext,
+      empfaenger,
+      await schluesselNutzlast(kontext, eintrag, geheimnis),
+      GRUPPEN_SCHLUESSEL_TYP,
+    )
+  ).anzahl
 }
 
 // ==========================================
@@ -1690,12 +1789,14 @@ async function beantworteAnfrage(
       eintrag,
       (await ablage.liesGeheimnis(kontext.groupId))?.geheimnis ?? null,
     )
-    zugestellt = await anJedesGeraet(
-      kontext,
-      [anfragerId],
-      nutzlast,
-      GRUPPEN_SCHLUESSEL_TYP,
-    )
+    zugestellt = (
+      await anJedesGeraet(
+        kontext,
+        [anfragerId],
+        nutzlast,
+        GRUPPEN_SCHLUESSEL_TYP,
+      )
+    ).anzahl
   } catch {
     zugestellt = 0
   }
@@ -1756,7 +1857,7 @@ export async function fordereGruppenSchluessel(
       keyId: fehlendeKeyId,
     })
 
-    const erreicht = await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)
+    const erreicht = (await anJedesGeraet(kontext, ziele, nutzlast, GRUPPEN_ANFRAGE_TYP)).anzahl
     // Nichts rausgegangen heißt: es liegt auch nichts in der Mailbox, das
     // jemand später noch beantworten könnte. Also Marke zurück.
     if (erreicht === 0) gefragt.delete(marke)
