@@ -214,8 +214,13 @@ Journal nach `409 FremdeSitzung` sowie `410`/`503` bei WebPush sehen.
   nicht beim einzigen Gerät. `approval_signature` **und** `approved_by` fallen mit, der Eintrag ist
   ehrlich „wartend“. Damit gibt es den Zustand „freigegeben ohne Unterschrift“ nicht mehr neu; er
   bleibt nur als Altbestand, und den zeigt die Karte an (Phase 1).
-- Ein **nachgereichter** Signaturschlüssel (Feld war leer, Primärschlüssel unverändert) ist kein
-  Wechsel und nimmt keine Freigabe. Sonst verlöre jeder Altbestand beim ersten Start seine Freigabe.
+- **Auch ein nachgereichter Signaturschlüssel ist ein Wechsel** (Korrektur nach der Prüfung vom
+  20.10.2026). Er war kurz als Ausnahme gebaut, damit der Altbestand nach dem Update nicht
+  nachbestätigen muss — und genau darin lag ein Loch: wer das Token dieses Geräts hat, legt unter
+  derselben Kennung seinen eigenen Signaturschlüssel ab, bleibt freigegeben und unterschreibt
+  damit Freigaben für weitere Geräte (Regel 21: ein Access-Token darf nie zu dauerhaftem Zugang
+  werden). Der Preis ist eine einmalige Nachbestätigung für Geräte von vor 09/2026; sie läuft
+  über die Unterschrift eines freigegebenen Geräts oder `wieder_freigeben`.
 - `bestaetigen` hat **keine Ausnahme mehr** für das letzte Gerät. Bis 20.10.2026 wurde ein
   wartendes Gerät ohne jede Unterschrift freigegeben, sobald kein freigegebenes mehr existierte —
   damit holte sich jeder mit einem Access-Token wieder Zutritt (Regel 21).
@@ -225,6 +230,14 @@ Journal nach `409 FremdeSitzung` sowie `410`/`503` bei WebPush sehen.
   `e2ee_reapprove` (neu in `ZWECKE_ANGEMELDET`, `PasskeyZweck`, `auth.browserBestaetigung.purpose`).
   Der Nachweis läuft über den gemeinsamen Helfer `_geraete_nachweis` (2FA-Faktor, sonst Passwort,
   sonst `RESET`), hinter `auth_rate_limit`; `/self/reset` nutzt denselben Helfer.
+- **Geprüft wird vor dem Verbrauch des Nachweises** (Korrektur 20.10.2026): `freigabe_hindernis`
+  beantwortet „Gerät unbekannt“ und „es gibt noch ein freigegebenes Gerät“ mit 404/403, **bevor**
+  Passkey oder Einmalcode eingelöst werden. Sonst verbrannte eine veraltete Geräteliste einen
+  gültigen Nachweis für eine Antwort, die ohnehin abgelehnt wird.
+- **Gelesen und geschrieben unter einer Kontosperre** (`SELECT … FOR UPDATE` auf die Kontozeile):
+  Zwei wartende Geräte sahen sonst gleichzeitig „kein freigegebenes“ und gaben beide frei — die
+  Unterschrift des ersten wäre umgangen. Test mit zwei eigenen Verbindungen, an einer Barriere
+  gestartet; ohne die Sperre ist er rot.
 
 **Karte, `E2eeGeraeteCard.tsx`:** Ist das eigene Gerät wartend und gibt es kein anderes
 freigegebenes, bietet sie „Dieses Gerät wieder zulassen“ an — je Faktor (Passkey/TOTP/Passwort/
@@ -243,14 +256,23 @@ Nutzer, alles verloren" bedienbar ist. Verworfen: zusätzlicher OAuth-/Mail-Link
 Faktor, Freigabe per Wiederherstellungsschlüssel. Wer das später verschärft, muss den Ausfallweg
 mitdenken — sonst sperrt sich das einzige Gerät aus.
 
+**Karte, Nachtrag:** Der Nachweis wird jetzt **innerhalb** von Laufanzeige und Fehlerbehandlung
+geholt. Vorher stand `await faktor.nachweis(…)` beim Knopf davor: ein abgebrochener Passkey warf
+ohne Meldung, und die Knöpfe blieben während der Abfrage bedienbar.
+
 Tests: `test_e2ee_device_approval.py` — `test_schluesselwechsel_beim_einzigen_geraet_laesst_es_warten`,
-`test_nachgereichter_signaturschluessel_nimmt_keine_freigabe`,
+`test_nachgereichter_signaturschluessel_ist_ein_wechsel`,
 `test_wieder_freigeben_nur_ohne_anderes_freigegebenes_geraet`,
-`test_wieder_freigeben_verlangt_frischen_nachweis`, `test_wieder_freigeben_mit_zweitem_faktor`;
+`test_wieder_freigeben_verlangt_frischen_nachweis`, `test_wieder_freigeben_mit_zweitem_faktor`,
+`test_zwei_wartende_geraete_geben_sich_nicht_gegenseitig_frei`,
+`test_abgelehnte_freigabe_verbraucht_keinen_code`;
 `E2eeGeraeteCard.test.tsx` — „bietet einem einzigen wartenden Gerät den Weg zurück ohne Neuanfang“,
-„verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift“.
-**Am Stand davor sind alle fünf Backend-Tests und beide Karten-Tests rot** (geprüft über einen
-Worktree auf `HEAD`: 5 failed / 15 passed bzw. 2 failed).
+„verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift“, „meldet einen
+abgebrochenen Nachweis, statt still zu scheitern“.
+**Am Stand davor rot:** alle fünf Backend-Tests der ersten Fassung (Worktree auf `HEAD`: 5 failed /
+15 passed) und beide Karten-Tests; die drei später ergänzten Tests wurden einzeln gegen den
+jeweils reparierten Code geprüft (Sperre entfernt, Vorabprüfung entfernt, Nachweis zurück vor das
+`try`) und waren dort rot.
 
 ### Phase 3 — Chatgeheimnis zuverlässig an eigene Geräte (**umgesetzt**)
 
