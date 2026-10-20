@@ -606,6 +606,27 @@ class E2eeDeviceApproveRequest(BaseModel):
     signature: str = Field(..., min_length=16, max_length=256)
 
 
+class E2eeDeviceSelfApproveRequest(BaseModel):
+    """Ein wartendes Geraet holt sich zurueck, weil es das einzige ist.
+
+    Nur wenn kein freigegebenes Geraet mehr existiert, sonst gaebe es einen Weg
+    an der Unterschrift vorbei. Der Nachweis ist derselbe wie beim Neustart des
+    Verzeichnisses:
+
+    - Bei aktivem 2FA: der eingerichtete Faktor — otp_code (TOTP) oder passkey.
+    - Ohne 2FA: das Passwort, bei Konten ohne Passwort das Wort RESET.
+
+    `approved_by` bleibt danach leer: der Server gibt die Zustellung frei, aber
+    niemand hat den Schluessel unterschrieben.
+    """
+
+    device_id: str = Field(..., min_length=8, max_length=64)
+    password: str | None = Field(default=None, max_length=512)
+    confirmation: str | None = Field(default=None, max_length=64)
+    otp_code: str | None = Field(default=None, max_length=32)
+    passkey: Zweitnachweis | None = None
+
+
 class E2eeDeviceRemoveRequest(BaseModel):
     """Entfernen eines Geraets. Unterschrift ist Pflicht, wenn es freigegeben ist."""
 

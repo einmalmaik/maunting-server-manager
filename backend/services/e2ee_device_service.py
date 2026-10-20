@@ -200,15 +200,31 @@ def _auffrischen(
 
     Wer das Passwort hat, kann unter jeder bekannten Kennung neue Schluessel
     ablegen. Gaelte die alte Freigabe weiter, schriebe ihm jedes Gegenueber.
-    Dazu zaehlt auch ein nachgereichter Signaturschluessel: die Freigabe
+    Dazu zaehlt auch ein **ersetzter** Signaturschluessel: die Freigabe
     unterschreibt beide Schluessel, und ein neuer ist durch sie nicht gedeckt.
     Einen neuen Schluessel legt nur die Sitzung ab, an die das Geraet
-    gebunden ist. Ohne ein anderes freigegebenes Geraet bleibt die Freigabe —
-    sonst kaeme das einzige Geraet eines Kontos nie wieder hinein; die
-    Gegenueber sehen den Wechsel dann als Warnung.
+    gebunden ist.
+
+    **Die Freigabe bleibt nie mehr stehen, auch nicht beim einzigen Geraet.**
+    Bis 10/2026 galt hier eine Ausnahme: gab es kein anderes freigegebenes
+    Geraet, blieb `is_approved = true` — sonst kaeme das einzige Geraet nie
+    wieder hinein. Genau daraus entstand der Widerspruch aus dem Fehlerbericht:
+    die Liste zeigte „freigegeben", obwohl keine Unterschrift mehr existierte,
+    und jedes Gegenueber warnte „es bekommt nichts". Jetzt ist der Eintrag
+    ehrlich wartend, und der Weg zurueck steht in `wieder_freigeben` — mit
+    frischem Nachweis statt mit einem stehengebliebenen Wort.
+
+    Ein **nachgereichter** Signaturschluessel (Altbestand, Feld war leer) ist
+    kein Wechsel: der Primaerschluessel bleibt derselbe, und eine Freigabe, die
+    beide Schluessel deckt, gab es fuer diese Zeile nie.
     """
     neuer_schluessel = bestand.public_key_jwk != public_key_jwk or (
         bool(signatur) and (bestand.signing_public_key_jwk or "") != signatur
+    )
+    nur_nachgeruestet = (
+        bestand.public_key_jwk == public_key_jwk
+        and bool(signatur)
+        and not (bestand.signing_public_key_jwk or "")
     )
     if neuer_schluessel and (not bestand.auth_family or bestand.auth_family != familie):
         # Ein neuer Schluessel aus einer fremden Sitzung. Das echte Geraet
@@ -226,12 +242,10 @@ def _auffrischen(
         # Mit unveraenderten Schluesseln uebernimmt das echte Geraet seine
         # Familie weiter unten wie bisher.
         raise FremdeSitzungError()
-    if neuer_schluessel:
+    if neuer_schluessel and not nur_nachgeruestet:
         bestand.approved_by = None
         bestand.approval_signature = None
-        andere = _freigegebene(db, user.id).filter(UserE2eeDevice.id != bestand.id).count()
-        if andere > 0:
-            bestand.is_approved = False
+        bestand.is_approved = False
     vorher = (bestand.public_key_jwk, bestand.signing_public_key_jwk, bestand.label, bestand.is_approved)
     bestand.public_key_jwk = public_key_jwk
     if signatur:
@@ -409,26 +423,24 @@ def bestaetigen(
     approver_device_id: str | None = None,
     signature: str | None = None,
 ) -> bool:
-    """Gibt ein wartendes Geraet frei.
+    """Gibt ein wartendes Geraet frei — mit der Unterschrift eines freigegebenen.
 
     Die Freigabe braucht die Unterschrift eines freigegebenen Geraets mit
     Signaturschluessel ueber `freigabe_daten`. Ein Geraet ohne
     Signaturschluessel gibt nichts frei: sonst genuegte es, seine Kennung zu
     nennen, und die steht in jeder Geraeteliste.
 
-    Einzige Ausnahme: gibt es ueberhaupt kein freigegebenes Geraet mehr — das
-    letzte hat sich selbst entfernt —, wird ein wartendes zum ersten.
+    **Keine Ausnahme mehr fuer das letzte Geraet.** Bis 10/2026 wurde ein
+    wartendes ohne jede Unterschrift freigegeben, sobald es kein freigegebenes
+    Geraet mehr gab. Damit holte sich jeder, der nur ein Access-Token hatte,
+    wieder Zutritt. Den Fall uebernimmt `wieder_freigeben`, und der verlangt
+    einen frischen Nachweis.
     """
     kennung = (device_id or "").strip()
     eintrag = _geraet(db, user.id, kennung)
     if eintrag is None:
         return False
     if eintrag.is_approved:
-        return True
-    if _freigegebene(db, user.id).count() == 0:
-        eintrag.is_approved = True
-        db.commit()
-        _verzeichnis_geaendert(user.id)
         return True
     unterzeichner = _unterzeichner(db, user, approver_device_id)
     if unterzeichner is None or unterzeichner.device_id == kennung or not signature:
@@ -441,6 +453,42 @@ def bestaetigen(
     eintrag.is_approved = True
     eintrag.approved_by = unterzeichner.device_id
     eintrag.approval_signature = signature
+    db.commit()
+    _verzeichnis_geaendert(user.id)
+    return True
+
+
+def wieder_freigeben(db: Session, user: User, device_id: str) -> bool:
+    """Holt ein wartendes Geraet zurueck, wenn es das einzige ist.
+
+    Der Gegenpol zu `_auffrischen`: wer seinen Schluessel verloren und neu
+    erzeugt hat, sitzt sonst in einem Wartezustand, den niemand aufloesen kann
+    — es gibt kein zweites freigegebenes Geraet, das unterschreiben koennte.
+
+    **Nur wenn kein freigegebenes Geraet mehr existiert.** Existiert eines,
+    ist das hier ein Weg an der Unterschrift vorbei und wird abgelehnt: sonst
+    holte sich jeder, der nur das Passwort hat, mit einem Klick wieder Zutritt.
+    Den Nachweis (2FA oder Passwort) prueft der Aufrufer — hier steht nur die
+    Regel, wer ueberhaupt in Frage kommt.
+
+    `approved_by` und `approval_signature` bleiben leer, und das ist der
+    Unterschied zwischen „freigegeben" und „beglaubigt": der Server gibt das
+    Geraet fuer die Zustellung frei, aber niemand hat den Schluessel
+    unterschrieben. Die Gegenueber sehen genau das („Ohne gueltige Freigabe")
+    und entscheiden selbst, ob sie die Sicherheitsnummer vergleichen.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        return False
+    if eintrag.is_approved:
+        return True
+    if _freigegebene(db, user.id).count() > 0:
+        raise GeraeteaenderungAbgelehntError(
+            "Ein freigegebenes Geraet muss dieses Geraet freigeben."
+        )
+    eintrag.is_approved = True
+    eintrag.approved_by = None
+    eintrag.approval_signature = None
     db.commit()
     _verzeichnis_geaendert(user.id)
     return True

@@ -35,6 +35,7 @@ from schemas.social import (
     E2eeDeviceApproveRequest,
     E2eeDeviceRemoveRequest,
     E2eeDeviceResetRequest,
+    E2eeDeviceSelfApproveRequest,
     FriendRequestCreate,
     FriendResponse,
     PresenceInfo,
@@ -370,6 +371,51 @@ def get_e2ee_devices(
     return e2ee_device_service.geraete(db, target_user_id, nur_bestaetigt=nur_bestaetigt)
 
 
+def _geraete_nachweis(
+    db: Session,
+    user: User,
+    *,
+    zweck: str,
+    password: str | None,
+    confirmation: str | None,
+    otp_code: str | None,
+    passkey: object | None,
+) -> None:
+    """Frischer Nachweis vor jeder Aenderung am Geraeteverzeichnis.
+
+    Drei Wege, und keiner davon ist das blosse Token: der eingerichtete zweite
+    Faktor (Passkey oder Code), sonst das Passwort, sonst bei Konten ohne
+    Passwort das Bestaetigungswort RESET. Was gilt, entscheiden die
+    eingerichteten Faktoren — nie ein Feld, das der Client behauptet.
+
+    Ein Ort fuer beide Wege (`self/reset` und `self/reapprove`): bis 10/2026
+    stand die Pruefung nur im Reset, und die Bereinigung eines wartenden
+    Geraets lief ganz ohne sie.
+    """
+    if user.two_factor_enabled:
+        from services import passkey_service
+
+        if not passkey_service.zweiter_faktor_bestaetigt(
+            db,
+            user,
+            otp_code=otp_code,
+            passkey=passkey.model_dump() if passkey is not None else None,
+            zweck=zweck,
+        ):
+            raise HTTPException(status_code=403, detail="2FA-Bestätigung erforderlich oder ungültig")
+        return
+    if not user.has_password:
+        if (confirmation or "").strip().upper() != "RESET":
+            raise HTTPException(status_code=400, detail="Bestätigung RESET erforderlich")
+        return
+    if (
+        not password
+        or not user.password_hash
+        or not AuthService.verify_password(password, user.password_hash)
+    ):
+        raise HTTPException(status_code=403, detail="Passwort falsch")
+
+
 @router.post("/e2ee/devices/self/approve", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
 def approve_own_e2ee_device(
     req: E2eeDeviceApproveRequest,
@@ -386,6 +432,45 @@ def approve_own_e2ee_device(
     ):
         raise HTTPException(status_code=403, detail="Freigabe nicht gültig unterschrieben")
     return {"ok": True}
+
+
+@router.post(
+    "/e2ee/devices/self/reapprove",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf), Depends(auth_rate_limit)],
+)
+def reapprove_own_e2ee_device(
+    req: E2eeDeviceSelfApproveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Holt das eigene Geraet zurueck, wenn es das einzige ist.
+
+    Der Fall dahinter: das Geraet hat seinen Schluessel neu erzeugt (verlorene
+    Ablage, neuer Browser) und ist damit wartend. Es gibt kein zweites
+    freigegebenes Geraet, das unterschreiben koennte — ohne diesen Weg bliebe
+    nur der Neustart des ganzen Verzeichnisses, der alle Sitzungen sperrt.
+
+    Der Nachweis ist Pflicht (Regel: was einen Zugang erzeugt, verlangt einen
+    frischen Nachweis) und liegt hinter `auth_rate_limit`. Existiert noch ein
+    freigegebenes Geraet, antwortet die Route 403: dann ist die Unterschrift
+    der vorgesehene Weg.
+    """
+    _geraete_nachweis(
+        db,
+        user,
+        zweck="e2ee_reapprove",
+        password=req.password,
+        confirmation=req.confirmation,
+        otp_code=req.otp_code,
+        passkey=req.passkey,
+    )
+    try:
+        freigegeben = e2ee_device_service.wieder_freigeben(db, user, req.device_id)
+    except e2ee_device_service.GeraeteaenderungAbgelehntError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if not freigegeben:
+        raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    return {"ok": True, "is_approved": True}
 
 
 @router.get("/e2ee/devices/self/pending", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])
@@ -433,23 +518,15 @@ def reset_own_e2ee_devices(
       - Konten ohne Passwort (nur Social Login): Bestätigungswort RESET.
       - Konten mit Passwort: Passwort-Prüfung, auch mit Social-Verknüpfung.
     """
-    if user.two_factor_enabled:
-        from services import passkey_service
-
-        if not passkey_service.zweiter_faktor_bestaetigt(
-            db, user,
-            otp_code=req.otp_code,
-            passkey=req.passkey.model_dump() if req.passkey else None,
-            zweck="e2ee_reset",
-        ):
-            raise HTTPException(status_code=403, detail="2FA-Bestätigung erforderlich oder ungültig")
-    else:
-        if not user.has_password:
-            if (req.confirmation or "").strip().upper() != "RESET":
-                raise HTTPException(status_code=400, detail="Bestätigung RESET erforderlich")
-        else:
-            if not req.password or not user.password_hash or not AuthService.verify_password(req.password, user.password_hash):
-                raise HTTPException(status_code=403, detail="Passwort falsch")
+    _geraete_nachweis(
+        db,
+        user,
+        zweck="e2ee_reset",
+        password=req.password,
+        confirmation=req.confirmation,
+        otp_code=req.otp_code,
+        passkey=req.passkey,
+    )
 
     return {"ok": True, "removed": e2ee_device_service.zuruecksetzen(db, user, familie)}
 
