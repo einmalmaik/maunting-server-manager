@@ -6909,7 +6909,8 @@
       },
       "sicherheit": {
         "messenger": "Messenger",
-        "tresor": "Vault"
+        "tresor": "Vault",
+        "geraete": "Devices"
       },
       "tab": {
         "desktop": "Desktop integration",

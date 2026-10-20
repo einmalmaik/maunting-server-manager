@@ -6909,7 +6909,8 @@
       },
       "sicherheit": {
         "messenger": "Messenger",
-        "tresor": "Tresor"
+        "tresor": "Tresor",
+        "geraete": "Geräte"
       },
       "tab": {
         "desktop": "Desktop-Integration",
