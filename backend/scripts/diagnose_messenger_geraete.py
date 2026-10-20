@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""Diagnose: Geräteverzeichnis, Freigaben und die Geister-Warnung.
+
+Liest **nur**. Kein Schreibzugriff auf `user_e2ee_devices`, keine Migration,
+kein Aufräumen — das Skript beantwortet die Frage, die man vor jedem Fix
+zuerst beantworten muss: steht in der Datenbank wirklich ein Gerät, das der
+Server als freigegeben führt, für das aber keine Unterschrift vorliegt?
+
+Genau daraus entsteht die Warnung aus `AGENTS.md`-Punkt A der Diagnose:
+
+* `is_approved` ist ein Wort des Servers, und die Liste unter *Profil → Geräte*
+  zeigt es unverändert an.
+* Die Warnung im Messenger hängt an der **Signaturkette** im Client
+  (`vertrauteGeraete` in `frontend/src/services/e2eeGeraet.ts`). Fehlt die
+  Unterschrift über die aktuellen Schlüssel, gilt das Gerät dort als
+  unbestätigt, und der Chat sagt: „Es bekommt nichts."
+
+Beide Sichten können dauerhaft auseinanderfallen, wenn ein Gerät seinen
+Schlüssel wechselt und es das einzige freigegebene Gerät ist
+(`_auffrischen` in `services/e2ee_device_service.py`): `approved_by` und
+`approval_signature` werden gelöscht, `is_approved` bleibt stehen.
+
+Aufruf:
+
+    python backend/scripts/diagnose_messenger_geraete.py
+    python backend/scripts/diagnose_messenger_geraete.py --konto anna
+    python backend/scripts/diagnose_messenger_geraete.py --konto 42 --json
+
+Der letzte Schritt bleibt Handarbeit im Browser: die Vertrauensliste liegt im
+`localStorage` des jeweiligen Geräts (`msm_vertraute_geraete:<userId>`), nicht
+in der Datenbank. Der Abdruck dort ist `sha256(public_key)` — das Skript gibt
+den erwarteten Hash deshalb mit aus.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+from datetime import datetime, timezone
+
+# Damit `config`, `database` und `models` importierbar sind — wie in den
+# übrigen Skripten unter `backend/scripts/`.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+# Eine Windows-Konsole ist cp1252 und bricht an „→“ mit UnicodeEncodeError ab —
+# ein Diagnoseskript, das beim Ausgeben stirbt, beantwortet die Frage nicht.
+for _strom in (sys.stdout, sys.stderr):
+    if hasattr(_strom, "reconfigure"):
+        _strom.reconfigure(encoding="utf-8", errors="replace")
+
+from database import SessionLocal  # noqa: E402
+from models import User, UserE2eeDevice  # noqa: E402
+
+#: Urteile, in der Reihenfolge, in der sie in der Zusammenfassung erscheinen.
+URTEIL_GEDECKT = "gedeckt"
+URTEIL_ERSTES = "erstes-geraet"
+URTEIL_GEIST = "geisterwarnung"
+URTEIL_WARTEND = "wartend"
+
+URTEIL_TEXT = {
+    URTEIL_GEDECKT: "Freigabe unterschrieben — Liste und Warnung stimmen überein.",
+    URTEIL_ERSTES: (
+        "einziges freigegebenes Gerät — ohne Unterschrift ist hier normal "
+        "(es gab niemanden, der freigeben konnte)."
+    ),
+    URTEIL_GEIST: (
+        "freigegeben, aber ohne Unterschrift eines anderen Geräts. Der Client "
+        "wertet das als unbestätigt: Warnung „Es bekommt nichts“, obwohl die "
+        "Liste es als freigegeben zeigt."
+    ),
+    URTEIL_WARTEND: "wartet auf Freigabe — bekommt nichts, ist aber sichtbar.",
+}
+
+
+def fingerabdruck(public_key_jwk: str) -> str:
+    """Derselbe Hash, den `vertrauteGeraete` im Client bildet."""
+    return hashlib.sha256((public_key_jwk or "").encode("utf-8")).hexdigest()
+
+
+def _zeit(wert: datetime | None) -> str:
+    if wert is None:
+        return "—"
+    if wert.tzinfo is None:
+        wert = wert.replace(tzinfo=timezone.utc)
+    return wert.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def urteil(geraet: UserE2eeDevice, andere_freigegebene: int) -> str:
+    """Wie der Client dieses Gerät sieht — die Regel aus `vertrauteGeraete`.
+
+    Nachgebaut ist nur der Teil, den die Datenbank beantworten kann:
+    Unterschrift vorhanden oder nicht. Der Fingerabdruck-Vergleich im
+    `localStorage` bleibt beim Menschen (siehe Kopf).
+    """
+    if not geraet.is_approved:
+        return URTEIL_WARTEND
+    if (geraet.approval_signature or "").strip() and (geraet.approved_by or "").strip():
+        return URTEIL_GEDECKT
+    if andere_freigegebene == 0:
+        return URTEIL_ERSTES
+    return URTEIL_GEIST
+
+
+def befund(db, user: User) -> dict:
+    """Alle Geräte eines Kontos mit Urteil und Hinweisen."""
+    eintraege = (
+        db.query(UserE2eeDevice)
+        .filter(UserE2eeDevice.user_id == user.id)
+        .order_by(UserE2eeDevice.last_seen_at.desc())
+        .all()
+    )
+    freigegeben = [e for e in eintraege if e.is_approved]
+
+    geraete = []
+    for e in eintraege:
+        andere = len([f for f in freigegeben if f.id != e.id])
+        hinweise: list[str] = []
+        if not (e.label or "").strip():
+            hinweise.append("ohne Namen — erscheint als „Unbenanntes Gerät“.")
+        if e.is_approved and not (e.approval_signature or "").strip() and andere > 0:
+            hinweise.append(
+                "Schlüsselwechsel ohne neue Unterschrift: `_auffrischen` löscht "
+                "`approved_by`/`approval_signature` und lässt `is_approved` stehen, "
+                "solange kein anderes Gerät freigegeben ist."
+            )
+        if not e.auth_family:
+            hinweise.append(
+                "keine Sitzungskette (`auth_family`) — Bestand von vor 09/2026 oder "
+                "ohne Familie gemeldet; Entfernen sperrt dann keine Sitzung."
+            )
+        geraete.append(
+            {
+                "device_id": e.device_id,
+                "kurz": e.device_id[:12],
+                "label": e.label or "",
+                "is_approved": bool(e.is_approved),
+                "approved_by": e.approved_by or "",
+                "hat_unterschrift": bool((e.approval_signature or "").strip()),
+                "signaturschluessel": bool((e.signing_public_key_jwk or "").strip()),
+                "auth_family": e.auth_family or "",
+                "erstellt": _zeit(e.created_at),
+                "zuletzt": _zeit(e.last_seen_at),
+                "fingerabdruck_public_key": fingerabdruck(e.public_key_jwk),
+                "urteil": urteil(e, andere),
+                "hinweise": hinweise,
+            }
+        )
+
+    zaehlung = {u: 0 for u in URTEIL_TEXT}
+    for g in geraete:
+        zaehlung[g["urteil"]] += 1
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "geraete": geraete,
+        "zaehlung": zaehlung,
+    }
+
+
+def _drucke(befunde: list[dict], nur_probleme: bool) -> None:
+    for befund_eines in befunde:
+        kopf = f"Konto {befund_eines['user_id']} ({befund_eines['username']})"
+        print()
+        print(kopf)
+        print("=" * len(kopf))
+        geraete = befund_eines["geraete"]
+        if not geraete:
+            print("  keine Geräte eingetragen")
+            continue
+        print(
+            f"  {'Gerät':<12}  {'frei':<5} {'sig':<4} {'von':<12} "
+            f"{'Name':<20} {'zuletzt':<16} Urteil"
+        )
+        for g in geraete:
+            if nur_probleme and g["urteil"] in (URTEIL_GEDECKT, URTEIL_ERSTES):
+                continue
+            name = (g["label"] or "—")[:20]
+            print(
+                f"  {g['kurz']:<12}  {'ja' if g['is_approved'] else 'nein':<5} "
+                f"{'ja' if g['hat_unterschrift'] else 'nein':<4} "
+                f"{(g['approved_by'] or '—')[:12]:<12} {name:<20} {g['zuletzt']:<16} "
+                f"{g['urteil']}"
+            )
+            print(f"  {'':12}  {URTEIL_TEXT[g['urteil']]}")
+            for h in g["hinweise"]:
+                print(f"  {'':12}  · {h}")
+
+        z = befund_eines["zaehlung"]
+        print()
+        print(
+            f"  Zusammenfassung: {z[URTEIL_GEDECKT]} gedeckt, "
+            f"{z[URTEIL_ERSTES]} erstes Gerät, {z[URTEIL_GEIST]} Geisterwarnung, "
+            f"{z[URTEIL_WARTEND]} wartend"
+        )
+        if z[URTEIL_GEIST]:
+            print(
+                "  → Die Zeile mit „geisterwarnung“ ist der Kandidat für die dauerhafte "
+                "Warnung. Zum Gegenprüfen im Browser dieses Kontos:"
+            )
+            g = next(g for g in geraete if g["urteil"] == URTEIL_GEIST)
+            print(
+                "     JSON.parse(localStorage['msm_vertraute_geraete:"
+                f"{befund_eines['user_id']}'] || 'null')"
+            )
+            print(
+                f"     erwarteter Abdruck für {g['kurz']}: {g['fingerabdruck_public_key']}"
+            )
+            print(
+                "     Weicht der gespeicherte `k` davon ab (oder fehlt der Eintrag), "
+                "ist die Warnung erklärt."
+            )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description="Liest Geräteverzeichnis und Freigaben eines Kontos (nur lesend)."
+    )
+    parser.add_argument(
+        "--konto",
+        help="Benutzername oder Kennung. Ohne Angabe: jedes Konto mit Geräten.",
+    )
+    parser.add_argument("--json", action="store_true", help="Maschinenlesbar ausgeben.")
+    parser.add_argument(
+        "--nur-probleme",
+        action="store_true",
+        help="Nur wartende und ungedeckte Geräte zeigen.",
+    )
+    args = parser.parse_args()
+
+    db = SessionLocal()
+    try:
+        abfrage = db.query(User)
+        if args.konto:
+            konto = args.konto.strip()
+            if konto.isdigit():
+                abfrage = abfrage.filter(User.id == int(konto))
+            else:
+                abfrage = abfrage.filter(User.username.ilike(konto))
+            user = abfrage.first()
+            if user is None:
+                print(f"Kein Konto für {args.konto!r} gefunden.", file=sys.stderr)
+                return 1
+            benutzer = [user]
+        else:
+            # Ohne Angabe nur Konten, die überhaupt ein Gerät eingetragen haben —
+            # sonst rauscht die Ausgabe eines Panels mit hunderten Konten.
+            mit_geraeten = {
+                uid for (uid,) in db.query(UserE2eeDevice.user_id).distinct().all()
+            }
+            benutzer = [u for u in abfrage.order_by(User.id.asc()).all() if u.id in mit_geraeten]
+
+        befunde = [befund(db, u) for u in benutzer]
+    finally:
+        db.close()
+
+    if args.json:
+        print(json.dumps({"konten": befunde}, ensure_ascii=False, indent=2))
+    else:
+        _drucke(befunde, args.nur_probleme)
+        print()
+        print(
+            "Hinweis: Dieses Skript liest nur. Ob ein Gerät im Client als vertraut "
+            "gilt, entscheidet zusätzlich der Fingerabdruck im localStorage des "
+            "Geräts — den Vergleich nennt die Ausgabe oben."
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
