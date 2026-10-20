@@ -492,11 +492,16 @@ jobs:
             "msm-panel-$TAG.tar.gz" "msm-frontend-$TAG.tar.gz" "msm-agent-$TAG.tar.gz" SHA256SUMS
             MauntingSmartSystem-Setup.exe MauntingSmartSystem-Setup.exe.sig latest.json MauntingSmartSystem.apk
             releases.mss.json releases.mss.json.sig
-            "MauntingSmartSystem-${TAG#v}-full.nupkg"
             MauntingPontis-Setup.exe MauntingPontis-Setup.exe.sig latest-msb.json MauntingSecureBrowser.apk
-            "Pontis-${TAG#v}-full.nupkg" releases.pontis.json releases.pontis.json.sig
+            releases.pontis.json releases.pontis.json.sig
           )
           for datei in "${pflicht[@]}"; do
             grep -qxF "$datei" <<<"$vorhanden" || { echo "Fehlt im Release: $datei" >&2; fehlt=1; }
+          done
+          # vpk 1.2 legt den Kanal in den Paketnamen
+          # (`Pontis-5.6.0-pontis-full.nupkg`); aeltere Fassungen ohne Kanal.
+          for app in MauntingSmartSystem Pontis; do
+            grep -qE "^${app}-${TAG#v}(-[a-z0-9]+)?-full\.nupkg$" <<<"$vorhanden" \
+              || { echo "Fehlt im Release: ${app}-${TAG#v}[-<kanal>]-full.nupkg" >&2; fehlt=1; }
           done
           exit "$fehlt"

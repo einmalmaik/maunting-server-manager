@@ -213,6 +213,21 @@ def test_android_reminders_need_no_background_service() -> None:
     assert ":alert_service" not in manifest
 
 
+def test_release_prueft_das_vollpaket_mit_kanal_im_namen() -> None:
+    """vpk 1.2 schreibt den Kanal in den Paketnamen.
+
+    Die Pflichtliste suchte `Pontis-<Version>-full.nupkg` und machte den Lauf rot,
+    obwohl Feed, Paket und Installer vollstaendig im Release lagen (20.10.2026,
+    v5.6.0). Aeltere vpk-Fassungen lassen den Kanal weg; beide Namen gelten.
+    """
+    release = (ROOT / ".github" / "workflows" / "release-artifacts.yml").read_text(
+        encoding="utf-8"
+    )
+    pruefung = release.split("name: Verify release assets", 1)[1]
+    assert "(-[a-z0-9]+)?-full\\.nupkg$" in pruefung
+    assert "MauntingSmartSystem-${TAG#v}-full.nupkg" not in pruefung
+
+
 def test_beide_apps_signieren_mit_derselben_tauri_cli() -> None:
     """Feed und Setup.exe signiert die CLI aus dem eigenen `npm ci` der App.
 

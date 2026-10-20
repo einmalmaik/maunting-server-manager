@@ -121,10 +121,12 @@ Paket, das Velopack prüft.
   Maus und Tastatur, Anmeldeinformations-Manager als Tresor).
 - `releases.mss.json` und `releases.mss.json.sig`: der signierte Update-Feed
   (Secret `TAURI_SIGNING_PRIVATE_KEY`) und seine Signatur.
-- `MauntingSmartSystem-<VERSION>-full.nupkg` (bei Bedarf `-delta`): das
+- `MauntingSmartSystem-<VERSION>-mss-full.nupkg` (bei Bedarf `-delta`): das
   Updatepaket, dessen SHA-256 im signierten Feed steht.
-- `latest.json`: nur noch Version und Hinweise für die **Android**-Prüfung,
-  ohne Signatur und ohne Plattform-Einträge.
+- `latest.json`: Version und Hinweise für die **Android**-Prüfung sowie unter
+  `platforms.windows-x86_64` der signierte Verweis auf
+  `MauntingSmartSystem-Setup.exe` — damit eine bestehende v5.5.1-Installation
+  einmalig auf Velopack und danach auf `releases.mss.json` wechselt.
 - `SHA256SUMS`: Prüfsummen aller Dateien des Releases.
 
 Unter Windows prüft und lädt die App ein Update **still im Hintergrund**; erst
@@ -280,9 +282,10 @@ Release schlägt fehl, wenn eine der folgenden Dateien fehlt:
 - `MauntingPontis-Setup.exe`: Velopacks Installer (der einzige Windows-Weg).
 - `releases.pontis.json` und `releases.pontis.json.sig`: der signierte
   Update-Feed des Browsers (`TAURI_SIGNING_PRIVATE_KEY`), dazu
-  `Pontis-<VERSION>-full.nupkg` mit dem Paket.
-- `latest-msb.json`: nur noch Version und Hinweise für die
-  **Android**-Prüfung, ohne Signatur; `latest.json` gehört dem Smart System.
+  `Pontis-<VERSION>-pontis-full.nupkg` mit dem Paket.
+- `latest-msb.json`: Version und Hinweise für die **Android**-Prüfung sowie
+  der signierte Verweis auf `MauntingPontis-Setup.exe` für den einmaligen
+  Wechsel von v5.5.1; `latest.json` gehört dem Smart System.
   Unter Windows lädt der Browser das Update still im Hintergrund und das Badge
   bietet nur den Neustart an; unter Android fragt er vor der Installation. Ein
   Entwicklungsbau installiert nie.
