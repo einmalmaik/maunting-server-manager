@@ -1,5 +1,6 @@
 """Contracts for split release artifacts and public self-hosting docs."""
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -210,3 +211,22 @@ def test_android_reminders_need_no_background_service() -> None:
     empfaenger = re.search(r'<receiver\s+android:name="\.ErinnerungEmpfaenger"\s+android:exported="false"', manifest)
     assert empfaenger is not None
     assert ":alert_service" not in manifest
+
+
+def test_beide_apps_signieren_mit_derselben_tauri_cli() -> None:
+    """Feed und Setup.exe signiert die CLI aus dem eigenen `npm ci` der App.
+
+    `signer sign --app-version` gibt es erst ab 2.12; Smart System stand bis
+    20.10.2026 auf 2.11.4. Der Windows-Bau schrieb den Feed und brach dann beim
+    Signieren ab, weil der Schalter unbekannt war.
+    """
+    versionen = {}
+    for app in ("smart-system", "browser"):
+        lock = json.loads(
+            (ROOT / app / "package-lock.json").read_text(encoding="utf-8")
+        )
+        version = lock["packages"]["node_modules/@tauri-apps/cli"]["version"]
+        zahlen = tuple(int(teil) for teil in version.split(".")[:3])
+        assert zahlen >= (2, 12, 0), f"{app}: {version} kennt --app-version nicht"
+        versionen[app] = version
+    assert versionen["smart-system"] == versionen["browser"], versionen
