@@ -454,7 +454,22 @@ def reapprove_own_e2ee_device(
     frischen Nachweis) und liegt hinter `auth_rate_limit`. Existiert noch ein
     freigegebenes Geraet, antwortet die Route 403: dann ist die Unterschrift
     der vorgesehene Weg.
+
+    **Erst pruefen, dann den Nachweis verbrauchen.** Ein Passkey oder
+    Einmalcode gilt genau einmal; stand er vor der Pruefung „Geraet
+    unbekannt" oder „anderes Geraet freigegeben", war er fuer eine 403/404
+    weg. Die Regel selbst faellt trotzdem erst in `wieder_freigeben` unter
+    der Kontosperre — hier wird nur der offensichtliche Fall abgefangen.
     """
+    hindernis = e2ee_device_service.freigabe_hindernis(db, user, req.device_id)
+    if hindernis == "nicht_gefunden":
+        raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
+    if hindernis == "anderes_freigegeben":
+        raise HTTPException(
+            status_code=403,
+            detail="Ein freigegebenes Gerät muss dieses Gerät freigeben.",
+        )
+
     _geraete_nachweis(
         db,
         user,

@@ -505,13 +505,17 @@ def test_schluesselwechsel_beim_einzigen_geraet_laesst_es_warten(db: Session, cl
     assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True) == []
 
 
-def test_nachgereichter_signaturschluessel_nimmt_keine_freigabe(db: Session, clean_db):
-    """Altbestand ohne Signaturschluessel: das Nachruesten ist kein Wechsel.
+def test_nachgereichter_signaturschluessel_ist_ein_wechsel(db: Session, clean_db):
+    """Auch der erste Signaturschluessel nimmt die Freigabe.
 
-    Jede Installation von vor 09/2026 meldet beim ersten Start einen neuen
-    Signaturschluessel. Wuerde das als Schluesselwechsel gelten, stuende nach
-    dem Update jedes Ein-Geraete-Konto im Wartezustand — ohne zweiten Faktor,
-    der es freigeben koennte.
+    Ein Altbestand ohne Signaturschluessel kam einmal ohne Freigabe davon. Das
+    war der bequeme Weg, sich Freigaberecht zu verschaffen: wer das Token
+    dieses Geraets hat, legt darunter seinen eigenen Signaturschluessel ab,
+    bleibt freigegeben — und unterschreibt damit Freigaben fuer weitere
+    Geraete. Ein abgegriffenes Token wurde so zur Freigabeinstanz.
+
+    Der Preis ist eine Nachbestaetigung: `wieder_freigeben` mit frischem
+    Nachweis, oder die Unterschrift eines freigegebenen Geraets.
     """
     user = _konto(db, "freigabe10")
     e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Telefon", "", familie="fam-alt")
@@ -520,15 +524,12 @@ def test_nachgereichter_signaturschluessel_nimmt_keine_freigabe(db: Session, cle
     nach = e2ee_device_service.veroeffentlichen(
         db, user, "altgeraet-01", RSA_A, "Telefon", ecdsa, familie="fam-alt"
     )
-    assert nach.is_approved is True
+    assert nach.is_approved is False
     assert nach.signing_public_key_jwk == ecdsa
-
-    # Ein **ersetzter** Signaturschluessel ist dagegen ein Wechsel.
-    _, anderes = _ecdsa_paar()
-    gewechselt = e2ee_device_service.veroeffentlichen(
-        db, user, "altgeraet-01", RSA_A, "Telefon", anderes, familie="fam-alt"
-    )
-    assert gewechselt.is_approved is False
+    assert nach.approved_by is None and nach.approval_signature is None
+    # Und der Weg zurueck steht offen, weil es das einzige Geraet ist.
+    assert e2ee_device_service.wieder_freigeben(db, user, "altgeraet-01") is True
+    assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)[0]["device_id"] == "altgeraet-01"
 
 
 def test_wieder_freigeben_nur_ohne_anderes_freigegebenes_geraet(db: Session, clean_db):
@@ -573,6 +574,129 @@ def test_wieder_freigeben_verlangt_frischen_nachweis(client: TestClient, db: Ses
     assert eintrag["device_id"] == "einziges-0001"
     # Freigegeben heisst nicht beglaubigt: niemand hat den Schluessel unterschrieben.
     assert eintrag["approved_by"] == "" and eintrag["approval_signature"] == ""
+
+
+def test_zwei_wartende_geraete_geben_sich_nicht_gegenseitig_frei(clean_db):
+    """Gleichzeitige Selbstfreigaben: genau eine kommt durch.
+
+    Ohne Sperre lesen beide „kein freigegebenes Geraet" und schreiben beide
+    `is_approved = true` — die Unterschrift des ersten waere umgangen, und das
+    Konto haette zwei Geraete, von denen keines die andere bestaetigt hat.
+
+    Zwei eigene Verbindungen, Start an einer Barriere: auf der geteilten
+    Verbindung der Suite gaebe es keinen Nebenlauf (AGENTS.md 43).
+    """
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    import database as db_module
+    from models import UserE2eeDevice
+
+    aufbau = db_module.SessionLocal()
+    try:
+        user = _konto(aufbau, "freigabe14")
+        _, ecdsa_a = _ecdsa_paar()
+        _, ecdsa_b = _ecdsa_paar()
+        # Beide warten: keine Unterschrift, keine Freigabe.
+        e2ee_device_service.veroeffentlichen(
+            aufbau, user, "geraet-00001", RSA_A, "Telefon", ecdsa_a, familie="fam-a"
+        )
+        e2ee_device_service.veroeffentlichen(
+            aufbau, user, "geraet-00002", RSA_B, "Laptop", ecdsa_b, familie="fam-b"
+        )
+        aufbau.query(UserE2eeDevice).filter(UserE2eeDevice.user_id == user.id).update(
+            {"is_approved": False, "approved_by": None, "approval_signature": None}
+        )
+        aufbau.commit()
+        konto_id = user.id
+    finally:
+        aufbau.close()
+
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    sitzung = sessionmaker(bind=engine)
+    barriere = threading.Barrier(2)
+    ergebnis: dict[str, object] = {}
+    fehler: list[BaseException] = []
+
+    def lauf(kennung: str) -> None:
+        s = sitzung()
+        try:
+            konto = s.get(User, konto_id)
+            try:
+                barriere.wait(timeout=5)
+            except threading.BrokenBarrierError:
+                pass
+            ergebnis[kennung] = e2ee_device_service.wieder_freigeben(s, konto, kennung)
+        except e2ee_device_service.GeraeteaenderungAbgelehntError:
+            ergebnis[kennung] = "abgelehnt"
+        except BaseException as e:  # noqa: BLE001 - im Test sichtbar machen
+            fehler.append(e)
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=lauf, args=(k,)) for k in ("geraet-00001", "geraet-00002")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    engine.dispose()
+
+    assert not fehler, fehler
+    assert sorted(str(v) for v in ergebnis.values()) == ["True", "abgelehnt"]
+
+    kontrolle = db_module.SessionLocal()
+    try:
+        freigegeben = (
+            kontrolle.query(UserE2eeDevice)
+            .filter(UserE2eeDevice.user_id == konto_id, UserE2eeDevice.is_approved.is_(True))
+            .count()
+        )
+    finally:
+        kontrolle.close()
+    assert freigegeben == 1
+
+
+def test_abgelehnte_freigabe_verbraucht_keinen_code(client: TestClient, db: Session, clean_db):
+    """Der Nachweis gilt genau einmal — er darf nicht an einer 403 verfallen.
+
+    Stand die Pruefung „es gibt noch ein freigegebenes Geraet" hinter dem
+    Nachweis, verbrannte ein gueltiger Code fuer eine Antwort, die ohnehin 403
+    lautet. Danach war derselbe Code nach dem Entfernen des anderen Geraets
+    nicht mehr zu gebrauchen.
+    """
+    from services.dis_client import DisClient
+    from tests._totp import totp_now
+
+    user = _konto(db, "freigabe15")
+    user.two_factor_enabled = True
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
+    db.commit()
+    kopf, _ = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    # Eigene Familien: das Entfernen des ersten Geraets sperrt dessen Sitzung,
+    # nicht die des Testclients.
+    e2ee_device_service.veroeffentlichen(db, user, "erstes-0001", RSA_A, "Telefon", ecdsa, familie="fam-erstes")
+    e2ee_device_service.veroeffentlichen(db, user, "zweites-0002", RSA_B, "Laptop", ecdsa, familie="fam-zweites")
+
+    pdaf = "/api/social/e2ee/devices/self/reapprove"
+    code = totp_now(secret)
+    assert client.post(
+        pdaf, headers=kopf, json={"device_id": "zweites-0002", "otp_code": code}
+    ).status_code == 403
+
+    # Erstes Geraet weg: jetzt ist das zweite das einzige und darf zurueck.
+    zusammen = e2ee_device_service.veroeffentlichen(
+        db, user, "erstes-0001", RSA_X, "Telefon", ecdsa, familie="fam-erstes"
+    )
+    assert zusammen.is_approved is False
+    assert e2ee_device_service.vergessen(db, user, "erstes-0001") is True
+
+    antwort = client.post(pdaf, headers=kopf, json={"device_id": "zweites-0002", "otp_code": code})
+    assert antwort.status_code == 200, antwort.text
 
 
 def test_wieder_freigeben_mit_zweitem_faktor(client: TestClient, db: Session, clean_db):

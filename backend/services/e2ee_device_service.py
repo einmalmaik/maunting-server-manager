@@ -214,17 +214,17 @@ def _auffrischen(
     ehrlich wartend, und der Weg zurueck steht in `wieder_freigeben` — mit
     frischem Nachweis statt mit einem stehengebliebenen Wort.
 
-    Ein **nachgereichter** Signaturschluessel (Altbestand, Feld war leer) ist
-    kein Wechsel: der Primaerschluessel bleibt derselbe, und eine Freigabe, die
-    beide Schluessel deckt, gab es fuer diese Zeile nie.
+    **Auch ein nachgereichter Signaturschluessel ist ein Wechsel.** Er ist der
+    bequeme Weg, sich Freigaberecht zu verschaffen: wer das Token dieses Geraets
+    hat, legt unter derselben Kennung seinen eigenen Signaturschluessel ab und
+    unterschreibt damit Freigaben fuer weitere Geraete. Eine Ausnahme fuer den
+    Altbestand (Feld war leer) gab es kurz und sie war genau das Loch — ein
+    abgegriffenes Token wurde damit zur Freigabeinstanz. Der Preis ist eine
+    einmalige Nachbestaetigung fuer Geraete von vor 09/2026; sie laeuft ueber
+    `wieder_freigeben` oder die Unterschrift eines freigegebenen Geraets.
     """
     neuer_schluessel = bestand.public_key_jwk != public_key_jwk or (
         bool(signatur) and (bestand.signing_public_key_jwk or "") != signatur
-    )
-    nur_nachgeruestet = (
-        bestand.public_key_jwk == public_key_jwk
-        and bool(signatur)
-        and not (bestand.signing_public_key_jwk or "")
     )
     if neuer_schluessel and (not bestand.auth_family or bestand.auth_family != familie):
         # Ein neuer Schluessel aus einer fremden Sitzung. Das echte Geraet
@@ -242,7 +242,7 @@ def _auffrischen(
         # Mit unveraenderten Schluesseln uebernimmt das echte Geraet seine
         # Familie weiter unten wie bisher.
         raise FremdeSitzungError()
-    if neuer_schluessel and not nur_nachgeruestet:
+    if neuer_schluessel:
         bestand.approved_by = None
         bestand.approval_signature = None
         bestand.is_approved = False
@@ -458,6 +458,29 @@ def bestaetigen(
     return True
 
 
+def freigabe_hindernis(db: Session, user: User, device_id: str) -> str | None:
+    """Was einer Selbstfreigabe im Weg steht, bevor ein Nachweis verbraucht wird.
+
+    Ein Passkey oder ein Einmalcode gilt genau einmal. Prueft die Route erst
+    *nach* dem Nachweis, ob es das Geraet ueberhaupt gibt und ob ein anderes
+    freigegebenes Geraet existiert, verbrennt eine veraltete Geraeteliste einen
+    gueltigen Nachweis fuer eine Antwort, die 403 oder 404 lautet.
+
+    Zurueck kommt `"nicht_gefunden"`, `"anderes_freigegeben"` oder `None`. Die
+    Entscheidung selbst faellt hier **nicht**: zwischen dieser Abfrage und dem
+    Schreiben kann ein anderes Geraet dazukommen, deshalb prueft
+    `wieder_freigeben` unter der Kontosperre noch einmal.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        return "nicht_gefunden"
+    if eintrag.is_approved:
+        return None
+    if _freigegebene(db, user.id).count() > 0:
+        return "anderes_freigegeben"
+    return None
+
+
 def wieder_freigeben(db: Session, user: User, device_id: str) -> bool:
     """Holt ein wartendes Geraet zurueck, wenn es das einzige ist.
 
@@ -471,18 +494,31 @@ def wieder_freigeben(db: Session, user: User, device_id: str) -> bool:
     Den Nachweis (2FA oder Passwort) prueft der Aufrufer — hier steht nur die
     Regel, wer ueberhaupt in Frage kommt.
 
+    **Gelesen und geschrieben unter einer Sperre.** Zwei wartende Geraete, die
+    gleichzeitig anfragen, saehen sonst beide „kein freigegebenes" und gäben
+    beide frei; die Unterschrift des ersten waere umgangen. Die Sperre liegt auf
+    der Kontozeile, weil sie die gemeinsame Zeile beider Anfragen ist.
+
     `approved_by` und `approval_signature` bleiben leer, und das ist der
     Unterschied zwischen „freigegeben" und „beglaubigt": der Server gibt das
     Geraet fuer die Zustellung frei, aber niemand hat den Schluessel
     unterschrieben. Die Gegenueber sehen genau das („Ohne gueltige Freigabe")
     und entscheiden selbst, ob sie die Sicherheitsnummer vergleichen.
     """
+    # Sperre vor dem Lesen: PostgreSQL serialisiert damit alle gleichzeitigen
+    # Selbstfreigaben desselben Kontos, auch wenn sie verschiedene Geraete
+    # betreffen.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
+
     eintrag = _geraet(db, user.id, (device_id or "").strip())
     if eintrag is None:
+        db.rollback()
         return False
     if eintrag.is_approved:
+        db.rollback()
         return True
     if _freigegebene(db, user.id).count() > 0:
+        db.rollback()
         raise GeraeteaenderungAbgelehntError(
             "Ein freigegebenes Geraet muss dieses Geraet freigeben."
         )
