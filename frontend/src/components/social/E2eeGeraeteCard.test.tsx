@@ -10,6 +10,7 @@ import {
   gibMichSelbstFrei,
   vertrauteGeraete,
 } from '@/services/e2eeGeraet'
+import { passkeyNachweis } from '@/services/passkeyService'
 import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
 import { E2eeGeraeteCard } from './E2eeGeraeteCard'
@@ -47,6 +48,18 @@ vi.mock('@/services/e2eeGeraet', () => ({
   gibMichSelbstFrei: vi.fn(async () => undefined),
   vertrauteGeraete: vi.fn(async (_id: number, liste: any[]) => liste),
 }))
+
+/**
+ * Der Passkey-Nachweis wird hier von Hand gesteuert.
+ *
+ * Nur so laesst sich der Moment festhalten, in dem die Abfrage laeuft: genau
+ * dort war der Knopf bis 10/2026 weiter bedienbar, und ein Abbruch lief ohne
+ * Meldung ins Leere (der Aufruf stand vor dem `try`).
+ */
+vi.mock('@/services/passkeyService', async (importOriginal) => {
+  const echt = await importOriginal<typeof import('@/services/passkeyService')>()
+  return { ...echt, passkeyNachweis: vi.fn() }
+})
 
 /** Beantwortet den nächsten Bestätigungsdialog. */
 async function bestaetige(antwort: boolean) {
@@ -290,6 +303,38 @@ describe('E2eeGeraeteCard', () => {
     await waitFor(() => expect(gibMichSelbstFrei).toHaveBeenCalledWith({ password: 'geheim' }))
     // Kein Neuanfang: die anderen Sitzungen bleiben, nur das Verzeichnis nicht.
     expect(geraeteZuruecksetzen).not.toHaveBeenCalled()
+  })
+
+  it('meldet einen abgebrochenen Nachweis, statt still zu scheitern', async () => {
+    // Der Nachweis stand bis 10/2026 vor dem `try`: ein abgebrochener Passkey
+    // warf ohne Meldung, und der Knopf blieb waehrend der ganzen Abfrage
+    // bedienbar. Beides ist hier festgehalten.
+    useAuthStore.setState({
+      user: { id: 10, username: 'anna', two_factor_enabled: true, two_factor_methods: ['passkey'] } as any,
+    })
+    liste.inhalt = [
+      { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
+    ]
+    let ablehnen: (fehler: Error) => void = () => {}
+    vi.mocked(passkeyNachweis).mockImplementation(
+      () =>
+        new Promise((_erfuellen, verwerfen) => {
+          ablehnen = verwerfen
+        }),
+    )
+
+    render(<E2eeGeraeteCard />)
+    const knopf = await screen.findByRole('button', { name: 'Dieses Gerät wieder zulassen' })
+    fireEvent.click(knopf)
+
+    // Waehrend die Abfrage laeuft, ist der Knopf gesperrt.
+    await waitFor(() => expect(knopf).toBeDisabled())
+    expect(gibMichSelbstFrei).not.toHaveBeenCalled()
+
+    ablehnen(new Error('Passkey abgebrochen'))
+    await waitFor(() => expect(knopf).toBeEnabled())
+    // Kein Aufruf ohne Nachweis — und der Fehler ist nicht verschluckt.
+    expect(gibMichSelbstFrei).not.toHaveBeenCalled()
   })
 
   it('verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift', async () => {

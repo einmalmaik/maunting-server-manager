@@ -183,11 +183,18 @@ export function E2eeGeraeteCard() {
    *
    * Der Nachweis kommt von `useZweitfaktor`, also vom eingerichteten Faktor
    * oder vom Passwort; was das Konto nicht hat, wird nicht angeboten.
+   *
+   * **Der Nachweis wird hier geholt, nicht vom Aufrufer.** Bis 10/2026 stand
+   * `await faktor.nachweis(…)` beim Knopf davor: brach der Passkey ab oder
+   * scheiterte er, lief die Ablehnung ohne Laufanzeige und ohne Meldung ins
+   * Leere, und die Knöpfe blieben während der ganzen Abfrage bedienbar. Jetzt
+   * liegt beides in einem `try`, wie beim Neuanfang daneben.
    */
-  const wiederFreigeben = async (nachweis: ReapproveEigenesGeraetInput) => {
+  const wiederFreigeben = async (nachweis: ReapproveEigenesGeraetInput | (() => Promise<ReapproveEigenesGeraetInput>)) => {
     setLaeuft('reapprove')
     try {
-      await gibMichSelbstFrei(nachweis)
+      const beleg = typeof nachweis === 'function' ? await nachweis() : nachweis
+      await gibMichSelbstFrei(beleg)
       setPasswort('')
       setConfirmationWord('')
       faktor.setCode('')
@@ -202,7 +209,7 @@ export function E2eeGeraeteCard() {
 
   const wiederFreigebenMitFaktor = async () => {
     if (!faktor.bereit) return
-    await wiederFreigeben(await faktor.nachweis('e2ee_reapprove'))
+    await wiederFreigeben(() => faktor.nachweis('e2ee_reapprove'))
   }
 
   const neuBeginnenMitPasskey = async () => {
