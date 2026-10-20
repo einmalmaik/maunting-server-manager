@@ -43,13 +43,21 @@ def main() -> None:
         shutil.copy2(main_binary, ziel / MAIN_EXE)
         print(f"Hauptprogramm kopiert: {MAIN_EXE}")
 
-    # Velopack-Artefakte einsammeln (*.nupkg, releases.*.json, Setup.exe)
+    # Das signierte Pontis-Feedpaar samt mindestens einem Updatepaket ist Pflicht.
     velopack_dir = Path("browser-velopack")
-    if velopack_dir.exists():
-        for f in velopack_dir.glob("*"):
-            if f.is_file():
-                shutil.copy2(f, ziel / f.name)
-                print(f"Copied Velopack artifact: {f.name}")
+    feed = velopack_dir / "releases.pontis.json"
+    feed_signature = velopack_dir / "releases.pontis.json.sig"
+    packages = sorted(velopack_dir.glob("Pontis-*-full.nupkg"))
+    for required in (feed, feed_signature):
+        if not required.is_file():
+            sys.exit(f"Signierter Velopack-Feed fehlt: {required}")
+    if not packages:
+        sys.exit(f"Velopack-Vollpaket fehlt: {velopack_dir}/Pontis-*-full.nupkg")
+
+    for f in velopack_dir.glob("*"):
+        if f.is_file():
+            shutil.copy2(f, ziel / f.name)
+            print(f"Copied Velopack artifact: {f.name}")
 
     manifest = {
         "version": tag.lstrip("v"),

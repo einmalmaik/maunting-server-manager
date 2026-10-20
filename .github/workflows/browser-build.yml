@@ -87,16 +87,30 @@ jobs:
         run: npx tauri build
 
       - name: Download Previous Velopack Releases (for Delta Updates)
-        continue-on-error: true
-        run: |
-          vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "browser-velopack" --channel "pontis"
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          previous_feed="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[].name] | any(. == "releases.pontis.json") | select(.)')"
+          if [[ -n "$previous_feed" ]]; then
+            vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "browser-velopack" --channel "pontis"
+          else
+            echo "Kein vorheriger Pontis-Feed; das erste Paket wird als Vollpaket erstellt."
+          fi
 
       - name: Package with Velopack
         run: |
           mkdir -p browser-velopack
           vpk pack --packId "Pontis" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "browser/src-tauri/target/release" --mainExe "MauntingPontis.exe" --icon "browser/src-tauri/icons/icon.ico" --splashImage "browser/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "pontis" --outputDir "browser-velopack"
+
+      - name: Sign Velopack feed
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          npx --prefix browser tauri signer sign --app-version "${{ steps.version.outputs.clean_version }}" browser-velopack/releases.pontis.json
 
       - name: Collect installer and latest-msb.json
         shell: bash

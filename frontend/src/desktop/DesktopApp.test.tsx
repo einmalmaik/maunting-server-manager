@@ -562,7 +562,7 @@ describe('DesktopApp', () => {
     })
   })
 
-  it('führt bei verfügbarem Update die Installation beim Start aus', async () => {
+  it('meldet ein verfügbares Update, lädt es erst auf Klick und startet erst danach neu', async () => {
     invokeMock.mockImplementation((befehl: string) => {
       if (befehl === 'konfig_laden') {
         return Promise.resolve({
@@ -582,6 +582,7 @@ describe('DesktopApp', () => {
           ist_android: false,
         })
       }
+      if (befehl === 'update_herunterladen') return Promise.resolve()
       if (befehl === 'update_installieren') return Promise.resolve()
       return Promise.resolve(null)
     })
@@ -616,6 +617,29 @@ describe('DesktopApp', () => {
 
     render(<DesktopApp />)
 
+    await waitFor(() => {
+      expect(screen.getByTestId('ki-seite')).toBeInTheDocument()
+      expect(eventListeners.get('updater:verfuegbar')?.size).toBeGreaterThan(0)
+    })
+    await act(async () => {
+      triggerTauriEvent('updater:verfuegbar', { version: '4.3.4' })
+    })
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /neue version 4\.3\.4 verfügbar/i })).toBeInTheDocument()
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('update_herunterladen')
+    expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
+
+    fireEvent.click(screen.getByRole('button', { name: /neue version 4\.3\.4 verfügbar/i }))
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('update_herunterladen')
+    })
+    expect(invokeMock).not.toHaveBeenCalledWith('update_installieren')
+
+    await act(async () => {
+      triggerTauriEvent('updater:bereit', { version: '4.3.4' })
+    })
+    fireEvent.click(screen.getByRole('button', { name: /version 4\.3\.4 ist einsatzbereit/i }))
     await waitFor(() => {
       expect(invokeMock).toHaveBeenCalledWith('update_installieren')
     })

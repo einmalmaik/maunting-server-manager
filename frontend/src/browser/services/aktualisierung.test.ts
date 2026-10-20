@@ -13,11 +13,13 @@ import { nativ } from './nativ'
 
 describe('Updates', () => {
   let pruefen: ReturnType<typeof vi.spyOn>
+  let herunterladen: ReturnType<typeof vi.spyOn>
   let installieren: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     vi.useFakeTimers()
     pruefen = vi.spyOn(nativ, 'updatePruefen').mockResolvedValue('5.2.0')
+    herunterladen = vi.spyOn(nativ, 'updateHerunterladen').mockResolvedValue(null)
     installieren = vi.spyOn(nativ, 'updateInstallieren').mockResolvedValue(null)
     useToastStore.setState({ toasts: [] })
     useEinstellungenStore.setState({ updatesSuchen: true })
@@ -40,9 +42,11 @@ describe('Updates', () => {
     const [meldung] = useToastStore.getState().toasts
     expect(meldung.message).toBe('Version 5.2.0 ist da.')
     expect(meldung.aktion?.label).toBe('Installieren und neu starten')
+    expect(herunterladen).not.toHaveBeenCalled()
     expect(installieren).not.toHaveBeenCalled()
     meldung.aktion?.ausfuehren()
-    expect(installieren).toHaveBeenCalledTimes(1)
+    expect(herunterladen).toHaveBeenCalledTimes(1)
+    expect(installieren).not.toHaveBeenCalled()
   })
 
   it('sagt nichts, wenn es keine neuere Version gibt', async () => {

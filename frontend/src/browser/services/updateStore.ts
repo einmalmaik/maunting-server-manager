@@ -130,9 +130,10 @@ export const useUpdateStore = create<UpdateStoreZustand>((set, get) => ({
 
   installieren: async () => {
     if (!istTauri()) return
+    const installieren = get().phase === 'bereit'
     set({ phase: 'laedt', prozent: 0, fehlerText: null })
     try {
-      await invoke('update_installieren')
+      await invoke(installieren ? 'update_installieren' : 'update_herunterladen')
     } catch (e) {
       set({
         phase: 'fehler',

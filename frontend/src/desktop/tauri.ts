@@ -502,6 +502,10 @@ export async function updatePruefen(): Promise<UpdateInfo> {
   return await invoke<UpdateInfo>('update_pruefen')
 }
 
+export async function updateHerunterladen(): Promise<void> {
+  await invoke('update_herunterladen')
+}
+
 export async function updateInstallieren(): Promise<void> {
   await invoke('update_installieren')
 }

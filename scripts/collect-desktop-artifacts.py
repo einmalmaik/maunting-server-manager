@@ -13,9 +13,12 @@ tag = sys.argv[1] if len(sys.argv) > 1 and sys.argv[1] else os.environ.get("TAG"
 release_dir = Path("smart-system/src-tauri/target/release")
 
 # 1. Installer und Haupt-Executable einsammeln
-for exe in release_dir.glob("bundle/nsis/*.exe"):
-    shutil.copy2(exe, desktop_dir / "MauntingSmartSystem-Setup.exe")
-    print(f"Copied installer: {exe.name} -> MauntingSmartSystem-Setup.exe")
+installers = sorted(release_dir.glob("bundle/nsis/*.exe"))
+if len(installers) != 1:
+    sys.exit(f"Genau ein NSIS-Installer erwartet, gefunden: {[p.name for p in installers]}")
+installer = installers[0]
+shutil.copy2(installer, desktop_dir / "MauntingSmartSystem-Setup.exe")
+print(f"Copied installer: {installer.name} -> MauntingSmartSystem-Setup.exe")
 
 main_exe = release_dir / "MauntingSmartSystem.exe"
 if main_exe.exists():
@@ -28,75 +31,55 @@ for f in release_dir.rglob("*"):
         shutil.copy2(f, desktop_dir / f.name)
         print(f"Copied updater file: {f.name}")
 
-# 2b. Velopack-Artefakte einsammeln (*.nupkg, releases.*.json, Setup.exe)
+setup_signature = installer.with_name(f"{installer.name}.sig")
+if not setup_signature.is_file():
+    sys.exit(f"Tauri-Setup-Signatur fehlt: {setup_signature}")
+shutil.copy2(setup_signature, desktop_dir / "MauntingSmartSystem-Setup.exe.sig")
+
+# 2b. Das signierte MSS-Feedpaar samt mindestens einem Updatepaket ist Pflicht.
 velopack_dir = Path("smart-system-velopack")
-if velopack_dir.exists():
-    for f in velopack_dir.glob("*"):
-        if f.is_file():
-            shutil.copy2(f, desktop_dir / f.name)
-            print(f"Copied Velopack artifact: {f.name}")
+feed = velopack_dir / "releases.mss.json"
+feed_signature = velopack_dir / "releases.mss.json.sig"
+packages = sorted(velopack_dir.glob("MauntingSmartSystem-*-full.nupkg"))
+for required in (feed, feed_signature):
+    if not required.is_file():
+        sys.exit(f"Signierter Velopack-Feed fehlt: {required}")
+if not packages:
+    sys.exit(f"Velopack-Vollpaket fehlt: {velopack_dir}/MauntingSmartSystem-*-full.nupkg")
 
-# Falls eine .sig für das Setup existiert, auch als MauntingSmartSystem-Setup.exe.sig bereitstellen
-for sig in desktop_dir.glob("*.sig"):
-    if "setup" in sig.name.lower():
-        shutil.copy2(sig, desktop_dir / "MauntingSmartSystem-Setup.exe.sig")
-        print(f"Linked signature: {sig.name} -> MauntingSmartSystem-Setup.exe.sig")
-        break
+for f in velopack_dir.glob("*"):
+    if f.is_file():
+        shutil.copy2(f, desktop_dir / f.name)
+        print(f"Copied Velopack artifact: {f.name}")
 
-# 3. Falls Tauri direkt ein latest.json erzeugt hat, übernehmen
-tauri_latest = list(release_dir.rglob("latest.json"))
-if tauri_latest:
-    shutil.copy2(tauri_latest[0], desktop_dir / "latest.json")
-    print(f"Copied Tauri's latest.json from {tauri_latest[0]}")
-
-# 4. latest.json sicherstellen (entweder von Tauri oder generiert)
+# 3. Erzeuge den MSS-Updater-Feed immer aus der Signatur genau des Installers.
+# Tauri-Signaturen weiterer Dateien (z. B. Velopack-Feed) dürfen nicht dafür
+# verwendet werden.
 latest_json_path = desktop_dir / "latest.json"
-if not latest_json_path.exists():
-    sig_files = list(desktop_dir.glob("*.sig"))
-    zip_files = list(desktop_dir.glob("*.zip"))
-    
-    sig_content = ""
-    target_url_file = "MauntingSmartSystem-Setup.exe"
-    
-    if zip_files:
-        target_url_file = zip_files[0].name
-        # Finde passende sig
-        matching_sigs = [s for s in sig_files if target_url_file in s.name]
-        sig_file = matching_sigs[0] if matching_sigs else (sig_files[0] if sig_files else None)
-        if sig_file:
-            sig_content = sig_file.read_text(encoding="utf-8").strip()
-    elif sig_files:
-        sig_content = sig_files[0].read_text(encoding="utf-8").strip()
-        target_url_file = "MauntingSmartSystem-Setup.exe"
-
-    clean_version = tag.lstrip("v")
-    if sig_content:
-        manifest = {
-            "version": clean_version,
-            "notes": f"MSS Update {tag}",
-            "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "platforms": {
-                "windows-x86_64": {
-                    "signature": sig_content,
-                    "url": f"https://github.com/einmalmaik/maunting-server-manager/releases/download/{tag}/{target_url_file}"
-                }
-            }
+sig_content = setup_signature.read_text(encoding="utf-8").strip()
+if not sig_content:
+    sys.exit(f"Tauri-Setup-Signatur ist leer: {setup_signature}")
+clean_version = tag.lstrip("v")
+manifest = {
+    "version": clean_version,
+    "notes": f"MSS Update {tag}",
+    "pub_date": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "platforms": {
+        "windows-x86_64": {
+            "signature": sig_content,
+            "url": f"https://github.com/einmalmaik/maunting-server-manager/releases/download/{tag}/MauntingSmartSystem-Setup.exe"
         }
-        latest_json_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-        print(f"Generated manifest latest.json pointing to {target_url_file} (version: {clean_version})")
-    else:
-        print("Warning: No signature found to create latest.json")
+    }
+}
+latest_json_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+print(f"Generated manifest latest.json pointing to MauntingSmartSystem-Setup.exe (version: {clean_version})")
 
-# 5. Falls latest.json existiert (egal ob von Tauri oder generiert), fuehrendes 'v' strikt entfernen
-if latest_json_path.exists():
-    try:
-        latest_data = json.loads(latest_json_path.read_text(encoding="utf-8"))
-        if "version" in latest_data and isinstance(latest_data["version"], str) and latest_data["version"].startswith("v"):
-            latest_data["version"] = latest_data["version"].lstrip("v")
-            latest_json_path.write_text(json.dumps(latest_data, indent=2), encoding="utf-8")
-            print(f"Sanitized latest.json version to SemVer: {latest_data['version']}")
-    except Exception as e:
-        print(f"Warning sanitizing latest.json: {e}")
+# 4. Verifiziere, dass das Manifest ausschließlich die Setup-Signatur verwendet.
+written_manifest = json.loads(latest_json_path.read_text(encoding="utf-8"))
+if written_manifest.get("platforms", {}).get("windows-x86_64", {}).get("signature") != sig_content:
+    sys.exit("latest.json enthält nicht die Signatur des MSS-Installers.")
+if written_manifest.get("version") != clean_version:
+    sys.exit("latest.json enthält eine ungültige MSS-Version.")
 
 print("\n--- Inhalt von desktop-release: ---")
 for item in desktop_dir.iterdir():

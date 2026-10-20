@@ -26,6 +26,14 @@ export async function installieren(): Promise<void> {
   }
 }
 
+export async function herunterladen(): Promise<void> {
+  try {
+    await nativ.updateHerunterladen()
+  } catch {
+    toast.error(i18n.t('browser.update.fehler'))
+  }
+}
+
 export function useAktualisierung(): void {
   const suchen = useEinstellungenStore((s) => s.updatesSuchen)
 
@@ -38,7 +46,7 @@ export function useAktualisierung(): void {
           if (!version) return
           toast.success(i18n.t('browser.update.da', { version }), {
             label: i18n.t('browser.update.installieren'),
-            ausfuehren: () => void installieren(),
+            ausfuehren: () => void herunterladen(),
           })
         })
         // Ohne Netz oder ohne Antwort von GitHub: beim nächsten Start wieder.

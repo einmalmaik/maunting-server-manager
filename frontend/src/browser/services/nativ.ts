@@ -272,7 +272,9 @@ export const nativ = {
     nacheinander('bildsuche', { id, privat, url: bild.url, feld: bild.feld, base64: bild.base64 ?? false }),
   /** Die neuere Version aus dem jüngsten Release, sonst `null` (`aktualisieren.rs`). */
   updatePruefen: () => rufen<string | null>('update_pruefen'),
-  /** Lädt, prüft die Signatur und startet den Installer; der Browser endet dabei. */
+  /** Lädt das Update nach erfolgreicher Hintergrundprüfung herunter. */
+  updateHerunterladen: () => rufen('update_herunterladen'),
+  /** Installiert das vorbereitete Update und startet den Browser neu. */
   updateInstallieren: () => rufen('update_installieren'),
 }
 

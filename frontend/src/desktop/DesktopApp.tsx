@@ -69,6 +69,7 @@ import {
   konfigAendern,
   konfigLaden,
   oeffneBrowser,
+  updateHerunterladen,
   updateInstallieren,
   type AppKonfig,
   type UpdateStatusEvent,
@@ -877,7 +878,7 @@ function Hauptseite({
       setUpdateProzent(0)
       setUpdateFehler(null)
       try {
-        await updateInstallieren()
+        await updateHerunterladen()
       } catch (e) {
         setUpdatePhase('fehler')
         setUpdateFehler(e instanceof Error ? e.message : String(e))

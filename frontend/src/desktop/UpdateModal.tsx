@@ -4,8 +4,8 @@ import { listen } from '@tauri-apps/api/event'
 import { Download, RefreshCw, CheckCircle2, AlertCircle, X, Sparkles } from 'lucide-react'
 import { Button } from '@/Singra/UI'
 import {
+  updateHerunterladen,
   updateInstallieren,
-  appNeuStarten,
   type UpdateInfo,
   type UpdateStatusEvent,
 } from './tauri'
@@ -81,11 +81,16 @@ export function UpdateModal() {
   if (!sichtbar || !info) return null
 
   async function handleInstallieren() {
+    if (!info) return
     setFehlerText(null)
     setStatus('laedt')
     setProzent(0)
     try {
-      await updateInstallieren()
+      if (info.ist_android) {
+        await updateInstallieren()
+      } else {
+        await updateHerunterladen()
+      }
     } catch (e) {
       setStatus('fehler')
       setFehlerText(e instanceof Error ? e.message : String(e))
@@ -191,7 +196,7 @@ export function UpdateModal() {
               <Button variant="secondary" onClick={() => setSichtbar(false)}>
                 {t('mss.updateModal.beimNaechstenStart')}
               </Button>
-              <Button onClick={() => void appNeuStarten()} className="gap-2">
+              <Button onClick={() => void updateInstallieren()} className="gap-2">
                 <RefreshCw className="w-4 h-4" />
                 {t('mss.updateModal.neuStarten')}
               </Button>
