@@ -110,8 +110,9 @@ jobs:
           feed_releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
             --jq '.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.pontis.json")) | [.published_at, .tag_name] | @tsv')"
           previous_version="$(printf '%s\n' "$feed_releases" | sort | tail -1 | cut -f2 | sed 's/^v//')"
-          # Ein zweiter Lauf fuer denselben Tag findet das eigene Paket als
-          # "vorheriges"; vpk pack bricht dann mit "exists" ab (20.10.2026).
+          # Ein zweiter Lauf fuer denselben Tag (oder ein aelterer Stand im
+          # Feed) findet das eigene Paket als "vorheriges"; `vpk pack` bricht
+          # dann mit "exists" ab. Dann wird ohne Delta gebaut (20.10.2026).
           if [[ -n "$previous_version" && "$previous_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
             # Derselbe Release, mit dem verglichen wurde — nicht der gerade
             # neueste des Feeds.
