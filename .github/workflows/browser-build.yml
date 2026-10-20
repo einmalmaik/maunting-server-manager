@@ -123,7 +123,7 @@ jobs:
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           cli="browser/node_modules/@tauri-apps/cli/tauri.js"
           node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" browser-velopack/releases.pontis.json
-          for setup in browser-velopack/*win-Setup.exe; do
+          for setup in browser-velopack/*-Setup.exe; do
             node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
           done
 

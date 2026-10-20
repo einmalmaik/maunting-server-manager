@@ -51,7 +51,9 @@ def main() -> None:
     feed = velopack_dir / "releases.pontis.json"
     feed_signature = velopack_dir / "releases.pontis.json.sig"
     packages = sorted(velopack_dir.glob("Pontis-*-full.nupkg"))
-    setup_installer = sorted(velopack_dir.glob("*win-Setup.exe"))
+    # vpk 1.2.161 nennt sie `<PackId>-<Kanal>-Setup.exe` (z. B.
+    # `Pontis-pontis-Setup.exe`), aeltere Fassungen `*-win-Setup.exe`.
+    setup_installer = sorted(velopack_dir.glob("*-Setup.exe"))
     for required in (feed, feed_signature):
         if not required.is_file():
             sys.exit(f"Signierter Velopack-Feed fehlt: {required}")

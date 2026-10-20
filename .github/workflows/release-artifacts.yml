@@ -262,7 +262,7 @@ jobs:
           test -n "$TAURI_SIGNING_PRIVATE_KEY"
           cli="smart-system/node_modules/@tauri-apps/cli/tauri.js"
           node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" smart-system-velopack/releases.mss.json
-          for setup in smart-system-velopack/*win-Setup.exe; do
+          for setup in smart-system-velopack/*-Setup.exe; do
             node "$cli" signer sign --app-version "${{ steps.version.outputs.clean_version }}" "$setup"
           done
 

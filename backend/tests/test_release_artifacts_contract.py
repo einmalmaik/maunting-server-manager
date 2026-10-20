@@ -121,7 +121,9 @@ def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
     signierschritt = bau.split("Sign Velopack feed", 1)[1]
     assert '"$cli" signer sign --app-version' in signierschritt
     assert "releases.pontis.json" in signierschritt
-    assert "*win-Setup.exe" in signierschritt
+    # vpk nennt den Installer `<PackId>-<Kanal>-Setup.exe`; aeltere Fassungen
+    # `*-win-Setup.exe`. Beide Namen deckt die Suche ab.
+    assert "*-Setup.exe" in signierschritt
 
 
 def test_windows_updates_laufen_nur_ueber_velopack() -> None:

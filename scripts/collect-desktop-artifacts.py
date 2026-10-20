@@ -47,7 +47,9 @@ if nsis:
 feed = velopack_dir / "releases.mss.json"
 feed_signature = velopack_dir / "releases.mss.json.sig"
 packages = sorted(velopack_dir.glob("MauntingSmartSystem-*-full.nupkg"))
-setup_installer = sorted(velopack_dir.glob("*win-Setup.exe"))
+# vpk 1.2.161 nennt sie `<PackId>-<Kanal>-Setup.exe` (z. B.
+# `MauntingSmartSystem-mss-Setup.exe`), aeltere Fassungen `*-win-Setup.exe`.
+setup_installer = sorted(velopack_dir.glob("*-Setup.exe"))
 for required in (feed, feed_signature):
     if not required.is_file():
         sys.exit(f"Signierter Velopack-Feed fehlt: {required}")
