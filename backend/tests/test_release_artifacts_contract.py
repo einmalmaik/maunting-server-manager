@@ -114,9 +114,14 @@ def test_secure_browser_kommt_vollstaendig_und_signiert_ins_release() -> None:
     assert '"${MSB_ANDROID_KEYSTORE_B64:?fehlt}"' in signieren
     assert "APK Signature Scheme v3): true" in signieren
 
-    # Der Velopack-Feed wird mit dem Secret signiert (nicht mehr der Installer).
+    # Der Velopack-Feed und Velopacks Setup.exe werden mit dem Secret signiert
+    # (nicht mehr der Tauri-Installer). Den CLI-Einstiegspunkt startet der Job
+    # direkt mit node: `npx --prefix <dir>` findet keine lokale Ausfuehrbare.
     assert "TAURI_SIGNING_PRIVATE_KEY" in bau
-    assert "tauri signer sign" in bau
+    signierschritt = bau.split("Sign Velopack feed", 1)[1]
+    assert '"$cli" signer sign --app-version' in signierschritt
+    assert "releases.pontis.json" in signierschritt
+    assert "*win-Setup.exe" in signierschritt
 
 
 def test_windows_updates_laufen_nur_ueber_velopack() -> None:
