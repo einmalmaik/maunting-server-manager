@@ -900,7 +900,10 @@ pub fn run() {
             .plugin(tauri_plugin_global_shortcut::Builder::new().build());
     }
 
-    let builder = updater_core::init_updater(builder, updater_core::UpdateConfig::mss());
+    // Auf Android haengen hier die Plattform-Plugins an; auf dem Desktop bleibt
+    // die Bindung unveraendert und `mut` ungenutzt.
+    #[allow(unused_mut)]
+    let mut builder = updater_core::init_updater(builder, updater_core::UpdateConfig::mss());
 
     #[cfg(target_os = "android")]
     {
