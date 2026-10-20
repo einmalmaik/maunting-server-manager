@@ -4410,7 +4410,7 @@
       "intro": "Optional Desktop App for Windows: the same ongoing chat as in the browser, a wake word trained offline, and work inside a folder the user picks. The app does not replace the panel — it is a second way into the same conversation, with the same permissions and a computer attached.",
       "artifact": {
         "title": "Installer",
-        "body": "release-artifacts.yml builds the Windows app on v* tags. Installing and updating go exclusively through Velopack: MauntingSmartSystem-Setup.exe with the signed feed releases.mss.json and MauntingSmartSystem-<version>-mss-full.nupkg. There is no second installer (Tauri NSIS), because its installation is unknown to Velopack. latest.json names the Android version and points, signed, to the installer so existing v5.5.1 installations move to Velopack once. Windows only: audio ducking, takeover and the credential vault are Windows features."
+        "body": "release-artifacts.yml builds the Windows app on v* tags. Installing and updating go exclusively through Velopack: MauntingSmartSystem-Setup.exe with the signed feed releases.mss.json and MauntingSmartSystem-<version>-full.nupkg. There is no second installer (Tauri NSIS), because its installation is unknown to Velopack. latest.json only names the Android version. Windows only: audio ducking, takeover and the credential vault are Windows features."
       },
       "oberflaeche": {
         "title": "One interface",
@@ -4451,7 +4451,7 @@
       },
       "updates": {
         "title": "Updates",
-        "body": "On Windows the browser updates exclusively through Velopack: MauntingPontis-Setup.exe and the signed feed releases.pontis.json with Pontis-<version>-pontis-full.nupkg (key from TAURI_SIGNING_PRIVATE_KEY). latest-msb.json and latest.json name the Android version and point, signed, to the installer for the one-time move from v5.5.1. On Windows the browser downloads the update quietly in the background and only the ready badge asks for a restart; on Android it asks before installing. A development build never installs."
+        "body": "On Windows the browser updates exclusively through Velopack: MauntingPontis-Setup.exe and the signed feed releases.pontis.json with Pontis-<version>-full.nupkg (key from TAURI_SIGNING_PRIVATE_KEY). latest-msb.json and latest.json only name the Android version, without a Windows signature. On Windows the browser downloads the update quietly in the background and only the ready badge asks for a restart; on Android it asks before installing. A development build never installs."
       },
       "android": {
         "title": "Android app",
