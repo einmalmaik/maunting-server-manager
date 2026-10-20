@@ -93,6 +93,8 @@ jobs:
           cp browser/src-tauri/target/release/MauntingPontis.exe velopack-stage-msb/
 
       - name: Download Previous Velopack Releases (for Delta Updates)
+        # Windows-Runner starten PowerShell; [[ ]] und $( ) gibt es dort nicht.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -225,6 +225,9 @@ jobs:
           cp smart-system/src-tauri/target/release/MauntingSmartSystem.exe velopack-stage-mss/
 
       - name: Download Previous Velopack Releases (for Delta Updates)
+        # Windows-Runner starten PowerShell; diese Funktionen der Schale ([[ ]],
+        # $( ), sed) gibt es dort nicht. Der Schritt braucht bash.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
