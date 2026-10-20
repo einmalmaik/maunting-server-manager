@@ -13,6 +13,7 @@ import {
 import { passkeyNachweis } from '@/services/passkeyService'
 import { useAuthStore } from '@/stores/authStore'
 import { useConfirmStore } from '@/stores/confirmStore'
+import { toast } from '@/stores/toastStore'
 import { E2eeGeraeteCard } from './E2eeGeraeteCard'
 
 const { liste } = vi.hoisted(() => ({
@@ -315,6 +316,9 @@ describe('E2eeGeraeteCard', () => {
     liste.inhalt = [
       { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
     ]
+    // Die Meldung selbst wird geprüft: ohne `toast.error` im `catch` bliebe
+    // ein Abbruch weiter stumm, und der Test dürfte davon nichts merken.
+    const gemeldet = vi.spyOn(toast, 'error').mockImplementation(() => {})
     let ablehnen: (fehler: Error) => void = () => {}
     vi.mocked(passkeyNachweis).mockImplementation(
       () =>
@@ -335,6 +339,8 @@ describe('E2eeGeraeteCard', () => {
     await waitFor(() => expect(knopf).toBeEnabled())
     // Kein Aufruf ohne Nachweis — und der Fehler ist nicht verschluckt.
     expect(gibMichSelbstFrei).not.toHaveBeenCalled()
+    await waitFor(() => expect(gemeldet).toHaveBeenCalledWith('Passkey abgebrochen'))
+    gemeldet.mockRestore()
   })
 
   it('verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift', async () => {
