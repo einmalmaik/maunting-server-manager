@@ -299,8 +299,25 @@ export function useMessengerKern({
     maxPartnerDeliveredIdRef.current = 0
     useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
 
+    /**
+     * Beim Eintreffen der Mailbox können bereits Systemzeilen dastehen: eine
+     * Schlüsselwarnung kommt aus einem Ereignis und nicht aus dem Verlauf.
+     * Ein Wechsel des Gesprächs verwirft sie; bleibt das Gespräch dasselbe und
+     * trifft nur die Kennung ein, bleiben sie stehen.
+     */
+    const mitSystemzeilen = (vorher: ChatMessage[], basis: ChatMessage[]) => {
+      if (neuesGespraech) return basis
+      const systemzeilen = vorher.filter((m) => m.isSystem)
+      if (!systemzeilen.length) return basis
+      const vorhanden = new Set(basis.map((m) => m.clientUuid ?? `#${m.id}`))
+      return sortMessagesChronologically([
+        ...basis,
+        ...systemzeilen.filter((m) => !vorhanden.has(m.clientUuid ?? `#${m.id}`)),
+      ])
+    }
+
     if (!blindMailboxId) {
-      setMessages([])
+      setMessages((vorher) => mitSystemzeilen(vorher, []))
       setLoadingMessages(Boolean(activeContact || activeGroup))
       return
     }
@@ -320,16 +337,16 @@ export function useMessengerKern({
 
     const cached = sessionChatCache.get(blindMailboxId)
     if (cached && cached.length > 0) {
-      setMessages(cached)
+      setMessages((vorher) => mitSystemzeilen(vorher, cached))
       setLoadingMessages(false)
     } else {
-      setMessages([])
+      setMessages((vorher) => mitSystemzeilen(vorher, []))
       setLoadingMessages(true)
       loadLocalMessages(blindMailboxId)
         .then((localMsgs) => {
           if (active && activeMailboxIdRef.current === blindMailboxId && localMsgs.length > 0) {
             sessionChatCache.set(blindMailboxId, localMsgs)
-            setMessages(localMsgs)
+            setMessages((vorher) => mitSystemzeilen(vorher, localMsgs))
             setLoadingMessages(false)
           }
         })

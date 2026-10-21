@@ -50,8 +50,6 @@ import {
   type ChatMessage,
   type TonZustand,
   type NoteAttachment,
-  type StickerAttachment,
-  type StoryReplyAttachment,
 } from '@/components/social/ChatMessageBubble'
 import {
   type ChatGroupItem,
@@ -64,10 +62,8 @@ import {
 import { deriveBlindMailboxId } from '@/services/e2eeCrypto'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
-  type AudioAttachment,
   type FileAttachment,
   type ImageAttachment,
-  type MedienBindungsKontext,
 } from '@/components/social/ChatMediaAttachments'
 import { useSprachaufnahme } from '@/hooks/useSprachaufnahme'
 import { useSprachwiedergabe } from '@/hooks/useSprachwiedergabe'
@@ -78,6 +74,7 @@ import { useMessengerAuswahl } from '@/pages/messenger/useMessengerAuswahl'
 import { useGruppenAktionen } from '@/hooks/useGruppenAktionen'
 import { useMessengerKern } from '@/hooks/useMessengerKern'
 import { useMessengerSenden } from '@/hooks/useMessengerSenden'
+import { useMessengerInteraktionen } from '@/hooks/useMessengerInteraktionen'
 import { useMessengerSync } from '@/hooks/useMessengerSync'
 import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
 import { useUeberallAnsicht } from '@/hooks/useUeberallAnsicht'
@@ -118,10 +115,7 @@ import {
   tilgeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
-import { bezugFelder } from '@/services/nachrichtBezug'
-import { anheftung, setzeAnheftung } from '@/services/nachrichtAnheftung'
 import { quittungsstand } from '@/services/quittungsstand'
-import { schalteReaktion } from '@/services/reaktionen'
 import {
   binIchGemeint,
   offeneErwaehnung,
@@ -130,7 +124,6 @@ import {
   type Erwaehnungsvorschlag,
 } from '@/services/erwaehnungen'
 import {
-  baueWeiterleitung,
   istWeiterleitbar,
   type Weiterleitungsziel,
 } from '@/services/nachrichtWeiterleiten'
@@ -821,55 +814,6 @@ function MessengerSeite() {
   const darfAnhaengen = !activeGroup || gruppenrechteVon(currentUserId).has('attach_media')
 
 
-  /**
-   * Reagieren — dieselbe Bewegung setzt und nimmt zurück.
-   *
-   * Die Wirkung wird **sofort lokal** angewendet, nicht erst beim nächsten
-   * Abruf: der eigene Steuerumschlag kommt nie zurück, weil ein Ratchet sein
-   * eigenes Erzeugnis nicht öffnet. Dieselbe Regel wie bei Bearbeiten und
-   * Löschen.
-   */
-  const handleReaktion = async (msg: ChatMessage, emoji: string) => {
-    if (!currentUserId || !blindMailboxId || msg.isDeleted) return
-    const { reaktionen: neu, aktion } = schalteReaktion(msg.reaktionen, emoji, currentUserId)
-
-    setMessages((prev) => {
-      const geaendert = prev.map((m) =>
-        m.id === msg.id || (msg.clientUuid && m.clientUuid === msg.clientUuid)
-          ? { ...m, reaktionen: neu }
-          : m,
-      )
-      sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
-      return geaendert
-    })
-    void updateMessageInLocalStore(blindMailboxId, msg.id, { reaktionen: neu }).catch(() => {})
-    vergissMailbox(blindMailboxId)
-
-    try {
-      await sendE2eeControlMessage({
-        type: 'reaction',
-        ...bezugFelder(msg),
-        emoji,
-        aktion,
-        actor_id: currentUserId,
-        zeitpunkt: new Date().toISOString(),
-      })
-    } catch {
-      // Eine Reaktion, die lokal steht und nie ankommt, ist eine Lüge — also
-      // wird sie zurückgenommen und gesagt, dass es nicht geklappt hat.
-      const zurueck = schalteReaktion(neu, emoji, currentUserId).reaktionen
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === msg.id || (msg.clientUuid && m.clientUuid === msg.clientUuid)
-            ? { ...m, reaktionen: zurueck }
-            : m,
-        ),
-      )
-      void updateMessageInLocalStore(blindMailboxId, msg.id, { reaktionen: zurueck }).catch(() => {})
-      toast.error(t('messenger.reactionFailed'))
-    }
-  }
-
   /** Antworten: den Zitatkopf über die Eingabe setzen und dorthin springen. */
   const handleAntworten = (msg: ChatMessage) => {
     if (!msg.clientUuid) {
@@ -1037,55 +981,6 @@ function MessengerSeite() {
   })
 
   /**
-   * Weiterleiten heißt neu verschlüsseln.
-   *
-   * Medien müssen wirklich noch einmal hoch: ein Anhang ist an Absender **und**
-   * Mailbox gebunden und geht in einem anderen Gespräch nicht auf. Das dauert,
-   * deshalb der Fortschritt.
-   */
-  const handleWeiterleiten = async (ziele: Weiterleitungsziel[]) => {
-    const auswahl = weiterzuleiten
-    if (!auswahl?.length || !currentUserId || !blindMailboxId) return
-    let gescheitert = 0
-    try {
-      for (const ziel of ziele) {
-        for (const msg of auswahl) {
-          try {
-            const inhalt = await baueWeiterleitung(
-              msg,
-              medienBindung(msg),
-              ziel,
-              currentUserId,
-              setWlFortschritt,
-            )
-            await handleSendMessage({
-              text: inhalt.text || '',
-              note: inhalt.noteAttachment as NoteAttachment | undefined,
-              cal: inhalt.calendarAttachment as CalendarAttachment | undefined,
-              sticker: inhalt.stickerAttachment as StickerAttachment | undefined,
-              storyReply: inhalt.storyReply as StoryReplyAttachment | undefined,
-              img: inhalt.imageAttachment as ImageAttachment | undefined,
-              file: inhalt.fileAttachment as FileAttachment | undefined,
-              audio: inhalt.audioAttachment as AudioAttachment | undefined,
-              weitergeleitet: true,
-              antwortAuf: null,
-              ziel,
-            })
-          } catch {
-            gescheitert++
-          }
-        }
-      }
-    } finally {
-      setWlFortschritt(null)
-    }
-    setWeiterzuleiten(null)
-    beendeAuswahl()
-    if (gescheitert) toast.error(t('messenger.forwardFailed', { count: gescheitert }))
-    else toast.success(t('messenger.forwarded', { count: ziele.length }))
-  }
-
-  /**
    * Den verschlüsselten Rollenblock der offenen Gruppe holen.
    *
    * Er entscheidet mit, ob ein fremder Löschbefehl befolgt wird — also muss er
@@ -1205,6 +1100,24 @@ function MessengerSeite() {
   /** Ob ich in dieser Gruppe anheften darf — vom Server entschieden. */
   const darfAnheften = Boolean(activeGroup?.can_pin_messages)
 
+  const { handleReaktion, handleAnheften, handleWeiterleiten, medienBindung } =
+    useMessengerInteraktionen({
+      t,
+      currentUserId,
+      blindMailboxId,
+      activeGroup,
+      angeheftet,
+      setAngeheftet,
+      darfAnheften,
+      weiterzuleiten,
+      setWeiterzuleiten,
+      setWlFortschritt,
+      beendeAuswahl,
+      setMessages,
+      sendE2eeControlMessage,
+      handleSendMessage,
+    })
+
   /**
    * Ob ich die Verfallsfrist dieses Chats umstellen darf.
    *
@@ -1216,42 +1129,6 @@ function MessengerSeite() {
    * dort verwerfen die Wirkung.
    */
   const darfVerfallStellen = !activeGroup || Boolean(activeGroup.can_set_disappearing_messages)
-
-  /**
-   * Eine Nachricht über den Verlauf heften.
-   *
-   * Dieselbe Bauart wie `@everyone`: der Server kann den Inhalt nicht lesen und
-   * deshalb nicht prüfen, wer was anheftet. Also entscheidet der **empfangende**
-   * Client anhand der Rechte des Anheftenden, ob die Leiste erscheint.
-   */
-  const handleAnheften = async (msg: ChatMessage) => {
-    if (!activeGroup || !msg.clientUuid) return
-    if (!darfAnheften) {
-      toast.error(t('messenger.pinNoRightInGroup'))
-      return
-    }
-    const loesen = angeheftet?.clientUuid === msg.clientUuid
-    const vorher = anheftung(blindMailboxId)
-    // Ein Zeitpunkt für beides. Mit zwei knapp verschiedenen käme der eigene
-    // Umschlag beim nächsten Abruf als „neuer" zurück.
-    const jetzt = new Date().toISOString()
-    setAngeheftet(loesen ? null : msg)
-    setzeAnheftung(blindMailboxId, loesen ? '' : msg.clientUuid, jetzt)
-    try {
-      await sendE2eeControlMessage({
-        type: 'pin_message',
-        ...bezugFelder(msg),
-        aktion: loesen ? 'loesen' : 'anheften',
-        actor_id: currentUserId,
-        zeitpunkt: jetzt,
-      })
-      toast.success(loesen ? t('messenger.unpinned') : t('messenger.pinned'))
-    } catch {
-      setAngeheftet(loesen ? msg : null)
-      setzeAnheftung(blindMailboxId, vorher.clientUuid, vorher.stand || jetzt)
-      toast.error(t('messenger.pinFailed'))
-    }
-  }
 
   /**
    * Die Verfallsfrist dieses Chats umstellen.
@@ -1750,19 +1627,6 @@ function MessengerSeite() {
   const aufnahme = useSprachaufnahme({
     blindMailboxId,
     onFertig: (audio) => void handleSendMessage({ text: '', audio }),
-  })
-
-  /**
-   * Woran die Anhänge einer Nachricht hängen.
-   *
-   * Absender und Mailbox kommen aus dem Gespräch, nicht aus dem Anhang. DIS
-   * bindet beides in die gebundenen Daten jedes Stücks — deshalb lässt sich ein
-   * Blob nicht in ein anderes Gespräch oder unter einen anderen Absender
-   * umhängen.
-   */
-  const medienBindung = (msg: ChatMessage): MedienBindungsKontext => ({
-    absenderId: Number(msg.senderId) || Number(currentUserId) || 0,
-    blindMailboxId,
   })
 
   // Handle Photo / Camera capture

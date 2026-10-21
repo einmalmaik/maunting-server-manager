@@ -3280,21 +3280,54 @@ describe('Messenger (Allround Chat)', () => {
       ).toBeInTheDocument()
     })
 
-    it('warnt auch fürs eigene Konto — ein Gerät, das jemand mit deinem Passwort einträgt', async () => {
-      render(
-        <MemoryRouter initialEntries={['/chat?userId=101']}>
-          <Messenger />
-        </MemoryRouter>
-      )
-      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
-
-      act(() => {
-        schluesselWarnungCallback!({ userId: 1, typ: 'unbestaetigt', geraete: ['dieb-1'] })
+    it('behält die eigene Schlüsselwarnung, während der Verlauf noch lädt', async () => {
+      const { loadLocalMessages } = await import('@/services/messengerLocalStore')
+      const ablage = vi.mocked(loadLocalMessages).getMockImplementation()!
+      let freigeben!: () => void
+      const tor = new Promise<void>((resolve) => (freigeben = resolve))
+      vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) => {
+        await tor
+        return ablage(mid)
       })
+      // Erst mit einer echten Zeile aus der Ablage ersetzt der Abruf den
+      // Verlauf. Eine leere Antwort würde die Warnung ohnehin nicht anfassen.
+      nachrichten.set('test-blind-mailbox', [
+        {
+          id: 1,
+          clientUuid: 'lokal-1',
+          senderId: 101,
+          text: 'Aus der Ablage',
+          createdAt: '2026-09-08T12:00:00Z',
+          isSelf: false,
+        },
+      ])
 
-      expect(
-        await screen.findByText(/Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat/),
-      ).toBeInTheDocument()
+      try {
+        render(
+          <MemoryRouter initialEntries={['/chat?userId=101']}>
+            <Messenger />
+          </MemoryRouter>
+        )
+        await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+        await waitFor(() => expect(loadLocalMessages).toHaveBeenCalled())
+
+        act(() => {
+          schluesselWarnungCallback!({ userId: 1, typ: 'unbestaetigt', geraete: ['dieb-1'] })
+        })
+        const warnung = /Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat/
+        expect(await screen.findByText(warnung)).toBeInTheDocument()
+
+        // Der Abruf kommt erst jetzt zurück. Die Warnung darf dabei nicht
+        // wieder aus dem Verlauf fallen.
+        freigeben()
+        await act(async () => { await tor })
+        expect(screen.getByText(warnung)).toBeInTheDocument()
+      } finally {
+        freigeben()
+        vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) =>
+          nachrichten.get(mid) ?? []
+        )
+      }
     })
 
     it('erlaubt das Öffnen der Sicherheitsnummer-Ansicht über das Chatmenü', async () => {
