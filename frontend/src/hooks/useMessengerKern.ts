@@ -86,6 +86,38 @@ export function useMessengerKern({
   const maxPartnerDeliveredIdRef = useRef(0)
   const sitzungsMeldungRef = useRef<Map<string, number>>(new Map())
   const aufbauMeldungRef = useRef<Map<string, number>>(new Map())
+  /**
+   * Systemzeilen je Gespräch. Sie entstehen aus Ereignissen und nicht aus dem
+   * Verlauf; deshalb überlebt eine Warnung den Abruf, der den Verlauf ersetzt.
+   * Der Schlüssel ist das Gegenüber, nicht die Mailbox: die Kennung trifft
+   * asynchron ein und darf eine Warnung aus derselben Sekunde nicht verlieren.
+   */
+  const systemzeilenRef = useRef<Map<string, ChatMessage[]>>(new Map())
+  const systemzeilenZielRef = useRef('')
+  systemzeilenZielRef.current = activeGroup
+    ? `g:${activeGroup.id}`
+    : activeContact
+      ? `u:${activeContact.userId}`
+      : ''
+
+  const merkeSystemzeile = useCallback((zeile: ChatMessage) => {
+    const schluessel = systemzeilenZielRef.current
+    const bisher = systemzeilenRef.current.get(schluessel) ?? []
+    systemzeilenRef.current.set(
+      schluessel,
+      [...bisher.filter((m) => m.clientUuid !== zeile.clientUuid), zeile].slice(-20),
+    )
+  }, [])
+
+  /**
+   * Dieselbe Systemzeile darf nur einmal im Verlauf stehen. Der Warnhinweis
+   * und das Eintreffen der Mailbox können in beliebiger Reihenfolge laufen;
+   * beide Wege prüfen deshalb dieselbe Kennung, statt blind anzuhängen.
+   */
+  const haengeSystemzeileAn = useCallback((vorher: ChatMessage[], zeile: ChatMessage) =>
+    vorher.some((m) => m.clientUuid === zeile.clientUuid)
+      ? vorher
+      : sortMessagesChronologically([...vorher, zeile]), [])
 
   const [geraetWartet, setGeraetWartet] = useState(eigenesGeraetFreigegeben() === false)
 
@@ -116,8 +148,9 @@ export function useMessengerKern({
       isSelf: false,
       isSystem: true,
     }
-    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
-  }, [])
+    merkeSystemzeile(zeile)
+    setMessages((prev) => haengeSystemzeileAn(prev, zeile))
+  }, [haengeSystemzeileAn, merkeSystemzeile])
 
   const aufbauAbgelehnt = useCallback((geraet: string) => {
     const jetzt = Date.now()
@@ -133,26 +166,24 @@ export function useMessengerKern({
       isSelf: false,
       isSystem: true,
     }
-    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
-  }, [t])
+    merkeSystemzeile(zeile)
+    setMessages((prev) => haengeSystemzeileAn(prev, zeile))
+  }, [haengeSystemzeileAn, merkeSystemzeile, t])
 
   const zeigeSystemzeile = useCallback((text: string) => {
     const jetzt = Date.now()
-    setMessages((prev) =>
-      sortMessagesChronologically([
-        ...prev,
-        {
-          id: jetzt,
-          clientUuid: `sys-${jetzt}`,
-          senderId: 0,
-          text,
-          createdAt: new Date().toISOString(),
-          isSelf: false,
-          isSystem: true,
-        },
-      ]),
-    )
-  }, [])
+    const zeile: ChatMessage = {
+      id: jetzt,
+      clientUuid: `sys-${jetzt}`,
+      senderId: 0,
+      text,
+      createdAt: new Date().toISOString(),
+      isSelf: false,
+      isSystem: true,
+    }
+    merkeSystemzeile(zeile)
+    setMessages((prev) => haengeSystemzeileAn(prev, zeile))
+  }, [haengeSystemzeileAn, merkeSystemzeile])
 
   useEffect(() => {
     scrubPlaintextStorage()
@@ -305,15 +336,27 @@ export function useMessengerKern({
      * Ein Wechsel des Gesprächs verwirft sie; bleibt das Gespräch dasselbe und
      * trifft nur die Kennung ein, bleiben sie stehen.
      */
+    if (neuesGespraech) {
+      // Alte Warnungen gehören zum alten Gespräch. Nur der neue Schlüssel
+      // bleibt, damit eine Zeile aus genau diesem Wechsel nicht verloren geht.
+      for (const schluessel of [...systemzeilenRef.current.keys()]) {
+        if (schluessel !== zielSchluessel) systemzeilenRef.current.delete(schluessel)
+      }
+    }
+
     const mitSystemzeilen = (vorher: ChatMessage[], basis: ChatMessage[]) => {
-      if (neuesGespraech) return basis
-      const systemzeilen = vorher.filter((m) => m.isSystem)
+      const gemerkt = systemzeilenRef.current.get(zielSchluessel) ?? []
+      const ausVerlauf = neuesGespraech ? [] : vorher.filter((m) => m.isSystem)
+      const systemzeilen = [...ausVerlauf, ...gemerkt]
       if (!systemzeilen.length) return basis
       const vorhanden = new Set(basis.map((m) => m.clientUuid ?? `#${m.id}`))
-      return sortMessagesChronologically([
-        ...basis,
-        ...systemzeilen.filter((m) => !vorhanden.has(m.clientUuid ?? `#${m.id}`)),
-      ])
+      const einmalig = systemzeilen.filter((m) => {
+        const kennung = m.clientUuid ?? `#${m.id}`
+        if (vorhanden.has(kennung)) return false
+        vorhanden.add(kennung)
+        return true
+      })
+      return sortMessagesChronologically([...basis, ...einmalig])
     }
 
     if (!blindMailboxId) {
