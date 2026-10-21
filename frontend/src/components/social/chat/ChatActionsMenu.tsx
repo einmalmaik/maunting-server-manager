@@ -52,6 +52,8 @@ interface ChatActionsMenuProps {
   onLoeschen: () => void
   onVerlassen: () => void
   onBlockieren: () => void
+  /** Nimmt den Direktchat aus der Liste, samt örtlichem Verlauf. */
+  onChatEntfernen: () => void
 }
 
 /**
@@ -161,6 +163,15 @@ export function ChatActionsMenu({
             />
           )}
         </>
+      )}
+
+      {kontakt && (
+        <Blatteintrag
+          icon={<Trash2 className="w-4 h-4" />}
+          label={t('messenger.removeChatFromList')}
+          gefahr
+          onClick={tu(aktion.onChatEntfernen)}
+        />
       )}
 
       {kontakt && (

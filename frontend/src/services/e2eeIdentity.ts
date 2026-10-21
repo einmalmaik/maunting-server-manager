@@ -55,12 +55,39 @@ export const E2eeRecipientKeyMissingError = E2eeKeinGeraetError
  * nichts. Genau das war beim Kontoschlüssel der Fehler, gegen den die alte
  * Fassung mit `locked` abgesichert war.
  */
+/**
+ * Wann zuletzt ein Fehlschlag gemeldet wurde.
+ *
+ * `resolveIdentity` läuft beim Öffnen und vor dem Senden. Ohne Drossel käme
+ * dieselbe Meldung im Fünf-Sekunden-Takt.
+ */
+let letzteVeroeffentlichungsMeldung = 0
+
 export async function resolveIdentity(userId: number): Promise<E2eeIdentity> {
   if (!userId) return IDENTITY_LOADING
   const geraet = await eigenesGeraet()
   // Fehlschlag beim Veröffentlichen ist nicht fatal: lesen kann dieses Gerät
   // trotzdem. Es bleibt nur so lange unerreichbar, bis die Meldung durchgeht.
-  await geraetVeroeffentlichen().catch(() => {})
+  //
+  // **Verschwiegen wird er trotzdem nicht mehr.** Ein `409 FremdeSitzung`
+  // heißt: lokal liegt ein anderer Schlüssel als auf dem Server, und jedes
+  // Gegenüber verschlüsselt gegen den alten. Bis 10/2026 stand hier ein nacktes
+  // `.catch(() => {})`; das Gerät war stumm und niemand erfuhr warum.
+  try {
+    await geraetVeroeffentlichen()
+  } catch (fehler) {
+    const jetzt = Date.now()
+    if (jetzt - letzteVeroeffentlichungsMeldung > 60_000) {
+      letzteVeroeffentlichungsMeldung = jetzt
+      const grund = fehler instanceof Error ? fehler.message : String(fehler)
+      console.warn('[E2EE] Gerät konnte nicht veröffentlicht werden:', grund)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('msm:e2ee-publish-failed', { detail: { grund } }),
+        )
+      }
+    }
+  }
   return {
     state: 'ready',
     sendPair: geraet.paar,

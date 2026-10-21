@@ -85,6 +85,14 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
   const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
   const [directChats, setDirectChats] = useState<DirectChatItem[]>(initialCache.directChats)
   const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
+  /**
+   * Ob die erste Runde durch ist.
+   *
+   * Die Messenger-Seite darf einen `?userId=`-Aufruf erst prüfen, wenn diese
+   * Liste geladen ist. Sonst verwürfe sie einen Freund, der beim ersten Rendern
+   * nur noch nicht angekommen ist.
+   */
+  const [geladen, setGeladen] = useState(false)
   const teamStand = useRef<{ abdruck: string; geholt: number; mitglieder: TeamKontakt[] } | null>(null)
 
   const laden = async () => {
@@ -166,6 +174,10 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
       } catch {}
     } catch {
       // Offline fallback
+    } finally {
+      // Auch ein misslungener Abruf beendet das Warten: die Prüfung eines
+      // `?userId=`-Aufrufs soll nicht ewig auf ein Netz warten, das nicht da ist.
+      setGeladen(true)
     }
   }
 
@@ -201,5 +213,7 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
     /** Für eine eben erstellte oder gelöschte Story. */
     setStories,
     laden,
+    /** Die erste Runde ist durch; erst jetzt lässt sich ein Kontakt prüfen. */
+    geladen,
   }
 }

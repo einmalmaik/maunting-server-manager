@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 
 import {
   Calendar as CalendarIcon,
+  AlertCircle,
   Check,
   CheckCheck,
   Clock,
@@ -143,7 +144,13 @@ export interface ChatMessage {
   storyReply?: StoryReplyAttachment
   videoNoteAttachment?: VideoNoteAttachment
   videoUrl?: string
-  status?: 'queued' | 'sent' | 'delivered' | 'read'
+  /**
+   * `failed` heißt: der Server hat den Umschlag endgültig abgewiesen (410/422
+   * nach erschöpften Versuchen, 400/404) oder die Warteschlange hat ihn
+   * aufgegeben. Die Zeile bleibt sichtbar, damit niemand ihren Text verliert —
+   * anders als eine Uhr, die nie stehen bleibt, sagt sie die Wahrheit.
+   */
+  status?: 'queued' | 'failed' | 'sent' | 'delivered' | 'read'
 
   /** Zeichen → wer damit reagiert hat. Siehe `services/reaktionen.ts`. */
   reaktionen?: Reaktionen
@@ -252,6 +259,8 @@ export interface BlasenAktionen {
   onReaktion: (msg: ChatMessage, emoji: string) => void
   /** Klick auf den Zitatkopf: hin zur zitierten Nachricht. */
   onSpringeZu: (clientUuid: string) => void
+  /** Aus der gescheiterten Zeile heraus noch einmal senden. */
+  onErneutSenden?: (msg: ChatMessage) => void
 }
 
 export interface ChatMessageBubbleProps {
@@ -1018,7 +1027,28 @@ function ChatMessageBubbleContent({
           })}
         </span>
         {msg.isSelf &&
-          (msg.status === 'queued' ? (
+          (msg.status === 'failed' ? (
+            <Kurzinfo text={t('messenger.stateFailedRetry')} seite="ende" lage="oben">
+              {aktionen.onErneutSenden ? (
+                <button
+                  type="button"
+                  onClick={() => aktionen.onErneutSenden!(msg)}
+                  aria-label={t('messenger.stateFailedRetry')}
+                  className="inline-flex items-center text-status-destructive hover:opacity-70 transition-opacity"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                </button>
+              ) : (
+                <span
+                  role="img"
+                  aria-label={t('messenger.stateFailed')}
+                  className="inline-flex items-center text-status-destructive"
+                >
+                  <AlertCircle className="w-3.5 h-3.5" />
+                </span>
+              )}
+            </Kurzinfo>
+          ) : msg.status === 'queued' ? (
             <Kurzinfo text={t('messenger.stateQueued')} seite="ende" lage="oben">
               <span role="img" aria-label={t('messenger.stateQueued')} className="inline-flex items-center">
                 <Clock className="w-3.5 h-3.5 opacity-60 animate-pulse" />

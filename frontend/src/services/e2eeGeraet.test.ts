@@ -583,6 +583,24 @@ describe('e2eeGeraet', () => {
       })
     })
 
+    it('nimmt für das eigene Konto das eigene wartende Gerät an, fremde wartende nicht', async () => {
+      // Der Server führt ein Gerät nach einem Schlüsselwechsel als wartend. Für
+      // das eigene Gerät ist das kein Grund, sich selbst auszusperren: seine
+      // Schlüssel liegen hier, und ohne es gäbe es keine eigene Kopie. Ein
+      // **anderes** wartendes Gerät des Kontos bekommt weiterhin nichts, weil
+      // es die Freigabe nicht unterschrieben hat.
+      const eigenes = await eigenesGeraet()
+      fremdeGeraete.liste = [
+        { device_id: eigenes.kennung, public_key: eigenes.paar.publicKeyJwk, is_approved: false },
+        { device_id: 'zweit', public_key: 'pk-zweit', is_approved: true },
+        { device_id: 'fremd', public_key: 'pk-fremd', is_approved: false },
+      ] as any
+
+      const liste = await verzeichnisVon(10)
+
+      expect(liste.map((g) => g.device_id)).toEqual([eigenes.kennung, 'zweit'])
+    })
+
     it('gibt einem Gerät, das der Server einträgt, nichts', async () => {
       // Genau der Fall, gegen den `is_approved` nicht hilft: der Server trägt
       // selbst ein Gerät ein und meldet es als freigegeben.

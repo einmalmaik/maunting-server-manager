@@ -45,9 +45,14 @@ const verzeichnis = new Map<
 const netz = { aus: false, veroeffentlichenScheitert: false }
 
 vi.mock('@/api/social', () => ({
-  getE2eeGeraete: async (uid: number) => {
+  getE2eeGeraete: async (uid: number, includeUnapproved = false) => {
     if (netz.aus) throw new Error('Netzwerk weg')
-    return [...(verzeichnis.get(uid) ?? [])]
+    const liste = verzeichnis.get(uid) ?? []
+    // Wie der Server: Fremde und der eigene Sendepfad ohne `include_unapproved`
+    // sehen nur freigegebene Geräte.
+    return includeUnapproved
+      ? [...liste]
+      : liste.filter((g) => (g as { is_approved?: boolean }).is_approved !== false)
   },
   putEigenesGeraet: async () => ({}),
 }))
@@ -68,6 +73,7 @@ vi.mock('./e2eeGeraet', async (importOriginal) => {
 import { erzeugeSignaturPaar, signiere, type SignaturPaar } from './absenderSignatur'
 import { clearGeraeteMemory, freigabeDaten, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
 import { setzeAblageFuerTest, sitzungsId, type RatchetAblage } from './ratchetSpeicher'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import {
   DR_PREFIX,
   DrGeraetNichtEingetragenError,
@@ -1028,6 +1034,26 @@ describe('ratchetSitzung', () => {
       aktiviere(zweites)
       const vomTablet = await baueZustellungen(kontextVon(ALICE, BOB), 'vom Tablet', 'u-da')
       expect(vomTablet.map((z) => z.zielGeraet)).toEqual([bob.kennung])
+    })
+
+    it('sendet auch, solange das eigene Gerät beim Server wartet', async () => {
+      // Ein Gerät, das seinen Signaturschlüssel nachgerüstet hat, führt der
+      // Server als wartend (`_auffrischen`). Es ist aber nicht entfernt — und
+      // genau dieser Unterschied entschied bis 10/2026 darüber, ob jemand
+      // überhaupt senden konnte: `eigenesVerzeichnis` sah das Gerät nicht und
+      // warf `DrGeraetNichtEingetragenError`. Das eigene Gerät zählt für den
+      // eigenen Sendepfad immer; fremde Konten sehen es weiterhin erst nach
+      // der Freigabe.
+      const eintrag = verzeichnis.get(ALICE)!.find((g) => g.device_id === alice.kennung)!
+      ;(eintrag as { is_approved?: boolean }).is_approved = false
+      clearGeraeteMemory()
+      setzeAngemeldetesKonto(ALICE)
+      try {
+        aktiviere(alice)
+        expect(await baueZustellungen(kontextVon(ALICE, BOB), 'trotz Warten', 'u-wartet')).toHaveLength(1)
+      } finally {
+        setzeAngemeldetesKonto(null)
+      }
     })
 
     it('hält eine Liste von vor der eigenen Anmeldung nicht für einen Befund', async () => {

@@ -738,13 +738,29 @@ export async function baueZustellungen(
 async function eigenesVerzeichnis(eigeneId: number, kennung: string): Promise<E2eeGeraetItem[]> {
   const fuehrt = (liste: E2eeGeraetItem[]) => liste.some((g) => g.device_id === kennung)
   try {
-    const liste = await verzeichnisVon(eigeneId, { frisch: true })
+    // **Mit wartenden Geräten.** Ein Gerät, das seinen Signaturschlüssel
+    // nachgerüstet hat, steht serverseitig auf „wartend", bis ein anderes es
+    // beglaubigt. Es ist aber nicht entfernt — und der Unterschied entscheidet
+    // hier über Senden oder Schweigen. `DrGeraetNichtEingetragenError` gilt nur
+    // noch, wenn die Zeile wirklich fehlt (Entfernen, Zurücksetzen).
+    const liste = await verzeichnisVon(eigeneId, {
+      frisch: true,
+      mitWartenden: true,
+      eigenesGeraetId: kennung,
+    })
     if (fuehrt(liste)) return liste
     vergessenGeraete(eigeneId)
-    const nochmal = await verzeichnisVon(eigeneId, { frisch: true })
+    const nochmal = await verzeichnisVon(eigeneId, {
+      frisch: true,
+      mitWartenden: true,
+      eigenesGeraetId: kennung,
+    })
     if (fuehrt(nochmal)) return nochmal
   } catch {
-    return geraeteVon(eigeneId)
+    // Keine Antwort ist kein Befund. Ob das Relais erreichbar ist, entscheidet
+    // der Versand selbst — hier wird nur entschieden, ob dieses Gerät aus der
+    // Liste **entfernt** wurde, und das sagt ein Netzfehler nicht.
+    return await geraeteVon(eigeneId)
   }
   throw new DrGeraetNichtEingetragenError()
 }

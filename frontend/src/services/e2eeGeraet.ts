@@ -698,7 +698,22 @@ const CACHE_FRIST_MS = 600000
  */
 const FRISCH_MS = 30_000
 
-const geraeteCache = new Map<number, { geraete: E2eeGeraetItem[]; geholtAm: number }>()
+/**
+ * Zwischenspeicher je Konto **und** Sicht.
+ *
+ * Die freigegebene Liste und die Liste mit wartenden Geräten sind zwei
+ * Antworten auf zwei Fragen. Ein gemeinsamer Eintrag ließe die zweite die
+ * erste überschreiben — und ein Gerät, das gerade wartet, wäre für den eigenen
+ * Sendepfad plötzlich „nicht eingetragen".
+ */
+const geraeteCache = new Map<
+  string,
+  { geraete: E2eeGeraetItem[]; geholtAm: number }
+>()
+
+function cacheSchluessel(userId: number, mitWartenden: boolean): string {
+  return `${userId}:${mitWartenden ? 'alle' : 'frei'}`
+}
 
 /**
  * Die Geräte eines Kontos, zehn Minuten gecacht.
@@ -842,6 +857,7 @@ function melde(event: SchluesselWarnungEvent): void {
 export async function vertrauteGeraete(
   userId: number,
   liste: E2eeGeraetItem[],
+  { eigenesGeraetId }: { eigenesGeraetId?: string } = {},
 ): Promise<E2eeGeraetItem[]> {
   const hashes = await Promise.all(liste.map((g) => sha256Hex(utf8ToBytes(g.public_key))))
   const fingerabdruck = (i: number): VertrautesGeraet => ({
@@ -849,6 +865,39 @@ export async function vertrauteGeraete(
     s: liste[i].signing_public_key || '',
   })
   const bekannt = liesVertraute(userId)
+
+  /**
+   * Für das **eigene** Konto entscheidet der Server, welche Geräte freigegeben
+   * sind: `GET /e2ee/devices/<id>` liefert Dritten ausschließlich bestätigte
+   * Geräte, und ein Gerät ohne Freigabe kommt hier nur mit `mitWartenden` an.
+   *
+   * Die Signaturkette bleibt für **fremde** Konten scharf. Dort schützt sie
+   * davor, dass der Server ein Gerät unterschiebt (Regel 21/41). Auf dem
+   * eigenen Konto ist sie eine zweite, langsamere Wahrheit neben der Liste: ein
+   * Gerät, das der Server freigegeben hat und das dieses Konto selbst gerade
+   * benutzt, wurde dadurch blockiert, dass `approved_by` auf ihm selbst stand
+   * (`_selbst_beglaubigen`). Genau das hielt Web, Pontis und MSS davon ab, sich
+   * gegenseitig zu beliefern.
+   *
+   * Das **eigene** Gerät zählt immer, auch wenn es wartet: seine Schlüssel
+   * liegen hier, und der Sendepfad braucht es, um überhaupt etwas zu bauen.
+   * Ein anderes wartendes Gerät des eigenen Kontos bekommt weiterhin nichts.
+   */
+  const eigenesKonto = angemeldetesKonto()
+  if (eigenesKonto !== null && userId === eigenesKonto) {
+    const vertraut = new Map<string, VertrautesGeraet>()
+    const offen: string[] = []
+    liste.forEach((g, i) => {
+      if (g.device_id === eigenesGeraetId || g.is_approved !== false) {
+        vertraut.set(g.device_id, fingerabdruck(i))
+      } else {
+        offen.push(g.device_id)
+      }
+    })
+    schreibeVertraute(userId, { ...(bekannt ?? {}), ...Object.fromEntries(vertraut) })
+    if (offen.length > 0) melde({ userId, typ: 'unbestaetigt', geraete: offen })
+    return liste.filter((g) => vertraut.has(g.device_id))
+  }
 
   if (bekannt === null) {
     const neu: VertrauteListe = {}
@@ -1064,22 +1113,41 @@ export async function geraeteZuruecksetzen(
  * alte Liste zurück, sondern den Fehler: er fragt ja gerade, weil er der alten
  * nicht traut.
  */
-async function holeGeraete(userId: number, frist = CACHE_FRIST_MS): Promise<E2eeGeraetItem[]> {
-  const cached = geraeteCache.get(userId)
+async function holeGeraete(
+  userId: number,
+  frist = CACHE_FRIST_MS,
+  { mitWartenden = false, eigenesGeraetId }: { mitWartenden?: boolean; eigenesGeraetId?: string } = {},
+): Promise<E2eeGeraetItem[]> {
+  const schluessel = cacheSchluessel(userId, mitWartenden)
+  const cached = geraeteCache.get(schluessel)
   if (cached && Date.now() - cached.geholtAm < frist) {
     return cached.geraete
   }
   try {
     // Gecacht wird die geprüfte Liste: wer aus dem Cache liest, bekommt nie
     // ein Gerät, das die Prüfung nicht bestanden hat.
-    const roh = await getE2eeGeraete(userId)
-    // Die Liste nennt nur freigegebene Geräte. Steht dieses darin, hat ein
-    // anderes es inzwischen freigegeben — der Hinweis kann weg.
-    if (geraetImRam?.konto === userId && roh.some((g) => g.device_id === geraetImRam?.geraet.kennung)) {
+    //
+    // `include_unapproved` darf nur der Kontoinhaber selbst; der Sendepfad
+    // fragt danach für das **eigene** Konto, um ein wartendes Gerät nicht mit
+    // einem entfernten zu verwechseln. Fremde Konten sehen weiter nur die
+    // freigegebenen.
+    const roh = await getE2eeGeraete(userId, mitWartenden)
+    // Steht dieses Gerät in der freigegebenen Liste, hat ein anderes es
+    // inzwischen freigegeben — der Hinweis kann weg. Ein wartendes zählt hier
+    // nicht.
+    if (
+      geraetImRam?.konto === userId &&
+      roh.some(
+        (g) => g.device_id === geraetImRam?.geraet.kennung && g.is_approved !== false,
+      )
+    ) {
       setzeEigeneFreigabe(true)
     }
-    const geraete = await vertrauteGeraete(userId, roh)
-    geraeteCache.set(userId, { geraete, geholtAm: Date.now() })
+    const geraete = await vertrauteGeraete(userId, roh, {
+      eigenesGeraetId:
+        eigenesGeraetId ?? (geraetImRam?.konto === userId ? geraetImRam.geraet.kennung : undefined),
+    })
+    geraeteCache.set(schluessel, { geraete, geholtAm: Date.now() })
     return geraete
   } catch (fehler) {
     // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
@@ -1102,13 +1170,21 @@ async function holeGeraete(userId: number, frist = CACHE_FRIST_MS): Promise<E2ee
  */
 export async function verzeichnisVon(
   userId: number,
-  { frisch = false }: { frisch?: boolean } = {},
+  {
+    frisch = false,
+    mitWartenden = false,
+    eigenesGeraetId,
+  }: { frisch?: boolean; mitWartenden?: boolean; eigenesGeraetId?: string } = {},
 ): Promise<E2eeGeraetItem[]> {
-  return holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS)
+  return holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS, {
+    mitWartenden,
+    eigenesGeraetId,
+  })
 }
 
 export function vergessenGeraete(userId: number): void {
-  geraeteCache.delete(userId)
+  geraeteCache.delete(cacheSchluessel(userId, false))
+  geraeteCache.delete(cacheSchluessel(userId, true))
 }
 
 /** Der Empfänger hat noch kein Gerät angemeldet — es gibt nichts, wogegen verschlüsselt werden kann. */

@@ -51,6 +51,19 @@ vi.mock('@/api/client', () => ({
   apiStream: vi.fn(),
 }))
 
+/**
+ * Die Ablage der Nachricht, auf der die Warteschlange den Status fortschreibt.
+ *
+ * Der echte Speicher braucht IndexedDB; hier zählt nur, **wann** geschrieben
+ * wird — vor dem Ereignis, nicht danach (Regel 45).
+ */
+const { lokalesNachrichtenUpdate } = vi.hoisted(() => ({
+  lokalesNachrichtenUpdate: vi.fn(async () => {}),
+}))
+vi.mock('@/services/messengerLocalStore', () => ({
+  updateMessageInLocalStore: lokalesNachrichtenUpdate,
+}))
+
 describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
   beforeEach(() => {
     // Die Ablage gehört einem Konto (`lib/offlineAblage.ts`); ohne Anmeldung gibt es keine.
@@ -798,6 +811,81 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       // der Auftrag raus, statt die Warteschlange für immer zu verstopfen.
       expect(client.api).toHaveBeenCalled()
       expect(getOutbox()[0]?.retryCount).toBe(1)
+    })
+
+    it('hält nach einem endgültig abgewiesenen Auftrag die folgenden nicht an und meldet den Fehlschlag', async () => {
+      // Am laufenden System: ein Umschlag, den der Server mit 400 abwies, stand
+      // vorn in der Warteschlange. Bis 10/2026 brach die Schleife danach ab,
+      // damit standen alle Nachrichten dahinter bis zum nächsten Lauf — und die
+      // abgewiesene verschwand ohne jedes Zeichen, die Uhr drehte weiter.
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-kaputt',
+        recipient_id: 42,
+        client_uuid: 'uuid-eins',
+      })
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-gut',
+        recipient_id: 42,
+        client_uuid: 'uuid-zwei',
+      })
+
+      vi.mocked(client.api)
+        .mockRejectedValueOnce(Object.assign(new Error('Bad Request'), { status: 400 }))
+        .mockResolvedValueOnce({ id: 2002, blind_mailbox_id: 'mailbox-abc' })
+
+      const gescheitert: any[] = []
+      const bestaetigt: any[] = []
+      const onFailed = (e: any) => gescheitert.push(e.detail)
+      const onConfirmed = (e: any) => bestaetigt.push(e.detail)
+      window.addEventListener('msm:message-failed', onFailed)
+      window.addEventListener('msm:message-confirmed', onConfirmed)
+
+      const result = await replayOutbox()
+
+      // Der zweite Auftrag ging im selben Lauf hinaus.
+      expect(result.processed).toBe(1)
+      expect(getOutbox()).toHaveLength(0)
+      expect(bestaetigt.some((d) => d.client_uuid === 'uuid-zwei')).toBe(true)
+      expect(gescheitert).toEqual([
+        { client_uuid: 'uuid-eins', blind_mailbox_id: 'mailbox-abc', grund: 'http-400' },
+      ])
+
+      window.removeEventListener('msm:message-failed', onFailed)
+      window.removeEventListener('msm:message-confirmed', onConfirmed)
+    })
+
+    it('schreibt den bestätigten Status vor dem Ereignis in die Ablage', async () => {
+      // Der Wettlauf aus dem Fehlerbericht: `loadMessages` las den alten Stand
+      // (`queued`) und überschrieb die eben bestätigte Nachricht wieder mit der
+      // Uhr. Deshalb gilt: erst festschreiben, dann melden. Wer die Reihenfolge
+      // dreht, verliert bei jedem gleichzeitigen Neuladen die Bestätigung.
+      const reihenfolge: string[] = []
+      lokalesNachrichtenUpdate.mockImplementation(async () => {
+        reihenfolge.push('ablage')
+      })
+      enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-1',
+        recipient_id: 42,
+        client_uuid: 'uuid-vor-ereignis',
+      })
+      vi.mocked(client.api).mockResolvedValueOnce({ id: 2001, blind_mailbox_id: 'mailbox-abc' })
+
+      const onConfirmed = () => reihenfolge.push('ereignis')
+      window.addEventListener('msm:message-confirmed', onConfirmed)
+      try {
+        await replayOutbox()
+      } finally {
+        window.removeEventListener('msm:message-confirmed', onConfirmed)
+      }
+
+      expect(lokalesNachrichtenUpdate).toHaveBeenCalledWith('mailbox-abc', 'uuid-vor-ereignis', {
+        id: 2001,
+        status: 'sent',
+      })
+      expect(reihenfolge).toEqual(['ablage', 'ereignis'])
     })
 
     it('replays queued message mutations in FIFO order and dispatches confirmation events', async () => {

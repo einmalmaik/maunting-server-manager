@@ -76,6 +76,7 @@ vi.mock('@/api/social', () => ({
   relayE2eeEnvelope: vi.fn(),
   fetchE2eeEnvelopes: vi.fn(),
   getPublicProfiles: vi.fn().mockResolvedValue([]),
+  getProfile: vi.fn(),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
   sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
 }))
@@ -164,6 +165,10 @@ vi.mock('@/services/messengerLocalStore', async () => {
   return {
     ...echt,
     loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    leereMailboxLokal: vi.fn(async (mid: string) => {
+      nachrichten.delete(mid)
+      klartexte.delete(mid)
+    }),
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
@@ -3415,6 +3420,108 @@ describe('Messenger (Allround Chat)', () => {
         expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
         expect(screen.queryByPlaceholderText(i18n.t('messenger.writePlaceholder'))).not.toBeInTheDocument()
       })
+    })
+  })
+
+  /**
+   * Ein `?userId=`, das niemand kennt, baute bis 10/2026 einen Kontakt
+   * „Benutzer #20", versiegelte ihn als Gespräch und ließ ihn nie wieder
+   * verschwinden — die Seitenleiste führte einen Chat, den es nicht gab.
+   */
+  describe('Unbekannte Kennungen und das Entfernen eines Chats', () => {
+    it('legt für eine unbekannte Kennung kein Gespräch an und räumt sie weg', async () => {
+      vi.mocked(socialApi.getProfile).mockRejectedValue(
+        Object.assign(new Error('Not Found'), { status: 404 }),
+      )
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=20']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      // Erst laden lassen, dann prüfen: der Geist entstand bisher sofort.
+      await waitFor(() => expect(socialApi.getFriends).toHaveBeenCalled())
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+
+      expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      expect(
+        screen.queryByText(i18n.t('social.contacts.unknownUser', { id: 20 })),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByPlaceholderText(i18n.t('messenger.writePlaceholder'))).not.toBeInTheDocument()
+      expect((await ladeGespraeche()).has(20)).toBe(false)
+      expect(sessionStorage.getItem('msm:active_messenger_user_id')).toBeNull()
+    })
+
+    it('öffnet ein öffentliches Profil und merkt sich das Gespräch', async () => {
+      vi.mocked(socialApi.getProfile).mockResolvedValue({
+        user_id: 555,
+        username: 'zoe_public',
+        avatar_url: null,
+        privacy: 'public',
+        is_friend: false,
+        presence: null,
+      })
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=555']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      expect(await screen.findByText('zoe_public')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
+      expect((await ladeGespraeche()).get(555)?.username).toBe('zoe_public')
+    })
+
+    it('verweigert ein privates Profil ohne Freundschaft', async () => {
+      vi.mocked(socialApi.getProfile).mockResolvedValue({
+        user_id: 556,
+        username: 'zoe_privat',
+        avatar_url: null,
+        privacy: 'private',
+        is_friend: false,
+        presence: null,
+      })
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=556']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(socialApi.getProfile).toHaveBeenCalledWith(556))
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+
+      expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      expect(screen.queryByText('zoe_privat')).not.toBeInTheDocument()
+      expect((await ladeGespraeche()).has(556)).toBe(false)
+    })
+
+    it('nimmt einen Direktchat samt Verlauf aus der Liste', async () => {
+      render(
+        <MemoryRouter>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      fireEvent.click(await screen.findByText('alice'))
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await waitFor(async () => expect((await ladeGespraeche()).has(101)).toBe(true))
+
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.removeChatFromList')))
+      fireEvent.click(await screen.findByText(i18n.t('messenger.removeChatConfirm')))
+
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      })
+      expect((await ladeGespraeche()).has(101)).toBe(false)
+      expect(sessionStorage.getItem('msm:active_messenger_user_id')).toBeNull()
     })
   })
 })

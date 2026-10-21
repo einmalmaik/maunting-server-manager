@@ -66,6 +66,7 @@ import {
   relayE2eeEnvelope,
   sendTypingSignal,
   getGroupInviteInfo,
+  getProfile,
   setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
@@ -142,6 +143,7 @@ import {
 import {
   fuelleNamenNach,
   gespraechsPartner,
+  ladeGespraeche,
   merkeGespraech,
   vergissGespraech,
 } from '@/services/gespraechsListe'
@@ -150,6 +152,7 @@ import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
   isOptimisticMessage,
+  leereMailboxLokal,
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
@@ -256,6 +259,7 @@ import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
 import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
 import { SafetyNumberDialog } from '@/components/social/modals/SafetyNumberDialog'
 import { BlockConfirmDialog } from '@/components/social/modals/BlockConfirmDialog'
+import { ChatEntfernenDialog } from '@/components/social/modals/ChatEntfernenDialog'
 import { MessengerModeNav, MessengerBottomNav } from '@/components/social/sidebar/MessengerModeNav'
 import { ContactFilterTabs } from '@/components/social/sidebar/ContactFilterTabs'
 import { StoriesCarouselBar } from '@/components/social/sidebar/StoriesCarouselBar'
@@ -409,6 +413,7 @@ function MessengerSeite() {
     stories,
     setStories,
     laden: loadData,
+    geladen: kontakteGeladen,
   } = useKontaktdaten(user?.id || 0, messengerGesperrt)
 
   // Notification & Mute/Block Store
@@ -455,6 +460,14 @@ function MessengerSeite() {
   // Group Permissions & Delete Modal State
   const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
   const [groupToDelete, setGroupToDelete] = useState<ChatGroupItem | null>(null)
+  const [chatEntfernenOffen, setChatEntfernenOffen] = useState(false)
+  /**
+   * Die `?userId=`, für die schon geprüft wurde.
+   *
+   * Die Kontaktliste kommt alle 15 Sekunden neu; ohne diesen Merker fragte die
+   * Seite für einen unbekannten Kontakt bei jedem Takt erneut nach dem Profil.
+   */
+  const gepruefterKontaktRef = useRef<number | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
   // Camera & Attachments
@@ -637,6 +650,7 @@ function MessengerSeite() {
   const sendeLaeuft = useRef(false)
 
   const handleInputChange = (text: string) => {
+    eingabeBeruehrtRef.current = true
     setInputText(text)
 
     // Vorschlagsliste: nur in Gruppen, und nur solange der Cursor hinter einem
@@ -1258,42 +1272,131 @@ function MessengerSeite() {
 
   const storyAnsicht = useStoryAnsicht(stories, currentUserId, contactsList)
 
-  // Auto-select contact if userId query parameter or storage is present
-  useEffect(() => {
-    if (queryUserId && !activeGroup) {
-      const targetId = Number(queryUserId)
-      if (targetId) {
-        const match = contactsList.find((c) => c.userId === targetId)
-        if (match) {
-          setActiveContact((prev) => {
-            if (prev?.userId === match.userId && prev.username === match.username && prev.avatarUrl === match.avatarUrl) {
-              return prev
-            }
-            return match
-          })
-          setActiveGroup(null)
-        } else {
-          setActiveContact((prev) => {
-            if (prev?.userId === targetId) return prev
-            return {
-              // Steht in keiner Liste, braucht den Schlüssel aber als Kontakt.
-              listKey: `q-${targetId}`,
-              id: targetId,
-              userId: targetId,
-              username: t('social.contacts.unknownUser', { id: targetId }),
-              avatarUrl: null,
-              status: 'invisible',
-              deviceType: null,
-              activityLabel: null,
-              isFriend: false,
-              teamName: null,
-            }
-          })
-          setActiveGroup(null)
+  /**
+   * Nimmt eine unbrauchbare `userId` aus Adresse und Sitzung.
+   *
+   * Ohne diesen Schritt blieb die Kennung in der URL stehen, der Effekt lief
+   * bei jeder Kontaktaktualisierung erneut, und die Seite baute denselben
+   * Geist wieder auf. `sessionStorage` gehört dazu: von dort kam die Kennung
+   * beim nächsten Öffnen sonst zurück.
+   */
+  const verwerfeUnbekanntenKontakt = useCallback(
+    (unbrauchbar?: number) => {
+      // Zwischen Prüfung und Antwort kann der Mensch einen anderen Chat
+      // geöffnet haben. Dann gehört dessen Auswahl nicht weggeräumt.
+      if (unbrauchbar !== undefined) {
+        setActiveContact((prev) => (prev?.userId === unbrauchbar ? null : prev))
+        try {
+          if (sessionStorage.getItem('msm:active_messenger_user_id') === String(unbrauchbar)) {
+            sessionStorage.removeItem('msm:active_messenger_user_id')
+          }
+        } catch {}
+      }
+
+      const next = new URLSearchParams(searchParams)
+      let geaendert = false
+      for (const key of ['userId', 'contact']) {
+        const wert = next.get(key)
+        if (wert === null) continue
+        if (unbrauchbar === undefined || Number(wert) === unbrauchbar) {
+          next.delete(key)
+          geaendert = true
         }
       }
+      if (geaendert) setSearchParams(next, { replace: true })
+    },
+    [searchParams, setSearchParams],
+  )
+
+  /**
+   * Ein Gespräch aus der Adresse öffnen — aber nur, wenn es eines gibt.
+   *
+   * Bis 10/2026 wurde **jede** unbekannte `userId` zu „Benutzer #<id>",
+   * versiegelt als Gespräch gespeichert und war danach nicht mehr zu löschen.
+   * Ein gelöschtes Konto, ein alter Deep-Link oder eine verwechselte Kennung
+   * hinterließ so einen Chat, den es nie gab.
+   *
+   * Jetzt gilt die Reihenfolge aus der Privatsphäre: ein **bestehendes**
+   * Gespräch darf bleiben (der Server erlaubt das Antworten unabhängig vom
+   * Profil), ein **Freund** oder ein **öffentliches** Profil darf geöffnet
+   * werden, alles andere fällt raus. Gefragt wird erst, wenn die Kontaktliste
+   * geladen ist — sonst verwürfe die Seite einen Freund, der nur noch nicht
+   * angekommen ist.
+   */
+  useEffect(() => {
+    if (!queryUserId || activeGroup) return
+    const targetId = Number(queryUserId)
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      verwerfeUnbekanntenKontakt()
+      return
     }
-  }, [queryUserId, contactsList, activeGroup])
+
+    // Ein bekannter Kontakt öffnet sofort — auch aus dem örtlichen Abzug, also
+    // bevor die frische Liste da ist. Gewartet wird nur für die Prüfung einer
+    // **unbekannten** Kennung; sonst wäre der Chat nach jedem Öffnen kurz tot.
+    const match = contactsList.find((c) => c.userId === targetId)
+    if (match) {
+      setActiveContact((prev) => {
+        if (prev?.userId === match.userId && prev.username === match.username && prev.avatarUrl === match.avatarUrl) {
+          return prev
+        }
+        return match
+      })
+      setActiveGroup(null)
+      return
+    }
+
+    if (!kontakteGeladen) return
+    if (gepruefterKontaktRef.current === targetId) return
+    gepruefterKontaktRef.current = targetId
+
+    let aktiv = true
+    void (async () => {
+      // Ein bestehender Chat überlebt eine Profiländerung: der Server prüft
+      // beim Senden `can_message_user` und lässt Antworten weiter zu. Ohne
+      // diesen Zweig verschwände ein alter Chat, sobald jemand sein Profil auf
+      // „privat" stellt.
+      const bekannt = (await ladeGespraeche().catch(() => new Map())).get(targetId) ?? null
+      let profil: Awaited<ReturnType<typeof getProfile>> | null = null
+      try {
+        profil = await getProfile(targetId)
+      } catch {
+        // 404 heißt: gibt es nicht, inaktiv oder für dieses Konto unsichtbar.
+      }
+      if (!aktiv) return
+
+      const erlaubt = Boolean(bekannt) || Boolean(profil && (profil.privacy === 'public' || profil.is_friend))
+      if (!erlaubt) {
+        verwerfeUnbekanntenKontakt(targetId)
+        return
+      }
+
+      setActiveContact({
+        listKey: `q-${targetId}`,
+        id: targetId,
+        userId: targetId,
+        username: profil?.username || bekannt?.username || t('messenger.thisContact'),
+        avatarUrl: profil?.avatar_url ?? bekannt?.avatarUrl ?? null,
+        status: (profil?.presence?.status as PresenceStatus) || 'invisible',
+        deviceType: profil?.presence?.device_type ?? null,
+        activityLabel: profil?.presence?.activity_label ?? null,
+        isFriend: Boolean(profil?.is_friend),
+        teamName: null,
+        isPublicUser: profil?.privacy === 'public',
+      })
+      setActiveGroup(null)
+    })()
+
+    return () => {
+      aktiv = false
+    }
+  }, [queryUserId, contactsList, activeGroup, kontakteGeladen, verwerfeUnbekanntenKontakt])
+
+  // Ist die Adresse leer, ist die Prüfung von vorhin erledigt: derselbe
+  // Aufruf darf später erneut geprüft werden, statt am Merker zu scheitern.
+  useEffect(() => {
+    if (!queryUserId) gepruefterKontaktRef.current = null
+  }, [queryUserId])
 
   // Auto-select group if groupId query parameter or storage is present
   useEffect(() => {
@@ -1553,6 +1656,20 @@ function MessengerSeite() {
   }, [activeContact?.userId, activeContact?.username, blindMailboxId])
 
   /**
+   * Welchem Gespräch der Zustand unten gehört.
+   *
+   * Die Mailbox-Kennung entsteht asynchron. Zwischen „Chat offen" und
+   * „Kennung abgeleitet" darf das Eingabefeld nicht geleert werden — sonst
+   * verschwindet, was jemand in genau diesem Moment tippt. Der Schlüssel aus
+   * Konto oder Gruppe ändert sich in dieser Spanne nicht.
+   */
+  const gespraechsZielRef = useRef('')
+  /** Für welches Gespräch der Entwurf schon geholt wurde. */
+  const entwurfGeholtRef = useRef('')
+  /** Ob hier schon getippt wurde — ein später Entwurf darf das nicht ersetzen. */
+  const eingabeBeruehrtRef = useRef(false)
+
+  /**
    * Der Wechsel in ein anderes Gespräch.
    *
    * Zählerstände zurücksetzen, den lokalen Verlauf zeigen, solange der Abruf
@@ -1561,6 +1678,35 @@ function MessengerSeite() {
    */
   useEffect(() => {
     let active = true
+
+    /**
+     * Der Wechsel wird **vor** dem frühen Ausstieg festgestellt.
+     *
+     * Beim ersten Öffnen ist die Mailbox noch leer, und `activeMailboxIdRef`
+     * steht ebenfalls auf leer: der Effekt kehrte zurück, ohne das Feld zu
+     * leeren. Kam die Kennung kurz darauf, galt derselbe Chat als „neu", und
+     * der eben getippte Text verschwand. Jetzt gehört das Leeren dem Wechsel
+     * des Gegenübers, nicht dem Eintreffen der Kennung.
+     */
+    const zielSchluessel = activeGroup
+      ? `g:${activeGroup.id}`
+      : activeContact
+        ? `u:${activeContact.userId}`
+        : ''
+    const neuesGespraech = gespraechsZielRef.current !== zielSchluessel
+    gespraechsZielRef.current = zielSchluessel
+
+    if (neuesGespraech) {
+      setAntwortAuf(null)
+      chatSuche.schliesse()
+      setAngeheftet(null)
+      wahl.leeren()
+      setInputText('')
+      eingabeBeruehrtRef.current = false
+      // Wer den Chat verlässt, findet beim nächsten Öffnen seinen Entwurf
+      // wieder — der Merker gehört nur zu diesem Besuch.
+      if (!zielSchluessel) entwurfGeholtRef.current = ''
+    }
 
     if (activeMailboxIdRef.current === blindMailboxId) return
     activeMailboxIdRef.current = blindMailboxId
@@ -1575,13 +1721,6 @@ function MessengerSeite() {
     maxPartnerDeliveredIdRef.current = 0
     useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
 
-    // Was zum neuen Chat gehört und nicht zum alten.
-    setAntwortAuf(null)
-    chatSuche.schliesse()
-    setAngeheftet(null)
-    wahl.leeren()
-    setInputText('')
-
     if (!blindMailboxId) {
       setMessages([])
       setLoadingMessages(Boolean(activeContact || activeGroup))
@@ -1590,12 +1729,18 @@ function MessengerSeite() {
 
     // Frist und angefangener Text gehören zu diesem Chat, nicht zum vorigen.
     setVerfallSekunden(verfallsfrist(blindMailboxId))
-    ladeEntwurf(blindMailboxId)
-      .then((text) => {
-        if (!active || activeMailboxIdRef.current !== blindMailboxId) return
-        if (text) setInputText(text)
-      })
-      .catch(() => {})
+    if (entwurfGeholtRef.current !== zielSchluessel) {
+      entwurfGeholtRef.current = zielSchluessel
+      // Wer schon tippt, wartet nicht auf den Entwurf von gestern.
+      if (!eingabeBeruehrtRef.current) {
+        ladeEntwurf(blindMailboxId)
+          .then((text) => {
+            if (!active || activeMailboxIdRef.current !== blindMailboxId) return
+            if (text && !eingabeBeruehrtRef.current) setInputText(text)
+          })
+          .catch(() => {})
+      }
+    }
 
     const cached = sessionChatCache.get(blindMailboxId)
     if (cached && cached.length > 0) {
@@ -2657,7 +2802,7 @@ function MessengerSeite() {
     // stehen. Am laufenden System waren das die Nachrichten mit der Uhr, an
     // die niemand mehr herankam. Also lokal entfernen, aus Ansicht,
     // Warteschlange und Verlauf.
-    if (msg.status === 'queued') {
+    if (msg.status === 'queued' || msg.status === 'failed') {
       const uuid = msg.clientUuid
       if (uuid) {
         /**
@@ -2897,14 +3042,15 @@ function MessengerSeite() {
 
     window.addEventListener('msm:sync-event', handleSync)
     window.addEventListener('msm:messages-updated', handleMessagesUpdated)
-    window.addEventListener('msm:message-confirmed', handleMessagesUpdated)
+    // `msm:message-confirmed` startet **kein** volles Neuladen mehr. Die
+    // Bestätigung schreibt ihren Status zuerst in die Ablage; ein paralleles
+    // `loadMessages` las vorher den alten Stand und setzte die Uhr zurück.
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange)
     }
     return () => {
       window.removeEventListener('msm:sync-event', handleSync)
       window.removeEventListener('msm:messages-updated', handleMessagesUpdated)
-      window.removeEventListener('msm:message-confirmed', handleMessagesUpdated)
       if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange)
       }
@@ -3020,6 +3166,51 @@ function MessengerSeite() {
       window.removeEventListener('msm:message-confirmed', handleMessageConfirmed)
     }
   }, [blindMailboxId])
+
+  /**
+   * Eine Nachricht, die die Warteschlange endgültig aufgegeben hat.
+   *
+   * Vorher erfuhr die Oberfläche davon nichts: der Auftrag verschwand, die Uhr
+   * drehte weiter. Jetzt steht dort ein rotes Zeichen, und das Menü bietet
+   * „Erneut senden". Der Text bleibt erhalten — das ist der Unterschied
+   * zwischen „nicht angekommen" und „verloren".
+   */
+  useEffect(() => {
+    const handleMessageFailed = (e: Event) => {
+      const detail = (
+        e as CustomEvent<{ client_uuid: string; blind_mailbox_id: string }>
+      ).detail
+      if (!detail?.client_uuid || detail.blind_mailbox_id !== blindMailboxId) return
+      const clientUuid = logischeUuid(detail.client_uuid) ?? detail.client_uuid
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.clientUuid === clientUuid
+            ? { ...m, status: 'failed', isDelivered: false, isRead: false }
+            : m,
+        ),
+      )
+    }
+    window.addEventListener('msm:message-failed', handleMessageFailed)
+    return () => {
+      window.removeEventListener('msm:message-failed', handleMessageFailed)
+    }
+  }, [blindMailboxId])
+
+  /**
+   * Wenn dieses Gerät sich nicht beim Konto melden kann, sieht es niemand.
+   *
+   * Der Fehler wird in `e2eeIdentity.resolveIdentity` gedrosselt gemeldet; hier
+   * wird daraus ein Satz statt eines stummen Verschwindens.
+   */
+  useEffect(() => {
+    const handlePublishFailed = () => {
+      toast.error(t('messenger.devicePublishFailed'))
+    }
+    window.addEventListener('msm:e2ee-publish-failed', handlePublishFailed)
+    return () => {
+      window.removeEventListener('msm:e2ee-publish-failed', handlePublishFailed)
+    }
+  }, [t])
 
   /**
    * Beim Öffnen eines Chats steht man unten, bei der letzten Nachricht.
@@ -3588,6 +3779,78 @@ function MessengerSeite() {
       sendeLaeuft.current = false
       setSending(false)
     }
+  }
+
+  /**
+   * Eine endgültig gescheiterte Nachricht noch einmal schicken.
+   *
+   * Der Umschlag von damals ist weg (der Server hat ihn abgewiesen), also wird
+   * die Nutzlast aus der lokalen Zeile neu gebaut. Anhänge mit `mediaId`
+   * werden wiederverwendet; eine Videonotiz lässt sich nicht aus ihrem Zeiger
+   * wiederherstellen, und ohne Text gäbe es dann nichts zu senden — das sagt
+   * die Meldung, statt eine leere Blase zu schicken.
+   */
+  const handleErneutSenden = async (msg: ChatMessage) => {
+    const hatInhalt = Boolean(
+      msg.text ||
+        msg.imageAttachment ||
+        msg.fileAttachment ||
+        msg.audioAttachment ||
+        msg.stickerAttachment ||
+        msg.noteAttachment ||
+        msg.calendarAttachment ||
+        msg.storyReply,
+    )
+    if (!hatInhalt) {
+      toast.error(t('messenger.retryNotPossible'))
+      return
+    }
+
+    if (msg.clientUuid) {
+      setMessages((prev) => prev.filter((m) => m.clientUuid !== msg.clientUuid))
+      await entferneLokaleNachricht(blindMailboxId, {
+        clientUuid: msg.clientUuid,
+        id: msg.id,
+      }).catch(() => {})
+    }
+
+    await handleSendMessage({
+      text: msg.text,
+      antwortAuf: msg.antwortAuf ?? null,
+      img: msg.imageAttachment,
+      file: msg.fileAttachment,
+      audio: msg.audioAttachment,
+      sticker: msg.stickerAttachment,
+      note: msg.noteAttachment,
+      cal: msg.calendarAttachment,
+      storyReply: msg.storyReply,
+      weitergeleitet: msg.weitergeleitet,
+    })
+  }
+
+  /**
+   * Nimmt ein 1:1-Gespräch aus der Liste — samt örtlichem Verlauf.
+   *
+   * Der Gegenpol zu den Geister-Kontakten aus früheren Fassungen: was nie in
+   * der Liste stehen sollte, lässt sich jetzt auch wieder entfernen. Die
+   * Freundschaft bleibt bestehen; nur das Gespräch und sein Verlauf gehen.
+   */
+  const handleChatAusListe = async () => {
+    if (!activeContact) return
+    const userId = activeContact.userId
+    const mid = blindMailboxId
+
+    await vergissGespraech(userId).catch(() => {})
+    if (mid) {
+      await leereMailboxLokal(mid).catch(() => {})
+      sessionChatCache.delete(mid)
+      vergissMailbox(mid)
+      useMessengerNotificationStore.getState().markAsRead(mid)
+    }
+
+    handleZurueckZurListe()
+    await loadData().catch(() => {})
+    toast.success(t('messenger.chatRemoved'))
   }
 
   // Die fertige Sprachnachricht geht denselben Weg wie jede andere Nachricht.
@@ -4195,6 +4458,7 @@ function MessengerSeite() {
       onAntworten: handleAntworten,
       onReaktion: (m, emoji) => void handleReaktion(m, emoji),
       onSpringeZu: springeZu,
+      onErneutSenden: (m) => void handleErneutSenden(m),
     },
     ton: tonWiedergabe,
     umschalten: handleAuswahlUmschalten,
@@ -4211,6 +4475,7 @@ function MessengerSeite() {
       onAntworten: (m) => blasenHandler.current.aktionen.onAntworten(m),
       onReaktion: (m, emoji) => blasenHandler.current.aktionen.onReaktion(m, emoji),
       onSpringeZu: (uuid) => blasenHandler.current.aktionen.onSpringeZu(uuid),
+      onErneutSenden: (m) => blasenHandler.current.aktionen.onErneutSenden?.(m),
     }),
     [],
   )
@@ -4653,6 +4918,7 @@ function MessengerSeite() {
                     onLoeschen={() => activeGroup && handleDeleteGroup(activeGroup)}
                     onVerlassen={() => activeGroup && handleLeaveGroup(activeGroup)}
                     onBlockieren={() => setIsBlockConfirmOpen(true)}
+                    onChatEntfernen={() => setChatEntfernenOffen(true)}
                   />
                 )}
               />
@@ -5232,6 +5498,16 @@ function MessengerSeite() {
         deleting={isDeletingGroup}
         onCancel={() => setGroupToDelete(null)}
         onConfirm={handleConfirmDeleteGroup}
+      />
+
+      <ChatEntfernenDialog
+        open={chatEntfernenOffen}
+        name={activeContact?.username ?? ''}
+        onCancel={() => setChatEntfernenOffen(false)}
+        onConfirm={() => {
+          setChatEntfernenOffen(false)
+          void handleChatAusListe()
+        }}
       />
       {/* Das Hintergrundfenster — dasselbe, das der KI-Chat öffnet. */}
       <ChatHintergrundDialog
