@@ -55,6 +55,10 @@ const { mockEnvelopeCache } = vi.hoisted(() => ({
   mockEnvelopeCache: new Map<number, { plain: string; ok: boolean }>(),
 }))
 
+// Eine Fälschung für beide Lesewege: der Messenger holt eine Mailbox
+// inzwischen seitenweise, die Tests setzen aber weiter `fetchE2eeEnvelopes`.
+const e2eeEnvelopeMock = vi.hoisted(() => vi.fn())
+
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
@@ -74,7 +78,8 @@ vi.mock('@/api/social', () => ({
   getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
   putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
-  fetchE2eeEnvelopes: vi.fn(),
+  fetchE2eeEnvelopes: e2eeEnvelopeMock,
+  fetchAlleE2eeEnvelopes: e2eeEnvelopeMock,
   getPublicProfiles: vi.fn().mockResolvedValue([]),
   getProfile: vi.fn(),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
@@ -91,6 +96,7 @@ vi.mock('@/api/teams', () => ({
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn().mockResolvedValue('test-blind-mailbox'),
   deriveGroupBlindMailboxId: vi.fn().mockResolvedValue('test-group-blind-mailbox'),
+  deriveUserDeviceMailboxId: vi.fn().mockResolvedValue('test-device-mailbox'),
   getCachedBlindMailboxId: vi.fn().mockReturnValue(undefined),
   getCachedGroupBlindMailboxId: vi.fn().mockReturnValue(undefined),
   envelopePlaintextCache: mockEnvelopeCache,
@@ -325,6 +331,11 @@ vi.mock('@/services/gruppenSchluessel', async (importOriginal) => {
   return {
     ...echt,
     verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
+    // Die Geräte-Mailbox gehört nicht zu diesen Fällen. Ohne diesen Haken
+    // verbraucht ihr Abruf die `mockResolvedValueOnce`-Antwort, die für die
+    // Chat-Mailbox gedacht ist — und der Verlauf bleibt leer.
+    holeGeraeteSteuerung: vi.fn(async () => 0),
+    fordereDmGeheimnis: vi.fn(async () => false),
   }
 })
 

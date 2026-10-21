@@ -66,7 +66,6 @@ import {
   relayE2eeEnvelope,
   sendTypingSignal,
   getGroupInviteInfo,
-  getProfile,
   setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
@@ -82,6 +81,9 @@ import { useSprachwiedergabe } from '@/hooks/useSprachwiedergabe'
 import { useChatSuche } from '@/hooks/useChatSuche'
 import { useEntwuerfe } from '@/hooks/useEntwuerfe'
 import { useKontaktdaten } from '@/hooks/useKontaktdaten'
+import { useKontaktAusUrl } from '@/hooks/useKontaktAusUrl'
+import { useMessengerSync } from '@/hooks/useMessengerSync'
+import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
 import { useStoryAnsicht } from '@/hooks/useStoryAnsicht'
 import { useUeberallAnsicht } from '@/hooks/useUeberallAnsicht'
@@ -143,7 +145,6 @@ import {
 import {
   fuelleNamenNach,
   gespraechsPartner,
-  ladeGespraeche,
   merkeGespraech,
   vergissGespraech,
 } from '@/services/gespraechsListe'
@@ -151,10 +152,8 @@ import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfi
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
-  isOptimisticMessage,
   leereMailboxLokal,
   loadLocalMessages,
-  mischeVerlauf,
   saveLocalMessages,
   sichereDauerhafteAblage,
   updateMessageInLocalStore,
@@ -168,9 +167,8 @@ import {
 } from '@/services/nachrichtLoeschen'
 import { bezugFelder } from '@/services/nachrichtBezug'
 import { anheftung, setzeAnheftung } from '@/services/nachrichtAnheftung'
-import { merkeQuittung, quittungsstand } from '@/services/quittungsstand'
-import { schalteReaktion, wendeReaktionenAn } from '@/services/reaktionen'
-import { werteUmschlaegeAus } from '@/services/umschlagAuswertung'
+import { quittungsstand } from '@/services/quittungsstand'
+import { schalteReaktion } from '@/services/reaktionen'
 import {
   binIchGemeint,
   findeErwaehnungen,
@@ -207,7 +205,6 @@ import {
   baueAugenblickNutzlast,
   baueWiederherstellungNutzlast,
   ereignisAusNachricht,
-  ereignisseAusNachrichten,
   rettungMoeglich,
   type AugenblickMarke,
   type FunkenEreignis,
@@ -467,7 +464,6 @@ function MessengerSeite() {
    * Die Kontaktliste kommt alle 15 Sekunden neu; ohne diesen Merker fragte die
    * Seite für einen unbekannten Kontakt bei jedem Takt erneut nach dem Profil.
    */
-  const gepruefterKontaktRef = useRef<number | null>(null)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
   // Camera & Attachments
@@ -1273,144 +1269,24 @@ function MessengerSeite() {
   const storyAnsicht = useStoryAnsicht(stories, currentUserId, contactsList)
 
   /**
-   * Nimmt eine unbrauchbare `userId` aus Adresse und Sitzung.
-   *
-   * Ohne diesen Schritt blieb die Kennung in der URL stehen, der Effekt lief
-   * bei jeder Kontaktaktualisierung erneut, und die Seite baute denselben
-   * Geist wieder auf. `sessionStorage` gehört dazu: von dort kam die Kennung
-   * beim nächsten Öffnen sonst zurück.
+   * Kontakt- und Gruppenkennung aus der Adresse — samt der Prüfung, ob es den
+   * Chat überhaupt gibt. Der Block stand bis 10/2026 hier und ist jetzt in
+   * `useKontaktAusUrl`; die Seite entscheidet nur noch, was sie übergibt.
    */
-  const verwerfeUnbekanntenKontakt = useCallback(
-    (unbrauchbar?: number) => {
-      // Zwischen Prüfung und Antwort kann der Mensch einen anderen Chat
-      // geöffnet haben. Dann gehört dessen Auswahl nicht weggeräumt.
-      if (unbrauchbar !== undefined) {
-        setActiveContact((prev) => (prev?.userId === unbrauchbar ? null : prev))
-        try {
-          if (sessionStorage.getItem('msm:active_messenger_user_id') === String(unbrauchbar)) {
-            sessionStorage.removeItem('msm:active_messenger_user_id')
-          }
-        } catch {}
-      }
-
-      const next = new URLSearchParams(searchParams)
-      let geaendert = false
-      for (const key of ['userId', 'contact']) {
-        const wert = next.get(key)
-        if (wert === null) continue
-        if (unbrauchbar === undefined || Number(wert) === unbrauchbar) {
-          next.delete(key)
-          geaendert = true
-        }
-      }
-      if (geaendert) setSearchParams(next, { replace: true })
-    },
-    [searchParams, setSearchParams],
-  )
-
-  /**
-   * Ein Gespräch aus der Adresse öffnen — aber nur, wenn es eines gibt.
-   *
-   * Bis 10/2026 wurde **jede** unbekannte `userId` zu „Benutzer #<id>",
-   * versiegelt als Gespräch gespeichert und war danach nicht mehr zu löschen.
-   * Ein gelöschtes Konto, ein alter Deep-Link oder eine verwechselte Kennung
-   * hinterließ so einen Chat, den es nie gab.
-   *
-   * Jetzt gilt die Reihenfolge aus der Privatsphäre: ein **bestehendes**
-   * Gespräch darf bleiben (der Server erlaubt das Antworten unabhängig vom
-   * Profil), ein **Freund** oder ein **öffentliches** Profil darf geöffnet
-   * werden, alles andere fällt raus. Gefragt wird erst, wenn die Kontaktliste
-   * geladen ist — sonst verwürfe die Seite einen Freund, der nur noch nicht
-   * angekommen ist.
-   */
-  useEffect(() => {
-    if (!queryUserId || activeGroup) return
-    const targetId = Number(queryUserId)
-    if (!Number.isInteger(targetId) || targetId <= 0) {
-      verwerfeUnbekanntenKontakt()
-      return
-    }
-
-    // Ein bekannter Kontakt öffnet sofort — auch aus dem örtlichen Abzug, also
-    // bevor die frische Liste da ist. Gewartet wird nur für die Prüfung einer
-    // **unbekannten** Kennung; sonst wäre der Chat nach jedem Öffnen kurz tot.
-    const match = contactsList.find((c) => c.userId === targetId)
-    if (match) {
-      setActiveContact((prev) => {
-        if (prev?.userId === match.userId && prev.username === match.username && prev.avatarUrl === match.avatarUrl) {
-          return prev
-        }
-        return match
-      })
-      setActiveGroup(null)
-      return
-    }
-
-    if (!kontakteGeladen) return
-    if (gepruefterKontaktRef.current === targetId) return
-    gepruefterKontaktRef.current = targetId
-
-    let aktiv = true
-    void (async () => {
-      // Ein bestehender Chat überlebt eine Profiländerung: der Server prüft
-      // beim Senden `can_message_user` und lässt Antworten weiter zu. Ohne
-      // diesen Zweig verschwände ein alter Chat, sobald jemand sein Profil auf
-      // „privat" stellt.
-      const bekannt = (await ladeGespraeche().catch(() => new Map())).get(targetId) ?? null
-      let profil: Awaited<ReturnType<typeof getProfile>> | null = null
-      try {
-        profil = await getProfile(targetId)
-      } catch {
-        // 404 heißt: gibt es nicht, inaktiv oder für dieses Konto unsichtbar.
-      }
-      if (!aktiv) return
-
-      const erlaubt = Boolean(bekannt) || Boolean(profil && (profil.privacy === 'public' || profil.is_friend))
-      if (!erlaubt) {
-        verwerfeUnbekanntenKontakt(targetId)
-        return
-      }
-
-      setActiveContact({
-        listKey: `q-${targetId}`,
-        id: targetId,
-        userId: targetId,
-        username: profil?.username || bekannt?.username || t('messenger.thisContact'),
-        avatarUrl: profil?.avatar_url ?? bekannt?.avatarUrl ?? null,
-        status: (profil?.presence?.status as PresenceStatus) || 'invisible',
-        deviceType: profil?.presence?.device_type ?? null,
-        activityLabel: profil?.presence?.activity_label ?? null,
-        isFriend: Boolean(profil?.is_friend),
-        teamName: null,
-        isPublicUser: profil?.privacy === 'public',
-      })
-      setActiveGroup(null)
-    })()
-
-    return () => {
-      aktiv = false
-    }
-  }, [queryUserId, contactsList, activeGroup, kontakteGeladen, verwerfeUnbekanntenKontakt])
-
-  // Ist die Adresse leer, ist die Prüfung von vorhin erledigt: derselbe
-  // Aufruf darf später erneut geprüft werden, statt am Merker zu scheitern.
-  useEffect(() => {
-    if (!queryUserId) gepruefterKontaktRef.current = null
-  }, [queryUserId])
-
-  // Auto-select group if groupId query parameter or storage is present
-  useEffect(() => {
-    if (queryGroupId && !activeContact && groups.length > 0) {
-      const targetGroupId = Number(queryGroupId)
-      if (targetGroupId) {
-        const match = groups.find((g) => g.id === targetGroupId)
-        if (match) {
-          setActiveGroup((prev) => (prev?.id === match.id ? prev : match))
-          setActiveContact(null)
-        }
-      }
-    }
-  }, [queryGroupId, groups, activeContact])
+  useKontaktAusUrl({
+    queryUserId,
+    queryGroupId,
+    kontakte: contactsList,
+    gruppen: groups,
+    kontakteGeladen,
+    activeContact,
+    activeGroup,
+    setActiveContact,
+    setActiveGroup,
+    searchParams,
+    setSearchParams,
+    t,
+  })
 
   /**
    * Geht zurück zur Kontaktliste und räumt Auswahl, Speicher und URL-Parameter
@@ -1788,6 +1664,12 @@ function MessengerSeite() {
       await signiereNutzlast(blindMailboxId, currentUserId, {
         actor_id: currentUserId,
         ...payloadObj,
+        // **Für welche Unterhaltung diese Wirkung gilt.** Die Kopien für die
+        // eigenen Zweitgeräte landen in einer gemeinsamen Geräte-Mailbox; ohne
+        // diese Marke wendete das Web eine Löschung aus der App auf den gerade
+        // offenen Chat an, der damit nichts zu tun hat. Sie steht im
+        // signierten Teil, sonst könnte sie umgeschrieben werden.
+        mailbox: blindMailboxId,
         client_uuid: clientUuid,
       }),
     )
@@ -1850,381 +1732,32 @@ function MessengerSeite() {
   const darfSchreiben = !activeGroup || gruppenrechteVon(currentUserId).has('send_messages')
   const darfAnhaengen = !activeGroup || gruppenrechteVon(currentUserId).has('attach_media')
 
-  const loadMessages = async (isInitial = false) => {
-    const currentMid = blindMailboxId
-    if (!currentMid || !currentUserId) return
-    if (activeMailboxIdRef.current !== currentMid) return
-    // Erst entschlüsseln, wenn feststeht, welche Schlüssel dieses Gerät hat.
-    // Ein Durchlauf während `loading` hätte keine, würde auf den Altpfad fallen
-    // und dessen Ergebnis im Zwischenspeicher festschreiben — der richtige
-    // Klartext käme danach nicht mehr durch.
-    //
-    // Das gilt seit der Umstellung auch für Gruppen: ihr Schlüssel kommt in
-    // einem Hybridumschlag, der gegen den Geräteschlüssel versiegelt ist.
-    const aktuelleIdentitaet = identityRef.current
-    if (aktuelleIdentitaet.state === 'loading') return
-    const seq = ++currentLoadSeqRef.current
-
-    if (isInitial && messages.length === 0) {
-      setLoadingMessages(true)
-    }
-    try {
-      // Der ganze Entschlüsselungsteil steht in `useKonversation`: welche
-      // Mailbox, welches Verfahren, was ein Umschlag bedeutet. Hier bleibt die
-      // Anzeige — Quittungen, Häkchen, Bearbeiten und Löschen.
-      const gelesen = await konversation.liesUmschlaege()
-      if (gelesen === null) return
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
-
-      const {
-        decryptedList,
-        aenderungen,
-        loeschungen,
-        reaktionen,
-        maxPartnerReadId,
-        maxPartnerDeliveredId,
-        maxIncomingId,
-      } = await werteUmschlaegeAus(gelesen, {
-        currentMid,
-        currentUserId,
-        activeContact,
-        activeGroup,
-        gruppenrechteVon,
-        t,
-        quittiertGelesen: (bis) => {
-          maxPartnerReadIdRef.current = Math.max(maxPartnerReadIdRef.current, bis)
-        },
-        quittiertZugestellt: (bis) => {
-          maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, bis)
-        },
-        markAsRead,
-        setVerfallSekunden,
-        zeigeSystemzeile,
-      })
-
-      const findeAenderung = (m: ChatMessage) =>
-        aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
-
-      /**
-       * Wessen Löschbefehl befolgt wird.
-       *
-       * Der eigene Absender immer. In einer Gruppe zusätzlich, wer
-       * `delete_messages` trägt — und das ist seit 09/2026 auch wirklich dieses
-       * Recht. Vorher wurde hier `can_pin_messages` geprüft, also das Recht,
-       * eine Nachricht **anzuheften**: ein Moderator mit Löschrecht und ohne
-       * Heftrecht wurde ignoriert, einer mit Heftrecht und ohne Löschrecht kam
-       * durch. Die Rechtelage kommt jetzt aus derselben Stelle wie im
-       * Rechte-Dialog, inklusive der Rollen aus dem verschlüsselten Block.
-       *
-       * Die ehrliche Grenze steht hier und nicht im Werbetext: Moderation unter
-       * Ende-zu-Ende-Verschlüsselung ist eine Bitte, die Clients befolgen —
-       * keine Tatsache, die der Server durchsetzt. Wer die Nachricht schon
-       * gelesen hat, behält sie. Das gilt für Signal und WhatsApp genauso.
-       */
-      const findeLoeschung = (m: ChatMessage) =>
-        loeschungen.finde(m, (urheber) => {
-          if (urheber === undefined) return false
-          if (Number(urheber) === Number(m.senderId)) return true
-          if (!activeGroup) return false
-          return gruppenrechteVon(Number(urheber)).has('delete_messages')
-        })
-
-      /**
-       * Die Wirkungen dieses Durchlaufs auf eine Zeile, die es schon gibt.
-       *
-       * Gebraucht an **zwei** Stellen, und genau darin lag ein Fehler: der
-       * lokale Verlauf wendete Löschung und Reaktionen an, die noch
-       * unbestätigten Zeilen aus dem React-Zustand dagegen gar nichts.
-       * `mischeVerlauf` lässt bei zwei optimistischen Fassungen die aus dem
-       * Zustand gewinnen — die gerade berechnete Reaktion wurde damit wieder
-       * überschrieben und so weggespeichert. Am laufenden System: eine
-       * Nachricht, die keine Reaktion mehr annahm, für immer.
-       *
-       * Bearbeitungen fehlten hier ganz. Sie standen allein im Zweig für frisch
-       * entschlüsselte Umschläge, und der kennt nur, was noch im
-       * Hundert-Umschläge-Fenster liegt. Alles Ältere blieb beim Empfänger
-       * unverändert stehen, auch nach dem Neuladen.
-       */
-      const wendeWirkungenAn = (m: ChatMessage): ChatMessage => {
-        const loeschung = findeLoeschung(m)
-        if (loeschung && !m.isDeleted) return tilgeInhalt(m, loeschung.deletedAt) as ChatMessage
-
-        let zeile = m
-        const aenderung = findeAenderung(zeile)
-        if (aenderung && zeile.text !== aenderung.newText) {
-          zeile = {
-            ...zeile,
-            originalText: zeile.text,
-            text: aenderung.newText,
-            isEdited: true,
-            editedAt: aenderung.editedAt,
-          }
-        }
-
-        const neue = wendeReaktionenAn(zeile.reaktionen, reaktionen.finde(zeile))
-        return neue === zeile.reaktionen ? zeile : { ...zeile, reaktionen: neue }
-      }
-
-      // Apply Edits, Deletions, and Read Status
-      // Gelöscht = gelöscht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
-      const processedList: ChatMessage[] = decryptedList.map((msg) => {
-        let text = msg.text
-        let isEdited = false
-        let editedAt: string | undefined = undefined
-        let isDeleted = false
-        let deletedAt: string | undefined = undefined
-        let originalText: string | undefined = undefined
-
-        const aenderung = findeAenderung(msg)
-        if (aenderung) {
-          originalText = text
-          text = aenderung.newText
-          isEdited = true
-          editedAt = aenderung.editedAt
-        }
-
-        const loeschung = findeLoeschung(msg)
-        if (loeschung) {
-          isDeleted = true
-          deletedAt = loeschung.deletedAt
-          // Kein originalText bei Löschung — gelöscht ist gelöscht.
-          originalText = undefined
-        }
-
-        // Dynamisches Häkchen-System (WhatsApp-Style):
-        // 1. Gelesen: Gesprächspartner hat die Nachricht quittiert (maxPartnerReadId >= msg.id)
-        // 2. Zugestellt: Gesprächspartner hat die Nachricht empfangen (maxPartnerDeliveredId >= msg.id oder bereits gelesen)
-        const isRead = msg.isSelf && maxPartnerReadId >= msg.id
-        const isDelivered = msg.isSelf && (isRead || maxPartnerDeliveredId >= msg.id)
-        const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead
-          ? 'read'
-          : isDelivered
-            ? 'delivered'
-            : msg.id > 0
-              ? 'sent'
-              : 'queued'
-
-        const fertig = {
-          ...msg,
-          text,
-          isEdited,
-          editedAt,
-          isDeleted,
-          deletedAt,
-          originalText,
-          isDelivered,
-          isRead,
-          status,
-          // Reaktionen aus diesem Fenster in die Zeile schreiben. Der Stand aus
-          // der Ablage kommt gleich beim Mischen dazu; `wendeReaktionenAn`
-          // trägt hier nur die neu gesehenen Meldungen nach.
-          reaktionen: wendeReaktionenAn(msg.reaktionen, reaktionen.finde(msg)),
-        }
-        // Ausblenden reicht nicht: was hier stehen bleibt, schreibt
-        // `saveLocalMessages` gleich wieder auf die Platte — Text und Anhang
-        // einer gelöschten Nachricht eingeschlossen.
-        return isDeleted && deletedAt ? tilgeInhalt(fertig, deletedAt) : fertig
-      })
-
-      // Abort if the user has navigated to another chat in the meantime or a newer load completed
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
-
-      /**
-       * Der eigene Gesprächsanteil steht nur hier: eine Ratchet-Nachricht kann
-       * ihr Absender nicht öffnen. Ein Ersetzen statt Zusammenführen würde
-       * alles selbst Geschriebene bei jedem Abruf wegwischen.
-       *
-       * **Seit 09/2026 auch für Gruppen.** Dort ließ sich die eigene Nachricht
-       * zwar immer schon lesen (Sender Keys sind symmetrisch), weshalb der
-       * lokale Verlauf verzichtbar schien. Verzichtbar war er aber nur für den
-       * Text: Markierungen, die Suche über alle Chats und die Übersicht „an
-       * mich" lesen alle aus dieser Ablage. Ohne sie endeten Gruppen in jeder
-       * dieser Ansichten als leere Stelle.
-       */
-      const rohesLokal = await loadLocalMessages(currentMid)
-      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
-
-      /**
-       * Eine Löschung, die hier ankommt, gilt auch für das, was schon auf der
-       * Platte liegt.
-       *
-       * Der Steuerumschlag nennt eine Nachricht, die dieses Gerät längst hat.
-       * Ohne diesen Durchgang blieben zwei Fassungen zurück: die Zeile im
-       * eigenen Verlauf mit Text und Anhang, und der abgelegte
-       * Umschlag-Klartext. Beide würden beim nächsten Öffnen des Gesprächs
-       * wieder gelesen — die Nachricht wäre „für alle gelöscht" und stünde
-       * trotzdem da.
-       */
-      const lokalerVerlauf = rohesLokal.map(wendeWirkungenAn)
-
-      // Augenblicke für den Funken — aus beiden Zweigen, wie jede Wirkung.
-      // Eigene optimistische Zeilen nicht: die hat der Versand schon gezählt,
-      // und ein gescheiterter nimmt sie dort wieder heraus.
-      if (activeContact?.isFriend && currentUserId) {
-        const funkenEreignisse = ereignisseAusNachrichten(
-          [...lokalerVerlauf, ...processedList].filter((m) => !(m.isSelf && isOptimisticMessage(m))),
-          currentUserId,
-          activeContact.userId,
-        )
-        if (funkenEreignisse.length) {
-          void useFunkenStore.getState().nimmAuf(activeContact.userId, funkenEreignisse)
-        }
-      }
-
-      const nochZuTilgen = new Map<string, { msg: ChatMessage; geloeschtAm: string }>()
-      for (const m of [...rohesLokal, ...processedList] as ChatMessage[]) {
-        if (m.isDeleted) continue
-        const loeschung = findeLoeschung(m)
-        if (!loeschung) continue
-        const schluessel = m.clientUuid || `#${m.id}`
-        if (!nochZuTilgen.has(schluessel)) {
-          nochZuTilgen.set(schluessel, { msg: m, geloeschtAm: loeschung.deletedAt })
-        }
-      }
-      for (const { msg, geloeschtAm } of nochZuTilgen.values()) {
-        void tilgeNachrichtLokal(currentMid, msg, geloeschtAm).catch(() => {})
-      }
-
-      setMessages((prev) => {
-        const processedClientUuids = new Set<string>()
-        for (const m of processedList) {
-          if (m.clientUuid) processedClientUuids.add(m.clientUuid)
-        }
-        const pendingOptimistic = prev
-          .filter((m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid))
-          .map((m) => {
-            // Dieselben Wirkungen wie im lokalen Verlauf. Ohne sie brächte
-            // diese Fassung eine Reaktion oder Bearbeitung weniger mit und
-            // würde die berechnete beim Mischen wieder verdrängen.
-            const zeile = wendeWirkungenAn(m)
-            const isRead = zeile.isSelf && maxPartnerReadId >= zeile.id
-            const isDelivered = zeile.isSelf && (isRead || maxPartnerDeliveredId >= zeile.id)
-            return {
-              ...zeile,
-              isRead,
-              isDelivered,
-              status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : zeile.status || ('queued' as const),
-            }
-          })
-        const systemzeilen = prev.filter((m) => m.isSystem)
-        const frisch = [...processedList, ...pendingOptimistic, ...systemzeilen]
-        const combined = lokalerVerlauf.length
-          ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
-          : sortMessagesChronologically(frisch)
-        sessionChatCache.set(currentMid, combined.slice(-80))
-        void saveLocalMessages(currentMid, combined.slice(-200))
-        return combined
-      })
-
-      /**
-       * Die Leiste wird aus der Ablage abgeglichen, nicht aus dem Umschlag.
-       *
-       * Die Kennung überlebt das Hundert-Umschläge-Fenster, der Anheft-Umschlag
-       * nicht. Deshalb ist die Ablage die Wahrheit und die Leiste nur ihre
-       * Anzeige — das deckt beides ab: eine frisch übernommene Anheftung und
-       * eine, die schon vor dem Öffnen des Chats galt. Nach dem `setMessages`,
-       * denn im Updater wäre es ein Seiteneffekt mitten in der Berechnung.
-       */
-      const gemerkt = anheftung(currentMid).clientUuid
-      setAngeheftet((bisher) => {
-        if ((bisher?.clientUuid || '') === gemerkt) return bisher
-        if (!gemerkt) return null
-        // Noch nicht im Verlauf: keine Leiste. Der nächste Durchgang holt sie
-        // nach, sobald die Zeile da ist — eine falsche wäre schlimmer als keine.
-        return [...processedList, ...lokalerVerlauf].find((m) => m.clientUuid === gemerkt) || null
-      })
-
-      // Ungelesen-Zähler zurücksetzen
-      markAsRead(currentMid)
-
-      // Prüfen, ob der Ziel-Kontakt blockiert ist: Wenn blockiert, werden keinerlei
-      // Zustell- oder Lesequittungen (delivery_receipt, read_receipt) an die Mailbox gesendet!
-      // Dadurch verbleibt die Nachricht beim blockierten Absender dauerhaft auf genau 1 grauem Häkchen (✓).
-      const isTargetBlocked = activeContact ? isBlocked(activeContact.userId) : false
-      // In einer Gruppe keine Quittungen, wie schon in `deliveryReceiptService`.
-      // Jedes Mitglied schickte je Nachricht zwei in die Gruppenmailbox; bei
-      // zehn Mitgliedern 18 Umschläge je Nachricht, und das Hundert-Fenster
-      // hielt kaum noch echte Nachrichten (bis 26.09.2026).
-      const istGruppe = Boolean(activeGroup)
-      const isDocVisible = typeof document === 'undefined' || document.visibilityState === 'visible'
-
-      // Sende Zustellbestätigung (delivery_receipt), sobald neue Nachrichten empfangen wurden
-      const needsDelivery =
-        !istGruppe &&
-        maxIncomingId > 0 &&
-        maxIncomingId > highestIncomingIdDeliveredRef.current &&
-        !isTargetBlocked
-
-      if (needsDelivery) {
-        const idToDeliver = maxIncomingId
-        /*
-         * Der Stand steigt **vor** dem Versand, nicht danach.
-         *
-         * Bis 09/2026 wanderte er erst im `.then()` hoch. Jeder gescheiterte
-         * Versand ließ ihn stehen, und der nächste Abruf ein paar Sekunden
-         * später schickte dieselbe Quittung noch einmal. Bremste der Server
-         * mit 429, hielt sich das von selbst am Leben: gemessen waren 64 % der
-         * Umschläge in der Mailbox Zustellquittungen, und das Fenster fasst
-         * hundert — verdrängt wurden Bearbeitungen und Reaktionen.
-         *
-         * Ein Verlust kostet nichts: `delivered_up_to_id` nennt eine
-         * Obergrenze. Die nächste Nachricht bringt eine höhere Kennung und
-         * damit eine Quittung, die den Bereich mit abdeckt.
-         */
-        highestIncomingIdDeliveredRef.current = Math.max(
-          highestIncomingIdDeliveredRef.current,
-          idToDeliver,
-        )
-        merkeQuittung(currentMid, 'zugestellt', idToDeliver)
-        sendE2eeControlMessage({
-          type: 'delivery_receipt',
-          delivered_up_to_id: idToDeliver,
-          receiver_id: currentUserId,
-          timestamp: new Date().toISOString(),
-        }).catch(() => {})
-      }
-
-      // Send read receipt if there are new incoming unacknowledged messages and document is visible
-      const needsRead =
-        !istGruppe &&
-        maxIncomingId > 0 &&
-        maxIncomingId > highestIncomingIdAcknowledgedRef.current &&
-        readReceiptsEnabled &&
-        isDocVisible &&
-        !isTargetBlocked
-
-      if (needsRead) {
-        const idToAck = maxIncomingId
-        // Derselbe Grund wie bei der Zustellquittung: kumulativ, also lieber
-        // einmal zu wenig als in jeder Runde erneut.
-        highestIncomingIdAcknowledgedRef.current = Math.max(
-          highestIncomingIdAcknowledgedRef.current,
-          idToAck,
-        )
-        merkeQuittung(currentMid, 'gelesen', idToAck)
-        const dispatchReadReceipt = () => {
-          sendE2eeControlMessage({
-            type: 'read_receipt',
-            read_up_to_id: idToAck,
-            reader_id: currentUserId,
-            timestamp: new Date().toISOString(),
-          }).catch(() => {})
-        }
-
-        if (needsDelivery) {
-          setTimeout(dispatchReadReceipt, 350)
-        } else {
-          dispatchReadReceipt()
-        }
-      }
-    } catch {
-      // Offline fallback
-    } finally {
-      if (isInitial && activeMailboxIdRef.current === currentMid) {
-        setLoadingMessages(false)
-      }
-    }
-  }
+  const loadMessages = useNachrichtenLaden({
+    blindMailboxId,
+    currentUserId,
+    activeContact,
+    activeGroup,
+    gruppenrechteVon,
+    t,
+    messages,
+    setMessages,
+    setLoadingMessages,
+    setAngeheftet,
+    setVerfallSekunden,
+    zeigeSystemzeile,
+    markAsRead,
+    isBlocked,
+    readReceiptsEnabled,
+    konversation,
+    identityRef,
+    activeMailboxIdRef,
+    currentLoadSeqRef,
+    maxPartnerReadIdRef,
+    maxPartnerDeliveredIdRef,
+    highestIncomingIdDeliveredRef,
+    highestIncomingIdAcknowledgedRef,
+    sendE2eeControlMessage,
+  })
 
   /**
    * Reagieren — dieselbe Bewegung setzt und nimmt zurück.
@@ -2954,111 +2487,18 @@ function MessengerSeite() {
     return () => window.clearInterval(takt)
   }, [messengerGesperrt])
 
-  // Real-time SSE event listener for zero-latency incoming messages & typing signals
-  useEffect(() => {
-    const handleSync = (e: Event) => {
-      const ce = e as CustomEvent<any>
-      const detail = ce.detail
-      if (detail?.type === 'group_call_started') {
-        if (!detail.group_id || !detail.room_token) return
-        const groupId = Number(detail.group_id)
-        const roomToken = String(detail.room_token)
-        setGroups((prev) =>
-          prev.map((group) =>
-            group.id === groupId ? { ...group, room_token: roomToken } : group
-          )
-        )
-        setActiveGroup((current) =>
-          current?.id === groupId ? { ...current, room_token: roomToken } : current
-        )
-        useCallStore.getState().handleCallSyncEvent(detail)
-      } else if (detail?.type === 'group_call_ended') {
-        if (detail.group_id && detail.room_token) {
-          const groupId = Number(detail.group_id)
-          setGroups((prev) =>
-            prev.map((group) =>
-              group.id === groupId ? { ...group, room_token: null } : group
-            )
-          )
-          setActiveGroup((current) =>
-            current?.id === groupId ? { ...current, room_token: null } : current
-          )
-          useCallStore.getState().handleCallSyncEvent(detail)
-        }
-      } else if (
-        detail?.type === 'direct_call_invitation' ||
-        detail?.type === 'direct_call_rejected' ||
-        detail?.type === 'direct_call_cancelled' ||
-        detail?.type === 'call_key' ||
-        detail?.type === 'user_call_state_changed' ||
-        detail?.type === 'call_transferred' ||
-        detail?.type === 'call_superseded' ||
-        detail?.type === 'call_ended_remotely'
-      ) {
-        useCallStore.getState().handleCallSyncEvent(detail)
-      } else if (detail?.type === 'e2ee_blind_message') {
-        const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
-        // Outgoing Echo Prevention: Sender niemals benachrichtigen
-        if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
-          if (isCurrentActive) {
-            void loadMessages(false)
-          }
-          return
-        }
-        // Empfänger-Filterung: Nur Empfänger verarbeitet Nachricht
-        if (detail.recipient_id && currentUserId && Number(detail.recipient_id) !== Number(currentUserId)) {
-          return
-        }
-        if (isCurrentActive) {
-          void loadMessages(false)
-        }
-      } else if (detail?.type === 'e2ee_typing_signal') {
-        if (detail.blind_mailbox_id === blindMailboxId && detail.sender_id !== currentUserId) {
-          if (partnerActivityTimeoutRef.current) {
-            clearTimeout(partnerActivityTimeoutRef.current)
-            partnerActivityTimeoutRef.current = null
-          }
-          if (detail.status === 'idle') {
-            setPartnerActivity(null)
-          } else if (detail.status === 'typing' || detail.status === 'recording') {
-            setPartnerActivity({ status: detail.status, username: detail.sender_username })
-            partnerActivityTimeoutRef.current = setTimeout(() => {
-              setPartnerActivity(null)
-            }, 4500)
-          }
-        }
-      }
-    }
+  // Echtzeitstrom: Anrufe, eintreffende Nachrichten, Tippen.
+  useMessengerSync({
+    blindMailboxId,
+    currentUserId,
+    geraeteMeldungen: user?.device_notifications,
+    loadMessages,
+    setGroups,
+    setActiveGroup,
+    setPartnerActivity,
+    partnerActivityTimeoutRef,
+  })
 
-    const handleMessagesUpdated = () => {
-      void loadMessages(false)
-    }
-
-    const handleVisibilityChange = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        void loadMessages(false)
-      }
-    }
-
-    window.addEventListener('msm:sync-event', handleSync)
-    window.addEventListener('msm:messages-updated', handleMessagesUpdated)
-    // `msm:message-confirmed` startet **kein** volles Neuladen mehr. Die
-    // Bestätigung schreibt ihren Status zuerst in die Ablage; ein paralleles
-    // `loadMessages` las vorher den alten Stand und setzte die Uhr zurück.
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', handleVisibilityChange)
-    }
-    return () => {
-      window.removeEventListener('msm:sync-event', handleSync)
-      window.removeEventListener('msm:messages-updated', handleMessagesUpdated)
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('visibilitychange', handleVisibilityChange)
-      }
-      if (partnerActivityTimeoutRef.current) {
-        clearTimeout(partnerActivityTimeoutRef.current)
-      }
-    }
-  }, [blindMailboxId, currentUserId, user?.device_notifications])
 
   useEffect(() => {
     setPartnerActivity(null)

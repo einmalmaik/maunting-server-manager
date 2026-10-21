@@ -24,21 +24,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import i18n from '@/i18n'
 
-import { fetchE2eeEnvelopes, type BlindEnvelopeItem } from '@/api/social'
+import { fetchAlleE2eeEnvelopes, type BlindEnvelopeItem } from '@/api/social'
 import {
   decryptE2eeHybridWithKeyring,
   deriveBlindMailboxId,
   deriveGroupBlindMailboxId,
+  deriveUserDeviceMailboxId,
   encryptE2eeHybrid,
   envelopePlaintextCache,
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
 import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
-import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
+import { eigeneWirkungenFuer, merkeEigeneWirkung } from '@/services/eigeneWirkungen'
+import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   entschluesseleGruppenUmschlag,
+  fordereDmGeheimnis,
   fordereGruppenSchluessel,
   dmZiele,
   gruppenZiele,
@@ -364,8 +367,56 @@ export function useKonversation({
     // nie — und stünde vor einer Mailbox voller „Verschlüsselte Nachricht"
     // oder, beim Direktchat, vor einer leeren. Vor dem Lesen, nicht danach:
     // sonst wäre der erste Durchlauf immer der blinde.
-    await holeGeraeteSteuerung(eigeneId, (umschlag) =>
-      decryptE2eeHybridWithKeyring(umschlag, schluessel),
+    // **Wirkungen aus den eigenen Zweitgeräten.** Sie liegen in derselben
+    // Geräte-Mailbox, sind aber keine Schlüsselzustellung: eine Quittung, eine
+    // Bearbeitung, eine Löschung oder eine Reaktion. Eingesammelt und unten an
+    // die Lesung gehängt, damit `werteUmschlaegeAus` sie mit denselben
+    // Absenderprüfungen anwendet wie die Pakete der Gegenseite. Ohne diesen
+    // Weg blieb ein Häkchen, ein Edit oder eine Löschung auf dem Gerät, an dem
+    // sie passiert ist.
+    const eigeneSteuerung: Lesung[] = []
+    await holeGeraeteSteuerung(
+      eigeneId,
+      (umschlag) => decryptE2eeHybridWithKeyring(umschlag, schluessel),
+      (klartext, env) => {
+        let roh: Record<string, unknown>
+        try {
+          const geparst = JSON.parse(klartext)
+          if (!geparst || typeof geparst !== 'object') return
+          roh = geparst as Record<string, unknown>
+        } catch {
+          return
+        }
+        // Nur, was zu **diesem** Gespräch gehört. Ein Zweitgerät kann viele
+        // Chats offen gehabt haben; ohne die Marke landete eine Löschung aus
+        // einem anderen Chat im falschen Verlauf. Für ein noch nicht
+        // geöffnetes Gespräch wird sie aufbewahrt, statt mit dem Cursor
+        // verloren zu gehen.
+        if (roh.mailbox !== mid) {
+          if (typeof roh.mailbox === 'string') {
+            merkeEigeneWirkung({
+              mailbox: roh.mailbox,
+              payload: klartext,
+              zeitpunkt: env.created_at,
+            })
+          }
+          return
+        }
+        eigeneSteuerung.push({
+          art: 'klartext',
+          // Eigene Kennung im negativen Bereich: die Nummern der Geräte-Mailbox
+          // und der Chat-Mailbox laufen unabhängig, positive kollidierten.
+          env: {
+            id: -env.id,
+            blind_mailbox_id: mid,
+            ciphertext_envelope: '',
+            client_uuid: `own-${env.id}`,
+            created_at: env.created_at,
+          },
+          text: klartext,
+          vonKonto: eigeneId,
+        })
+      },
     ).catch(() => 0)
     if (aktuelleMailbox.current !== mid) return null
 
@@ -382,17 +433,30 @@ export function useKonversation({
      * Geheimnis an, und ein Durchlauf, der vorher fragt, liest die neue
      * Mailbox erst beim nächsten Mal.
      */
-    const lesen = gruppenKontext
-      ? (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
-      : drKontext
-        ? (await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)).lesen
-        : [mid]
+    let lesen: string[]
+    if (gruppenKontext) {
+      lesen = (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
+    } else if (drKontext) {
+      const ziele = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
+      lesen = ziele.lesen
+      if (!ziele.nachweis) {
+        // Kein Geheimnis: die neue Mailbox ist diesem Gerät unbekannt. Die
+        // eigenen Geschwister haben es vielleicht — fragen kostet einen
+        // Umschlag im eigenen Postfach, und die Antwort kommt beim nächsten
+        // Durchlauf an. Gedrosselt und ohne Warten.
+        void fordereDmGeheimnis(drKontext.eigeneId, drKontext.peerId).catch(() => {})
+      }
+    } else {
+      lesen = [mid]
+    }
     if (aktuelleMailbox.current !== mid) return null
 
     const umschlaege = (
       await Promise.all(
         lesen.map((kennung) =>
-          fetchE2eeEnvelopes(kennung).catch(() => [] as Awaited<ReturnType<typeof fetchE2eeEnvelopes>>),
+          fetchAlleE2eeEnvelopes(kennung).catch(
+            () => [] as Awaited<ReturnType<typeof fetchAlleE2eeEnvelopes>>,
+          ),
         ),
       )
     )
@@ -609,6 +673,27 @@ export function useKonversation({
      */
     const gelesen: Lesung[] = []
     for (const env of umschlaege) gelesen.push(await einUmschlag(env))
+    // Die Wirkungen der eigenen Zweitgeräte kommen **fertig entschlüsselt**
+    // dazu. Sie dürfen nicht durch `einUmschlag`: ihr Umschlag liegt in der
+    // Geräte-Mailbox und trägt keinen Chat-Chiffretext. Als `klartext` mit
+    // eigener, negativer Nummer durchlaufen sie dieselben Prüfungen wie ein
+    // Paket der Gegenseite — Signatur, `actor_id`, `mailbox`-Bindung.
+    gelesen.push(...eigeneSteuerung)
+    // Dazu, was ein anderes Gerät geschickt hat, während dieser Chat zu war.
+    eigeneWirkungenFuer(mid).forEach((wirkung, i) => {
+      gelesen.push({
+        art: 'klartext',
+        env: {
+          id: -1_000_000 - i,
+          blind_mailbox_id: mid,
+          ciphertext_envelope: '',
+          client_uuid: `own-spaet-${i}`,
+          created_at: wirkung.zeitpunkt,
+        },
+        text: wirkung.payload,
+        vonKonto: eigeneId,
+      })
+    })
 
     if (aktuelleMailbox.current !== mid) return null
 
@@ -677,7 +762,48 @@ export function useKonversation({
   const baueSteuerversand = useCallback(
     async (payload: string, clientUuid: string, typ: string): Promise<Versandauftrag[]> => {
       const mid = blindMailboxId
-      if (!mid) return []
+      if (!mid || !eigeneId) return []
+
+      /**
+       * Dieselbe Wirkung für die **eigenen übrigen Geräte**.
+       *
+       * Sie geht nicht in die Chat-Mailbox: das Relais weist einen Umschlag
+       * an das eigene Konto dort mit 400 ab. Ihr Weg ist die Geräte-Mailbox,
+       * in der schon die Schlüssel liegen, versiegelt gegen jedes einzelne
+       * Gerät. Das sendende Gerät überspringt sich selbst — es hat die Wirkung
+       * bereits lokal angewandt.
+       *
+       * Ohne diesen Schritt blieb „gelesen", „bearbeitet", „gelöscht" und
+       * „reagiert" auf dem Gerät stehen, an dem es passiert ist: das Web zeigte
+       * ein Häkchen, während die App weiter die alte Fassung hatte.
+       */
+      const eigeneAuftraege = async (): Promise<Versandauftrag[]> => {
+        const sendPair = identitaetRef.current.sendPair
+        if (!sendPair) return []
+        const [geraete, meins, geraeteMailbox] = await Promise.all([
+          verlangeGeraeteVon(eigeneId).catch(() => []),
+          eigenesGeraet().catch(() => null),
+          deriveUserDeviceMailboxId(eigeneId),
+        ])
+        const auftraege = await Promise.all(
+          geraete
+            .filter((geraet) => geraet.device_id !== meins?.kennung)
+            .map(async (geraet, i) => ({
+              blind_mailbox_id: geraeteMailbox,
+              ciphertext_envelope: await encryptE2eeHybrid(
+                payload,
+                geraet.public_key,
+                sendPair.publicKeyJwk,
+              ),
+              // Eigene Kennung je Gerät; `#own` hält die Kopie aus dem
+              // Nachrichtenfenster des Empfängers heraus.
+              client_uuid: `${clientUuid}#own${i}`,
+              is_control: true,
+              control_type: typ,
+            })),
+        )
+        return auftraege
+      }
 
       if (gruppenKontext) {
         // Quittungen laufen in der Gruppe über denselben Schlüssel wie die
@@ -692,6 +818,7 @@ export function useKonversation({
             is_control: true,
             control_type: typ,
           },
+          ...(await eigeneAuftraege()),
         ]
       }
 
@@ -705,16 +832,9 @@ export function useKonversation({
       // kostet ein Häkchen, eine verbrauchte Kettenposition kostet eine
       // Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto hat
       // keinen gemeinsamen privaten Schlüssel mehr.
-      // **Nur an die Gegenseite, und das ist eine Serverregel, keine Auslassung.**
-      // Ein Umschlag an das eigene Konto ist in einer Chat-Mailbox verboten
-      // (`relay_blind_envelope` antwortet 400, selbstadressiert gehört in die
-      // Geräte-Sync-Mailbox). Die eigenen übrigen Geräte erfahren von einer
-      // Wirkung also erst über den Gerätekanal — das gilt für Quittungen,
-      // Reaktionen und die Verfallsfrist gleichermaßen und wäre eine eigene
-      // Runde wert.
       const geraete = await verlangeGeraeteVon(drKontext.peerId)
       const ziel = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
-      return Promise.all(
+      const auftraege = await Promise.all(
         geraete.map(async (geraet, i) => ({
           blind_mailbox_id: ziel.senden,
           ciphertext_envelope: await encryptE2eeHybrid(payload, geraet.public_key, sendPair.publicKeyJwk),
@@ -726,8 +846,9 @@ export function useKonversation({
           control_type: typ,
         })),
       )
+      return [...auftraege, ...(await eigeneAuftraege())]
     },
-    [blindMailboxId, gruppenKontext, drKontext, identitaetRef],
+    [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef],
   )
 
   return { blindMailboxId, gruppenKontext, liesUmschlaege, baueVersand, baueSteuerversand }

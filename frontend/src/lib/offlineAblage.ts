@@ -39,6 +39,8 @@ export const MESSENGER_KEYS = {
   PINS: 'msm:chat_pins',
   ARCHIVE: 'msm:chat_archive',
   MENTIONS: 'msm:chat_mentions',
+  GERAETE_STAND: 'msm:chat_geraete_stand',
+  EIGENE_WIRKUNGEN: 'msm:chat_eigene_wirkungen',
 } as const
 
 /** Zwischenspeicher der Kontaktliste (`hooks/useKontaktdaten.ts`). Er kommt vom Server wieder. */

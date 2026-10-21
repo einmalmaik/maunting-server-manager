@@ -14,9 +14,20 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } = vi.hoisted(() => ({
+import { leereOfflineAblage } from '@/lib/offlineAblage'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import {
+  eigeneWirkungenFuer,
+  leereEigeneWirkungen,
+  merkeEigeneWirkung,
+} from '@/services/eigeneWirkungen'
+
+const { lesungen, geraete, eigeneGeraete, eigeneSteuerung, gruppenLesungen, gerufen, klartextCache, abgelegt } = vi.hoisted(() => ({
   lesungen: new Map<string, any>(),
   geraete: [] as { device_id: string; public_key: string }[],
+  eigeneGeraete: [] as { device_id: string; public_key: string }[],
+  /** Was die eigene Geräte-Mailbox in diesem Test an Wirkungen liefert. */
+  eigeneSteuerung: [] as { klartext: string; env: { id: number; created_at: string } }[],
   gruppenLesungen: new Map<string, any>(),
   /** Der dauerhafte Klartextspeicher, nach Umschlagkennung. */
   abgelegt: new Map<number, string>(),
@@ -51,11 +62,16 @@ vi.mock('@/api/social', () => ({
     gerufen.gelesen.push(kennung)
     return proMailbox.get(kennung) ?? umschlaege
   }),
+  fetchAlleE2eeEnvelopes: vi.fn(async (kennung: string) => {
+    gerufen.gelesen.push(kennung)
+    return proMailbox.get(kennung) ?? umschlaege
+  }),
 }))
 
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn(async (a: number, b: number) => `dm-${Math.min(a, b)}-${Math.max(a, b)}`),
   deriveGroupBlindMailboxId: vi.fn(async (g: number) => `gruppe-${g}`),
+  deriveUserDeviceMailboxId: vi.fn(async (uid: number) => `dev-${uid}`),
   getCachedBlindMailboxId: vi.fn(() => undefined),
   getCachedGroupBlindMailboxId: vi.fn(() => undefined),
   decryptE2eeHybridWithKeyring: vi.fn(async (umschlag: string) => {
@@ -68,9 +84,11 @@ vi.mock('@/services/e2eeCrypto', () => ({
 }))
 
 vi.mock('@/services/e2eeGeraet', () => ({
-  verlangeGeraeteVon: vi.fn(async () => {
-    if (geraete.length === 0) throw new Error('kein Gerät')
-    return geraete
+  eigenesGeraet: vi.fn(async () => ({ kennung: 'eigen-a', public_key: 'eigen-pub' })),
+  verlangeGeraeteVon: vi.fn(async (uid: number) => {
+    const liste = uid === 1 ? eigeneGeraete : geraete
+    if (liste.length === 0) throw new Error('kein Gerät')
+    return liste
   }),
 }))
 
@@ -90,14 +108,21 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   fordereGruppenSchluessel: vi.fn(async (_k: any, keyId: string) => {
     gerufen.fordereGruppenSchluessel.push(keyId)
   }),
+  // Das Nachfordern eines Chatgeheimnisses prüft `gruppenSchluessel.test.ts`.
+  fordereDmGeheimnis: vi.fn(async () => false),
   verarbeiteGruppenSteuerung: vi.fn(async (_k: any, klartext: string) => {
     gerufen.verarbeiteGruppenSteuerung.push(klartext)
   }),
   // Die eigene Geräte-Mailbox. Sie steht vor dem Lesen der Gruppenmailbox und
   // bringt den Schlüssel mit; was sie im einzelnen tut, prüft
   // `gruppenSchluessel.test.ts`.
-  holeGeraeteSteuerung: vi.fn(async (eigeneId: number) => {
+  holeGeraeteSteuerung: vi.fn(async (
+    eigeneId: number,
+    _entsiegle: (umschlag: string) => Promise<string>,
+    empfange?: (klartext: string, env: { id: number; created_at: string }) => void,
+  ) => {
     gerufen.holeGeraeteSteuerung.push(eigeneId)
+    for (const eintrag of eigeneSteuerung) empfange?.(eintrag.klartext, eintrag.env)
     return 0
   }),
   verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
@@ -234,10 +259,15 @@ async function baueHook(
 
 describe('useKonversation', () => {
   beforeEach(() => {
+    setzeAngemeldetesKonto(ICH)
+    leereOfflineAblage()
+    leereEigeneWirkungen()
     umschlaege = []
     lesungen.clear()
     gruppenLesungen.clear()
     geraete.length = 0
+    eigeneGeraete.length = 0
+    eigeneSteuerung.length = 0
     gerufen.fordereGruppenSchluessel.length = 0
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
@@ -522,8 +552,8 @@ describe('useKonversation', () => {
       lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
 
       const { result } = await baueHook({ art: 'direkt', peerId: DU })
-      const { fetchE2eeEnvelopes } = await import('@/api/social')
-      const vorher = vi.mocked(fetchE2eeEnvelopes).mock.calls.length
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+      const vorher = vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.length
 
       // Der erste Durchlauf hängt am Abruf fest. Genau das ist das Fenster, in
       // dem am laufenden System die weiteren Aufrufe hereinkommen.
@@ -531,7 +561,7 @@ describe('useKonversation', () => {
       const bremse = new Promise<void>((aufloesen) => {
         loslassen = aufloesen
       })
-      vi.mocked(fetchE2eeEnvelopes).mockImplementationOnce(async () => {
+      vi.mocked(fetchAlleE2eeEnvelopes).mockImplementationOnce(async () => {
         await bremse
         return umschlaege as any
       })
@@ -548,7 +578,7 @@ describe('useKonversation', () => {
       loslassen()
       const alle = await Promise.all([lauf1, lauf2, lauf3])
 
-      expect(vi.mocked(fetchE2eeEnvelopes).mock.calls.length - vorher).toBe(2)
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.length - vorher).toBe(2)
       // Der Nachzügler liest denselben Umschlag ein zweites Mal — und bekommt
       // seinen Klartext aus der Ablage, statt einen verbrauchten
       // Nachrichtenschlüssel ein zweites Mal zu benutzen.
@@ -647,7 +677,7 @@ describe('useKonversation', () => {
       umzug.set('gruppe-7', 'geheime-mailbox')
       proMailbox.set('geheime-mailbox', [umschlag(2, 'g-neu')])
       gruppenLesungen.set('g-neu', { art: 'klartext', text: 'aus der neuen' })
-      const echt = (await import('@/api/social')).fetchE2eeEnvelopes as any
+      const echt = (await import('@/api/social')).fetchAlleE2eeEnvelopes as any
       echt.mockImplementationOnce(async (k: string) => {
         gerufen.gelesen.push(k)
         return proMailbox.get(k) ?? []
@@ -805,6 +835,87 @@ describe('useKonversation', () => {
       })
 
       expect(await result.current.baueSteuerversand('{}', 'ctrl-3', 'read_receipt')).toEqual([])
+    })
+
+    it('spiegelt eine Wirkung an die eigenen übrigen Geräte', async () => {
+      // Das Web liest, die App soll dasselbe Häkchen zeigen. Der Weg dorthin
+      // ist die Geräte-Mailbox: die Chat-Mailbox weist einen Umschlag an das
+      // eigene Konto mit 400 ab. Das sendende Gerät bekommt keine Kopie.
+      geraete.push({ device_id: 'fremd-a', public_key: 'pub-a' })
+      eigeneGeraete.push(
+        { device_id: 'eigen-a', public_key: 'eigen-pub' },
+        { device_id: 'eigen-b', public_key: 'eigen-b-pub' },
+      )
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const auftraege = await result.current.baueSteuerversand(
+        '{"type":"read_receipt"}',
+        'ctrl-9',
+        'read_receipt',
+      )
+
+      const eigene = auftraege.filter((a) => a.blind_mailbox_id === 'dev-1')
+      expect(eigene.map((a) => a.client_uuid)).toEqual(['ctrl-9#own0'])
+      expect(eigene[0].ciphertext_envelope).toBe('hybrid(eigen-b-pub):{"type":"read_receipt"}')
+      expect(eigene[0].is_control && eigene[0].control_type).toBe('read_receipt')
+      // Die Gegenseite bekommt ihre Kopie unverändert daneben.
+      expect(auftraege.filter((a) => a.blind_mailbox_id === 'dm-1-2')).toHaveLength(1)
+    })
+  })
+
+  describe('Wirkungen der eigenen Zweitgeräte', () => {
+    it('liest sie aus der Geräte-Mailbox und hängt sie an die Lesung', async () => {
+      // Ein Edit aus der App muss im Web ankommen; sonst zeigt jedes Gerät
+      // eine andere Fassung derselben Nachricht.
+      const payload = JSON.stringify({
+        type: 'edit_message',
+        mailbox: 'dm-1-2',
+        actor_id: ICH,
+        new_text: 'berichtigt',
+      })
+      eigeneSteuerung.push({ klartext: payload, env: { id: 4, created_at: '2026-10-21T10:00:00Z' } })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      const wirkung = gelesen?.find((l: any) => l.text === payload)
+      expect(wirkung?.art).toBe('klartext')
+      expect(wirkung?.vonKonto).toBe(ICH)
+      // Eigene Nummer im negativen Bereich: die Geräte-Mailbox und die
+      // Chat-Mailbox vergeben unabhängig, positive kollidierten.
+      expect(wirkung?.env.id).toBe(-4)
+    })
+
+    it('wendet keine Wirkung aus einem anderen Gespräch an', async () => {
+      // Eine Löschung aus dem Chat mit C landet sonst im offenen Chat mit B.
+      const payload = JSON.stringify({ type: 'delete_message', mailbox: 'dm-1-9', actor_id: ICH })
+      eigeneSteuerung.push({
+        klartext: payload,
+        env: { id: 5, created_at: '2026-10-21T10:00:00Z' },
+      })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen).toEqual([])
+      // Aber sie ist nicht verloren: der Chat mit C ist nur gerade zu.
+      expect(eigeneWirkungenFuer('dm-1-9').map((w) => w.payload)).toEqual([payload])
+    })
+
+    it('holt eine aufbewahrte Wirkung nach, sobald ihr Gespräch offen ist', async () => {
+      // Das Web war zu, als die App gelöscht hat. Der Geräte-Cursor ist längst
+      // darüber hinweg; ohne die Ablage bliebe die Nachricht hier stehen.
+      const payload = JSON.stringify({ type: 'delete_message', mailbox: 'dm-1-2', actor_id: ICH })
+      merkeEigeneWirkung({
+        mailbox: 'dm-1-2',
+        payload,
+        zeitpunkt: '2026-10-21T09:00:00Z',
+      })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen?.some((l: any) => l.text === payload)).toBe(true)
     })
   })
 })

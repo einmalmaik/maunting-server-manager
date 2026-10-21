@@ -74,12 +74,13 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 
 import {
-  fetchE2eeEnvelopes,
+  fetchAlleE2eeEnvelopes,
   getGroupMembers,
   registriereMailbox,
   relayE2eeEnvelope,
 } from '@/api/social'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
+import { MESSENGER_KEYS, getStorageItem, setStorageItem } from '@/lib/offlineAblage'
 import i18n from '@/i18n'
 
 import {
@@ -851,6 +852,15 @@ export async function abonniereBekannteGespraeche(
 
 /** Der Steuerumschlag, mit dem ein Chatgeheimnis zu den Geräten reist. */
 const DM_GEHEIMNIS_TYP = 'dm_secret'
+/**
+ * Ein eigenes Gerät fragt seine Geschwister nach dem Chatgeheimnis.
+ *
+ * Der Weg ist nötig, weil ein neu gekoppeltes Gerät das Geheimnis weder
+ * erzeugen noch aus der Chat-Mailbox holen kann: es kennt die neue Mailbox
+ * nicht und liest nur die alte. Ohne diese Nachfrage bliebe es für immer auf
+ * der alten, während jedes andere Gerät ausschließlich in die neue schreibt.
+ */
+const DM_ANFRAGE_TYP = 'dm_secret_request'
 
 /**
  * Wer ein Chatgeheimnis erzeugen darf: das **kleinere Konto**.
@@ -957,6 +967,108 @@ async function verteileDmGeheimnis(
     /* nachholbar */
   }
   return { gegenstelle, eigene }
+}
+
+/**
+ * Wann dieses Gerät zuletzt nach einem Chatgeheimnis gefragt hat, je Peer.
+ *
+ * Die Nachfrage steht im Lesepfad und läuft im Fünf-Sekunden-Takt. Ohne
+ * Drosselung schickte ein Gerät, das noch keines hat, alle fünf Sekunden einen
+ * Umschlag an jedes Geschwister — und die Mailbox füllte sich mit Anfragen.
+ */
+const dmGefragt = new Map<string, number>()
+const DM_ANFRAGE_ABSTAND_MS = 60_000
+
+/**
+ * Bittet die eigenen Zweitgeräte um das Chatgeheimnis eines Direktchats.
+ *
+ * Wird nur gerufen, wenn dieses Gerät beim Lesen merkt, dass es keines hat
+ * (`dmZiele` fällt dann auf die alte, abgeleitete Mailbox zurück). Die Antwort
+ * kommt als gewöhnliche Schlüsselzustellung in der Geräte-Mailbox an; dieses
+ * Gerät liest sie beim nächsten Durchlauf. Die Gegenseite sieht davon nichts —
+ * die Anfrage geht ausschließlich an das eigene Konto.
+ */
+export async function fordereDmGeheimnis(eigeneId: number, peerId: number): Promise<boolean> {
+  if (!Number.isInteger(eigeneId) || eigeneId <= 0) return false
+  if (!Number.isInteger(peerId) || peerId <= 0 || peerId === eigeneId) return false
+  try {
+    if (await ablage.liesDmGeheimnis(peerId)) return false
+  } catch {
+    return false
+  }
+  const jetzt = Date.now()
+  // Je Konto und Peer: ein Kontowechsel im selben Tab darf die Nachfrage des
+  // vorigen Kontos nicht für eine Minute unterdrücken.
+  const marke = `${eigeneId}:${peerId}`
+  if (jetzt - (dmGefragt.get(marke) ?? 0) < DM_ANFRAGE_ABSTAND_MS) return false
+  dmGefragt.set(marke, jetzt)
+
+  try {
+    const meins = await eigenesGeraet()
+    const nutzlast = await signiereNutzlast(await deriveBlindMailboxId(eigeneId, peerId), eigeneId, {
+      typ: DM_ANFRAGE_TYP,
+      v: 1,
+      peerId,
+      eigeneId,
+      geraet: meins.kennung,
+    })
+    const kontext: GruppenKontext = {
+      groupId: 0,
+      blindMailboxId: '',
+      eigeneId,
+      mitglieder: [],
+      istEigentuemer: false,
+    }
+    await anJedesGeraet(kontext, [eigeneId], JSON.stringify(nutzlast), DM_ANFRAGE_TYP)
+    return true
+  } catch {
+    // Kein Netz oder kein Geschwistergerät. Der nächste Versuch nach der Frist.
+    dmGefragt.delete(marke)
+    return false
+  }
+}
+
+/**
+ * Beantwortet eine solche Anfrage — nur mit dem **aktuellen** Geheimnis, nur
+ * an das genannte eigene Gerät, und nur wenn es im Verzeichnis steht.
+ *
+ * Die Prüfung ist dieselbe wie beim Empfang: Beglaubigung gegen die
+ * abgeleitete Gesprächskennung, Downgrade-Schranke für Konten mit
+ * Signaturschlüssel, und der Absender muss das eigene Konto sein. Ein
+ * untergeschobener Umschlag (jeder kennt den öffentlichen Geräteschlüssel)
+ * könnte sonst ein fremdes Gerät mit einem erfundenen Geheimnis versorgen.
+ */
+async function beantworteDmAnfrage(eigeneId: number, roh: Record<string, unknown>): Promise<boolean> {
+  const peerId = Number(roh.peerId)
+  const geraet = typeof roh.geraet === 'string' ? roh.geraet : ''
+  if (!Number.isInteger(peerId) || peerId <= 0 || peerId === eigeneId || !geraet) return false
+
+  const pruefung = await pruefeNutzlast(await deriveBlindMailboxId(eigeneId, peerId), roh)
+  if (pruefung.art === 'gefaelscht') return false
+  if (pruefung.art === 'geprueft' && Number(pruefung.vonKonto) !== Number(eigeneId)) return false
+  if (pruefung.art === 'unsigniert' && (await kontoNutztSignaturen(eigeneId))) return false
+
+  const eintrag = await ablage.liesDmGeheimnis(peerId)
+  if (!eintrag?.geheimnis) return false
+
+  const bekannt = await geraeteVon(eigeneId).catch(() => [])
+  if (!bekannt.some((g) => g.device_id === geraet)) return false
+
+  const darfSelbst = darfDmGeheimnisErzeugen(eigeneId, peerId)
+  const beleg = darfSelbst ? undefined : eintrag.beleg
+  // Wer nicht erzeugen darf, kann nur den **Originalumschlag** der Gegenseite
+  // weitergeben. Selbst unterschrieben trüge er die grössere Kennung und würde
+  // beim Empfänger abgewiesen.
+  if (!darfSelbst && !beleg) return false
+
+  const { eigene } = await verteileDmGeheimnis(eigeneId, peerId, eintrag.geheimnis, {
+    nurEigene: [geraet],
+    beleg,
+  })
+  if (eigene.length > 0) {
+    await ablage.merkeDmVerteilung(peerId, eintrag.verteiltAm ?? new Date().toISOString(), eigene)
+  }
+  return eigene.length > 0
 }
 
 /**
@@ -1907,16 +2019,51 @@ export async function fordereGruppenSchluessel(
 /**
  * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
  *
- * Nur im Arbeitsspeicher. Nach einem Neuladen wird einmal alles gelesen — das
- * kostet einen Durchlauf und ist der Preis dafür, nichts zu verpassen. Je
- * Konto getrennt, damit ein Kontowechsel im selben Tab nicht den Stand des
- * vorigen erbt und dessen Umschläge überspringt.
+ * **Auf der Platte, nicht nur im Arbeitsspeicher.** Bis 10/2026 fiel der Stand
+ * bei jedem Neuladen auf 0 zurück. Das war nicht bloß eine Wiederholung: der
+ * Server gibt höchstens 200 Umschläge je Abruf heraus, und wer die ältesten
+ * 200 schon verarbeitet hat, bekam beim nächsten Start wieder genau die und
+ * damit nie die Schlüsselzustellung, die inzwischen dahinter lag. Ein Gerät,
+ * das eine Weile geschlossen war, blieb so ohne Gruppenschlüssel und ohne
+ * Chatgeheimnis.
+ *
+ * Die Ablage ist kontogebunden (`offlineAblage`); ein Kontowechsel im selben
+ * Tab erbt den Stand des vorigen nicht. Der Wert ist keine geheime Nachricht,
+ * sondern eine Umschlagkennung — er verrät nur, wie weit dieses Konto gelesen
+ * hat.
  */
 const geraeteStand = new Map<number, number>()
 
-/** Vergisst den Lesestand und Antwortsperren. Gehört zum Abmelden. */
+function standLesen(eigeneId: number): number {
+  const imSpeicher = geraeteStand.get(eigeneId) ?? 0
+  const roh = Number(getStorageItem(MESSENGER_KEYS.GERAETE_STAND) ?? 0)
+  // **Immer der höhere Stand.** Ein zweiter Tab darf den Cursor nicht
+  // zurücksetzen, nur weil er selbst noch nicht so weit gelesen hat. Sonst
+  // überspränge der nächste Start genau die Umschläge, die der andere Tab
+  // schon verarbeitet hat — und der eigene Cursor fiele hinter sie zurück.
+  const stand = Math.max(imSpeicher, Number.isFinite(roh) && roh > 0 ? roh : 0)
+  geraeteStand.set(eigeneId, stand)
+  return stand
+}
+
+function standMerken(eigeneId: number, stand: number): void {
+  if (!Number.isFinite(stand) || stand <= 0) return
+  if (stand <= standLesen(eigeneId)) return
+  geraeteStand.set(eigeneId, stand)
+  setStorageItem(MESSENGER_KEYS.GERAETE_STAND, String(stand))
+}
+
+/**
+ * Vergisst den Lesestand im Arbeitsspeicher und die Antwortsperren.
+ *
+ * Die **Ablage** bleibt: der Stand ist der Fortschritt dieses Kontos und soll
+ * ein Neuladen überleben. Beim Abmelden fällt er mit der ganzen
+ * kontogebundenen Ablage (`leereOfflineAblage`). Wer den Messenger nur
+ * zurücksetzt, ruft beides.
+ */
 export function leereGeraeteStand(): void {
   geraeteStand.clear()
+  dmGefragt.clear()
   leereAntwortSperren()
 }
 
@@ -1945,15 +2092,19 @@ export function leereGeraeteStand(): void {
 export async function holeGeraeteSteuerung(
   eigeneId: number,
   entsiegle: (umschlag: string) => Promise<string>,
+  empfangeSteuerung?: (klartext: string, env: { id: number; created_at: string }) => void,
 ): Promise<number> {
   if (!Number.isInteger(eigeneId) || eigeneId <= 0) return 0
 
   const mid = await deriveUserDeviceMailboxId(eigeneId)
-  const seit = geraeteStand.get(eigeneId) ?? 0
+  const seit = standLesen(eigeneId)
 
-  let umschlaege: { id: number; ciphertext_envelope: string }[]
+  let umschlaege: { id: number; ciphertext_envelope: string; created_at: string }[]
   try {
-    umschlaege = await fetchE2eeEnvelopes(mid, seit)
+    // **Alle Seiten, nicht nur die erste.** Das Limit von 200 lag vorher genau
+    // zwischen dem Gerät und seinem Schlüssel. `since_id` ist der zuletzt
+    // vollständig gelesene Stand aus der Ablage, nicht 0 nach jedem Neustart.
+    umschlaege = await fetchAlleE2eeEnvelopes(mid, seit)
   } catch {
     // Kein Netz oder ein Server, der diese Mailbox nicht kennt. Der nächste
     // Durchlauf holt es nach; der Stand bleibt stehen.
@@ -1961,63 +2112,117 @@ export async function holeGeraeteSteuerung(
   }
 
   let verarbeitet = 0
+  // Ein Schreibvorgang je Durchlauf, nicht je Umschlag: die Ablage ist
+  // localStorage, und ein Schwung von zweihundert Schreibern hielte den
+  // Lesepfad an. Was zählt, ist der höchste **verarbeitete** Umschlag.
+  let stand = seit
+  // Ab dem ersten unerwarteten Fehler bleibt der Stand davor stehen. Alles
+  // danach wird beim nächsten Durchlauf wiederholt — die Zustellungen sind
+  // idempotent, und ein Überspringen wäre der einzige wirkliche Verlust.
+  let angehalten = false
   for (const env of umschlaege) {
-    if (env.id > (geraeteStand.get(eigeneId) ?? 0)) geraeteStand.set(eigeneId, env.id)
-    if (!env.ciphertext_envelope.startsWith(E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix)) continue
-
-    let klartext: string
     try {
-      klartext = await entsiegle(env.ciphertext_envelope)
-    } catch {
-      continue // Für ein anderes Gerät desselben Kontos.
-    }
-
-    let roh: Record<string, unknown>
-    try {
-      const geparst = JSON.parse(klartext)
-      if (!geparst || typeof geparst !== 'object') continue
-      roh = geparst as Record<string, unknown>
-    } catch {
-      continue // Kein JSON — gehört einem anderen Nutzer dieser Mailbox
-      // (Notizen, Kalender) und nicht hierher.
-    }
-
-    // Ein Chatgeheimnis kennt keine Gruppe. Es muss vor der `groupId`-Prüfung
-    // abbiegen, sonst fiele es durch — der Fehler wäre stumm und der
-    // Direktchat bliebe für immer auf der alten Mailbox.
-    if (roh.typ === DM_GEHEIMNIS_TYP) {
-      try {
-        if (await nimmDmGeheimnis(eigeneId, roh)) verarbeitet += 1
-      } catch {
-        // Wie unten: eine Zustellung hält die übrigen nicht auf.
+      if (!env.ciphertext_envelope.startsWith(E2EE_HYBRID_ENVELOPE_SPEC.currentPrefix)) {
+        if (!angehalten) stand = env.id
+        continue
       }
-      continue
-    }
 
-    const groupId = Number(roh.groupId)
-    const mitglieder = normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : [])
-    if (!Number.isInteger(groupId) || groupId <= 0) continue
+      let klartext: string
+      try {
+        klartext = await entsiegle(env.ciphertext_envelope)
+      } catch {
+        // Für ein anderes Gerät desselben Kontos.
+        if (!angehalten) stand = env.id
+        continue
+      }
 
-    if (!mitglieder.includes(eigeneId)) mitglieder.push(eigeneId)
-    const kontext: GruppenKontext = {
-      groupId,
-      blindMailboxId: await deriveGroupBlindMailboxId(groupId),
-      eigeneId,
-      mitglieder,
-      // Aus einem eingehenden Umschlag wird niemand Eigentümer. Das Flag
-      // entscheidet allein, ob dieses Gerät ein Geheimnis *erzeugen* darf —
-      // und das darf es beim Empfangen unter keinen Umständen.
-      istEigentuemer: false,
-    }
+      let roh: Record<string, unknown>
+      try {
+        const geparst = JSON.parse(klartext)
+        if (!geparst || typeof geparst !== 'object') {
+          if (!angehalten) stand = env.id
+          continue
+        }
+        roh = geparst as Record<string, unknown>
+      } catch {
+        // Kein JSON — gehört einem anderen Nutzer dieser Mailbox
+        // (Notizen, Kalender) und nicht hierher.
+        if (!angehalten) stand = env.id
+        continue
+      }
 
-    try {
-      const ergebnis = await verarbeiteGruppenSteuerung(kontext, klartext)
-      if (ergebnis.art !== 'keine') verarbeitet += 1
+      // Ein Geschwistergerät hat keines und bittet darum. Die Antwort geht
+      // zurück in dieselbe Mailbox, an genau das fragende Gerät.
+      if (roh.typ === DM_ANFRAGE_TYP) {
+        try {
+          if (await beantworteDmAnfrage(eigeneId, roh)) verarbeitet += 1
+        } catch {
+          // Eine Anfrage hält die übrigen Zustellungen nicht auf.
+        }
+        if (!angehalten) stand = env.id
+        continue
+      }
+
+      // Ein Chatgeheimnis kennt keine Gruppe. Es muss vor der `groupId`-Prüfung
+      // abbiegen, sonst fiele es durch — der Fehler wäre stumm und der
+      // Direktchat bliebe für immer auf der alten Mailbox.
+      if (roh.typ === DM_GEHEIMNIS_TYP) {
+        try {
+          if (await nimmDmGeheimnis(eigeneId, roh)) verarbeitet += 1
+        } catch {
+          // Wie unten: eine Zustellung hält die übrigen nicht auf.
+        }
+        if (!angehalten) stand = env.id
+        continue
+      }
+
+      const groupId = Number(roh.groupId)
+      const mitglieder = normalisiereMitglieder(Array.isArray(roh.mitglieder) ? roh.mitglieder : [])
+      if (!Number.isInteger(groupId) || groupId <= 0) {
+        // **Kein Gruppenschlüssel, aber vielleicht eine Wirkung aus einem
+        // anderen eigenen Gerät.** Quittung, Bearbeitung, Löschung, Reaktion
+        // und Verfallsfrist reisen verschlüsselt hierher; der Aufrufer
+        // entscheidet an `mailbox`, ob sie zu seinem offenen Gespräch gehören.
+        // Der Umschlag selbst bleibt für ihn ungeöffnet, wenn er ein anderes
+        // Ziel trägt.
+        if (empfangeSteuerung && typeof roh.type === 'string') {
+          try {
+            empfangeSteuerung(klartext, { id: env.id, created_at: env.created_at })
+          } catch {
+            // Eine fehlerhafte Wirkung hält die übrigen nicht auf.
+          }
+        }
+        if (!angehalten) stand = env.id
+        continue
+      }
+
+      if (!mitglieder.includes(eigeneId)) mitglieder.push(eigeneId)
+      const kontext: GruppenKontext = {
+        groupId,
+        blindMailboxId: await deriveGroupBlindMailboxId(groupId),
+        eigeneId,
+        mitglieder,
+        // Aus einem eingehenden Umschlag wird niemand Eigentümer. Das Flag
+        // entscheidet allein, ob dieses Gerät ein Geheimnis *erzeugen* darf —
+        // und das darf es beim Empfangen unter keinen Umständen.
+        istEigentuemer: false,
+      }
+
+      try {
+        const ergebnis = await verarbeiteGruppenSteuerung(kontext, klartext)
+        if (ergebnis.art !== 'keine') verarbeitet += 1
+      } catch {
+        // Eine Zustellung, die sich nicht verarbeiten lässt, hält die übrigen
+        // nicht auf.
+      }
+      if (!angehalten) stand = env.id
     } catch {
-      // Eine Zustellung, die sich nicht verarbeiten lässt, hält die übrigen
-      // nicht auf.
+      // Auch ein unerwarteter Fehler bei einem Umschlag darf die folgenden
+      // nicht anhalten. Der Stand bleibt für diesen stehen und holt ihn nach.
+      angehalten = true
     }
   }
+  standMerken(eigeneId, stand)
   return verarbeitet
 }
 

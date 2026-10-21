@@ -720,12 +720,49 @@ export async function syncE2eeMailboxes(sinceId = 0): Promise<E2eeMailboxSyncRes
 
 export async function fetchE2eeEnvelopes(
   blindMailboxId: string,
-  sinceId?: number
+  sinceId?: number,
+  limit?: number,
 ): Promise<BlindEnvelopeItem[]> {
-  const query = sinceId ? `?since_id=${sinceId}` : ''
+  const params = new URLSearchParams()
+  if (sinceId) params.set('since_id', String(sinceId))
+  if (limit) params.set('limit', String(limit))
+  const query = params.size > 0 ? `?${params.toString()}` : ''
   return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`, {
     headers: nachweisKopf(blindMailboxId),
   })
+}
+
+/**
+ * Liest eine Mailbox vollständig, Seite für Seite.
+ *
+ * Der Server gibt höchstens 200 Umschläge je Abruf heraus. Wer nur einmal
+ * fragt, bekommt die **ältesten** 200 und verliert alles danach: bei der
+ * eigenen Geräte-Mailbox sind das die Schlüsselzustellungen, bei einem Chat
+ * die Nachrichten. Bis 10/2026 las der Messenger genau so, und ein Gerät,
+ * das eine Weile nicht offen war, sah den Rest nie.
+ *
+ * `since_id` wandert auf die höchste gelesene Kennung, nie auf die Anzahl:
+ * Umschläge werden auch gelöscht, und eine Zählung überspränge dann welche.
+ * Bricht die Verbindung mitten in der zweiten Seite ab, bleibt die Ausnahme
+ * stehen — der nächste Durchlauf beginnt am zuletzt vollständig gelesenen
+ * Stand.
+ */
+export async function fetchAlleE2eeEnvelopes(
+  blindMailboxId: string,
+  sinceId = 0,
+): Promise<BlindEnvelopeItem[]> {
+  const SEITE = 200
+  const alle: BlindEnvelopeItem[] = []
+  let seit = sinceId
+  for (;;) {
+    const seite = await fetchE2eeEnvelopes(blindMailboxId, seit, SEITE)
+    alle.push(...seite)
+    if (seite.length < SEITE) return alle
+    const naechste = seite.reduce((hoechste, env) => Math.max(hoechste, env.id), seit)
+    // Ein Server, der dieselbe Seite wiedergibt, darf keine Schleife bauen.
+    if (naechste <= seit) return alle
+    seit = naechste
+  }
 }
 
 export async function sendTypingSignal(payload: {

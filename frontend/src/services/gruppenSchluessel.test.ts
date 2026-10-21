@@ -89,6 +89,8 @@ interface Umschlag {
 }
 
 let mailbox: Umschlag[] = []
+/** Mit welchem `since_id` die Geräte-Mailbox abgefragt wurde. */
+const standAbrufe: number[] = []
 let naechsteId = 1
 /** Die Mitgliedschaft laut Server. `beforeEach` setzt sie je Test. */
 let serverMitglieder: number[] = []
@@ -125,6 +127,11 @@ vi.mock('@/api/social', () => ({
   },
   fetchE2eeEnvelopes: async (mid: string, seit = 0) =>
     mailbox.filter((u) => u.mailboxId === mid && u.id > seit),
+  // Der Lesepfad holt die Geräte-Mailbox vollständig, Seite für Seite.
+  fetchAlleE2eeEnvelopes: async (mid: string, seit = 0) => {
+    standAbrufe.push(seit)
+    return mailbox.filter((u) => u.mailboxId === mid && u.id > seit)
+  },
   // Die Mitgliederliste, wie der Server sie sieht. Absichtlich getrennt von der
   // Liste, die der Aufrufer im Kontext mitgibt: genau dieses Auseinanderlaufen
   // ist der Fall, den ein Nachzügler auslöst.
@@ -141,6 +148,7 @@ import {
   GRUPPE_PREFIX,
   abonniereBekannteGespraeche,
   dmZiele,
+  fordereDmGeheimnis,
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
   fordereGruppenSchluessel,
@@ -165,6 +173,16 @@ import {
 import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
 import { signiereNutzlast } from './nutzlastSignatur'
 import { leereMailboxAbos, offeneMailboxAbos } from './mailboxAbo'
+import { MESSENGER_KEYS, getStorageItem, leereOfflineAblage } from '@/lib/offlineAblage'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+
+// Der Geräte-Cursor liegt kontogebunden in der Ablage. Zwischen zwei Tests
+// darf weder der Stand noch ein Konto stehenbleiben, sonst überspringt der
+// nächste Test genau die Umschläge, die er prüfen will.
+beforeEach(() => {
+  setzeAngemeldetesKonto(null)
+  leereOfflineAblage()
+})
 
 const ALICE = 1
 const BOB = 2
@@ -392,6 +410,7 @@ describe('gruppenSchluessel', () => {
     serverMitglieder = [...alle]
     relaisKaputt = false
     registrierungen.length = 0
+    standAbrufe.length = 0
     leereGeraeteStand()
   })
 
@@ -1880,6 +1899,81 @@ describe('Chatgeheimnis des Direktchats', () => {
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(2)
     expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
     expect(await bob.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
+  })
+
+  it('merkt sich den Lesestand der Geräte-Mailbox über einen Neustart', async () => {
+    // Bis 10/2026 lag der Cursor nur im Arbeitsspeicher. Nach jedem Öffnen las
+    // das Gerät wieder die ältesten 200 Umschläge und bekam die Schlüssel
+    // dahinter nie zu sehen.
+    setzeAngemeldetesKonto(BOB)
+    const alice = geraet(ALICE, 'alice-laptop')
+    const bob = geraet(BOB, 'bob-handy')
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    const stand = Number(getStorageItem(MESSENGER_KEYS.GERAETE_STAND))
+    expect(stand).toBeGreaterThan(0)
+    expect(standAbrufe.at(-1)).toBe(0)
+
+    // Neustart: nur der Arbeitsspeicher fällt, die Ablage bleibt.
+    leereGeraeteStand()
+    standAbrufe.length = 0
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+    expect(standAbrufe).toEqual([stand])
+  })
+
+  it('holt ein fehlendes Chatgeheimnis bei den eigenen Geschwistern nach', async () => {
+    // Ein frisch gekoppeltes Gerät kennt die neue Mailbox nicht. Ohne Nachfrage
+    // bliebe es für immer auf der alten, während die anderen längst in die
+    // neue schreiben.
+    const alice = geraet(ALICE, 'alice-laptop')
+    const bobHandy = geraet(BOB, 'bob-handy')
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(await bobHandy.ablage.liesDmGeheimnis(ALICE)).toBeNull()
+
+    // Bobs Zweitgerät kommt später dazu und hat das Geheimnis nie gesehen.
+    const bobTablet = geraet(BOB, 'bob-tablet')
+    aktiviere(bobTablet)
+    expect(await fordereDmGeheimnis(BOB, ALICE)).toBe(true)
+
+    // Das Geschwister hat es und antwortet genau diesem Gerät.
+    aktiviere(bobHandy)
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bobHandy))
+
+    aktiviere(bobTablet)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bobTablet))).toBe(1)
+    expect(await bobTablet.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
+  })
+
+  it('reicht Wirkungen aus der Geräte-Mailbox an den Aufrufer weiter', async () => {
+    // Quittung, Bearbeitung, Löschung und Reaktion der eigenen Zweitgeräte
+    // reisen hierher. Der Aufrufer entscheidet an `mailbox`, ob sie zu seinem
+    // offenen Gespräch gehören.
+    const bob = geraet(BOB, 'bob-handy')
+    const payload = JSON.stringify({
+      type: 'reaction',
+      mailbox: 'dm:1:2',
+      actor_id: BOB,
+      emoji: '👍',
+    })
+    mailbox.push({
+      id: naechsteId++,
+      mailboxId: `dev:${BOB}`,
+      ciphertext_envelope: `${HYBRID}${bob.oeffentlich}.${Buffer.from(payload, 'utf-8').toString('base64')}`,
+      client_uuid: 'ctrl-1#own0',
+      control_type: 'reaction',
+    })
+
+    aktiviere(bob)
+    const empfangen: { text: string; id: number }[] = []
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (text, env) => {
+      empfangen.push({ text, id: env.id })
+    })
+
+    expect(empfangen).toEqual([{ text: payload, id: 1 }])
   })
 })
 
