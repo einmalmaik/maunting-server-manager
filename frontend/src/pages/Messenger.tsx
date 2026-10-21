@@ -37,7 +37,6 @@ import {
   AtSign,
 } from 'lucide-react'
 import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
-import { starteGruppenanruf } from '@/api/calls'
 import { apiUrl } from '@/config/api'
 import {
   CircularVideoNoteRecorder,
@@ -57,15 +56,11 @@ import {
 import {
   type ChatGroupItem,
   type ChatStoryItem,
-  createGroup,
   joinGroupByInvite,
   sendFriendRequest,
-  leaveGroup,
-  deleteGroup,
   relayE2eeEnvelope,
   sendTypingSignal,
   getGroupInviteInfo,
-  setzeEinladungsKarte,
 } from '@/api/social'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
@@ -81,6 +76,7 @@ import { useChatSuche } from '@/hooks/useChatSuche'
 import { useEntwuerfe } from '@/hooks/useEntwuerfe'
 import { useMessengerKontakte } from '@/pages/messenger/useMessengerKontakte'
 import { useMessengerAuswahl } from '@/pages/messenger/useMessengerAuswahl'
+import { useGruppenAktionen } from '@/hooks/useGruppenAktionen'
 import { useMessengerSync } from '@/hooks/useMessengerSync'
 import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
@@ -99,7 +95,6 @@ import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import {
   deriveBlindMailboxId,
-  deriveGroupBlindMailboxId,
   scrubPlaintextStorage,
 } from '@/services/e2eeCrypto'
 import {
@@ -121,25 +116,13 @@ import {
   onSchluesselWarnung,
 } from '@/services/e2eeGeraet'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
+import { abonniereBekannteGespraeche } from '@/services/gruppenSchluessel'
 import {
-  abonniereBekannteGespraeche,
-  gruppenGeheimnis,
-  verwirfGruppenSchluessel,
-} from '@/services/gruppenSchluessel'
-import {
-  baueEinladungsKarte,
-  einladungsschluesselAus,
   lieseEinladungsKarte,
-  logoAlsDatenUrl,
-  mitSchluessel,
   schluesselAusLink,
   type EinladungsInhalt,
 } from '@/services/einladungsKarte'
-import {
-  merkeGruppenName,
-  sichereGruppenAnsicht,
-  vergissGruppenName,
-} from '@/services/gruppenName'
+import { merkeGruppenName } from '@/services/gruppenName'
 import {
   gespraechsPartner,
   merkeGespraech,
@@ -197,7 +180,6 @@ import { baueNutzlast, ladeAnhaengeHoch, stelleZu } from '@/services/nachrichtVe
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
 import { FunkenWache } from '@/components/social/FunkenWache'
 import { FunkenAbzeichen } from '@/components/social/FunkenBadge'
-import { FunkenRettungDialog } from '@/components/social/modals/FunkenRettungDialog'
 import {
   baueAugenblickNutzlast,
   baueWiederherstellungNutzlast,
@@ -239,20 +221,13 @@ class AugenblickNichtHochgeladenError extends Error {
   }
 }
 import { compressImageFile } from '@/lib/imageCompression'
-import { CameraSnapshotModal } from '@/components/social/CameraSnapshotModal'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
 import { siegelAktiv } from '@/services/lokaleVersiegelung'
 import { useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
-import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
-import { CreateGroupDialog } from '@/components/social/modals/CreateGroupDialog'
 import { NotePickerDialog } from '@/components/social/modals/NotePickerDialog'
 import { CalendarPickerDialog } from '@/components/social/modals/CalendarPickerDialog'
-import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
-import { ChatMuteDialog } from '@/components/social/modals/ChatMuteDialog'
-import { SafetyNumberDialog } from '@/components/social/modals/SafetyNumberDialog'
-import { BlockConfirmDialog } from '@/components/social/modals/BlockConfirmDialog'
 import { ChatEntfernenDialog } from '@/components/social/modals/ChatEntfernenDialog'
 import { MessengerModeNav, MessengerBottomNav } from '@/components/social/sidebar/MessengerModeNav'
 import { ContactFilterTabs } from '@/components/social/sidebar/ContactFilterTabs'
@@ -270,7 +245,8 @@ import { StickerEmojiPicker, type PickerReiter } from '@/components/social/chat/
 import { AttachMenu } from '@/components/social/chat/AttachMenu'
 import { MentionSuggestions, ChatReplyBar } from '@/components/social/chat/ChatComposerTop'
 import { ComposerSendActions } from '@/components/social/chat/ComposerSendActions'
-import { ChatHintergrund, ChatHintergrundDialog } from '@/features/chatHintergrund'
+import { ChatHintergrund } from '@/features/chatHintergrund'
+import { MessengerDialoge } from '@/components/social/modals/MessengerDialoge'
 import { useAuthStore } from '@/stores/authStore'
 import { toast } from '@/stores/toastStore'
 import { useMessengerNotificationStore, PINS_MAX } from '@/stores/messengerNotificationStore'
@@ -437,6 +413,34 @@ function MessengerSeite() {
     handleArchivieren,
   } = useMessengerAuswahl({ kontakte: contactsList, gruppen: groups, kontakteGeladen, t })
 
+  const {
+    isCreateGroupOpen,
+    setIsCreateGroupOpen,
+    groupToDelete,
+    setGroupToDelete,
+    isDeletingGroup,
+    logoLaedt,
+    gruppenLogoInputRef,
+    groupCallPermissions,
+    handleStartGroupCall,
+    handleGruppenLogo,
+    handleCreateGroup,
+    handleCopyInviteLink,
+    handleLeaveGroup,
+    handleDeleteGroup,
+    handleConfirmDeleteGroup,
+  } = useGruppenAktionen({
+    t,
+    currentUserId,
+    activeGroup,
+    setActiveGroup,
+    setActiveContact,
+    setGroups,
+    loadData,
+    gruppenTitel,
+    handleZurueckZurListe,
+  })
+
   // Notification & Mute/Block Store
   const unreadCounts = useMessengerNotificationStore((s) => s.unreadCounts)
   const isChatMuted = useMessengerNotificationStore((s) => s.isMuted)
@@ -471,7 +475,6 @@ function MessengerSeite() {
 
   // Group Permissions & Delete Modal State
   const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
-  const [groupToDelete, setGroupToDelete] = useState<ChatGroupItem | null>(null)
   const [chatEntfernenOffen, setChatEntfernenOffen] = useState(false)
   /**
    * Die `?userId=`, für die schon geprüft wurde.
@@ -479,7 +482,6 @@ function MessengerSeite() {
    * Die Kontaktliste kommt alle 15 Sekunden neu; ohne diesen Merker fragte die
    * Seite für einen unbekannten Kontakt bei jedem Takt erneut nach dem Profil.
    */
-  const [isDeletingGroup, setIsDeletingGroup] = useState(false)
 
   // Camera & Attachments
   const [isCameraModalOpen, setIsCameraModalOpen] = useState(false)
@@ -539,7 +541,6 @@ function MessengerSeite() {
   const [stickerTab, setStickerTab] = useState<PickerReiter>('stickers')
 
   // Group creation modal
-  const [isCreateGroupOpen, setIsCreateGroupOpen] = useState(false)
 
   const [isVideoNoteRecording, setIsVideoNoteRecording] = useState(false)
   const tonWiedergabe = useSprachwiedergabe()
@@ -927,69 +928,6 @@ function MessengerSeite() {
       name: gruppe.name ?? karte.name ?? null,
       description: gruppe.description ?? karte.beschreibung ?? null,
       avatar_url: gruppe.avatar_url ?? karte.logo ?? null,
-    }
-  }
-
-  /** Gruppenlogo: Auswahl, Prüfung, Ablage im verschlüsselten Gruppenblock. */
-  const gruppenLogoInputRef = useRef<HTMLInputElement | null>(null)
-  const [logoLaedt, setLogoLaedt] = useState(false)
-
-  /*
-   * Das Logo geht nicht mehr auf die Platte des Servers.
-   *
-   * Bis Stufe 6 lud `POST /social/groups/{id}/avatar` die Datei hoch und der
-   * Server lieferte sie unter einer rate-URL an jeden aus, der sie kannte —
-   * ohne Anmeldung. Ein Bild sagt über eine Gruppe oft mehr als ihr Name.
-   *
-   * Jetzt schrumpft `logoAlsDatenUrl` das Bild auf 128 Pixel und macht eine
-   * Data-URL daraus; die landet im verschlüsselten Gruppenblock und im
-   * versiegelten örtlichen Speicher. Der Grössenriegel darunter ist damit kein
-   * Upload-Limit mehr, sondern der Schutz davor, ein 5-MB-Bild überhaupt erst
-   * zu dekodieren.
-   */
-  const handleGruppenLogo = async (datei: File | undefined) => {
-    if (!datei || !activeGroup || !currentUserId) return
-    if (!/^image\/(jpeg|png|webp|gif)$/.test(datei.type)) {
-      toast.error(t('messenger.logoBadType'))
-      return
-    }
-    if (datei.size > 5 * 1024 * 1024) {
-      toast.error(t('messenger.logoTooLarge'))
-      return
-    }
-    setLogoLaedt(true)
-    try {
-      const logo = await logoAlsDatenUrl(datei)
-      if (!logo) {
-        toast.error(t('messenger.logoFailed'))
-        return
-      }
-      const gruppenId = activeGroup.id
-      const mailbox = await deriveGroupBlindMailboxId(gruppenId)
-      const gespeichert = await sichereGruppenAnsicht(
-        {
-          groupId: gruppenId,
-          blindMailboxId: mailbox,
-          eigeneId: currentUserId,
-          mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
-          istEigentuemer: activeGroup.role === 'owner',
-        },
-        { logo },
-      )
-      // Anzeigen auch dann, wenn der Block nicht zu schreiben war: der
-      // örtliche Speicher hat das Logo (`sichereGruppenAnsicht` merkt es
-      // immer), und dieses Gerät zeigt es ab jetzt.
-      setActiveGroup((aktuell) =>
-        aktuell?.id === gruppenId ? { ...aktuell, avatar_url: logo } : aktuell,
-      )
-      setGroups((vorher) =>
-        vorher.map((g) => (g.id === gruppenId ? { ...g, avatar_url: logo } : g)),
-      )
-      toast.success(gespeichert ? t('messenger.logoUpdated') : t('messenger.logoLocalOnly'))
-    } catch {
-      toast.error(t('messenger.logoFailed'))
-    } finally {
-      setLogoLaedt(false)
     }
   }
 
@@ -3024,157 +2962,6 @@ function MessengerSeite() {
     }
   }
 
-  // Handle Create Group. `true` heisst angelegt; dann leert der Dialog sein Formular.
-  const handleCreateGroup = async (name: string, beschreibung: string | null): Promise<boolean> => {
-    try {
-      // Der Server bekommt nur die Bitte, eine Gruppe anzulegen. Name und
-      // Beschreibung gehen ihn nichts an.
-      const roh = await createGroup()
-
-      /*
-       * Der Name geht zwei Wege, und beide braucht es.
-       *
-       * `merkeGruppenName` schreibt ihn sofort in den versiegelten örtlichen
-       * Speicher — damit steht er in der Liste, bevor irgendein Netzaufruf
-       * zurück ist. `sichereGruppenAnsicht` legt ihn zusätzlich in den
-       * verschlüsselten Gruppenblock, damit ihn auch das nächste Gerät
-       * bekommt.
-       *
-       * Der Block kann hier noch scheitern: eine frisch angelegte Gruppe hat
-       * oft noch kein Geheimnis, das entsteht erst beim ersten Senden. Das ist
-       * kein Grund, das Anlegen abzubrechen — der örtliche Speicher trägt den
-       * Namen, und `sichereGruppenAnsicht` läuft beim nächsten Umbenennen
-       * erneut.
-       */
-      await merkeGruppenName(roh.id, { name, beschreibung }).catch(() => {})
-      const mailbox = await deriveGroupBlindMailboxId(roh.id).catch(() => null)
-      if (mailbox && currentUserId) {
-        void sichereGruppenAnsicht(
-          {
-            groupId: roh.id,
-            blindMailboxId: mailbox,
-            eigeneId: currentUserId,
-            mitglieder: [currentUserId],
-            istEigentuemer: true,
-          },
-          { name, beschreibung },
-        ).catch(() => false)
-      }
-
-      const newGroup: ChatGroupItem = { ...roh, name, description: beschreibung }
-      toast.success(t('messenger.groupCreated', { name }))
-      setIsCreateGroupOpen(false)
-      await loadData()
-      setActiveGroup(newGroup)
-      setActiveContact(null)
-      return true
-    } catch {
-      toast.error(t('messenger.groupCreateFailed'))
-      return false
-    }
-  }
-
-  /**
-   * Den Einladungslink kopieren — wenn es einen gibt.
-   *
-   * `invite_code` ist `null`, sobald das Backend dieses Mitglied nicht als
-   * einladungsberechtigt ansieht. Das ist die eigentliche Durchsetzung von
-   * `invite_members`: wer den Code nicht bekommt, kann ihn nicht weitergeben.
-   * Der Knopf erscheint dann gar nicht erst; diese Zeile fängt den Fall ab,
-   * dass eine Liste noch aus einem älteren Abruf stammt.
-   */
-  const handleCopyInviteLink = async (group: ChatGroupItem) => {
-    if (!group.invite_code) {
-      toast.error(t('messenger.inviteNoRight'))
-      return
-    }
-    const url = `${window.location.origin}/chat/join/${group.invite_code}`
-
-    /*
-     * Die Vorschaukarte entsteht hier — beim Teilen, nicht beim Anlegen.
-     *
-     * Zwei Gründe. Erstens trägt sie dann genau den Stand, den der Absender
-     * gerade sieht; eine beim Anlegen erzeugte Karte zeigte den Namen von
-     * vorgestern. Zweitens hat die Gruppe beim Anlegen oft noch gar kein
-     * Geheimnis: das entsteht, wenn der Eigentümer zum ersten Mal sendet.
-     *
-     * Ohne Geheimnis bleibt der Link, was er war — ohne Raute und ohne
-     * Vorschau. Seit Stufe 6 gibt es keinen Klartext mehr, auf den er dafür
-     * zurückfallen könnte; der Eingeladene sieht dann „Verschlüsselte
-     * Einladung" und die Mitgliederzahl, sonst nichts.
-     */
-    let fertig = url
-    try {
-      const geheimnis = await gruppenGeheimnis(group.id)
-      if (geheimnis) {
-        const karte = await baueEinladungsKarte(geheimnis, group.invite_code, {
-          name: group.name,
-          beschreibung: group.description ?? null,
-          // `avatar_url` trägt seit Stufe 6 bereits die Data-URL aus dem
-          // Gruppenblock — nichts mehr nachzuladen. Der Prüfausdruck fängt
-          // Altbestände ab, die noch eine Serveradresse enthalten: die wäre
-          // für den Eingeladenen ohnehin nicht abrufbar.
-          logo:
-            group.avatar_url && group.avatar_url.startsWith('data:image/')
-              ? group.avatar_url
-              : null,
-        })
-        await setzeEinladungsKarte(group.id, karte)
-        fertig = mitSchluessel(url, await einladungsschluesselAus(geheimnis))
-      }
-    } catch {
-      // Eine Karte, die nicht zustande kommt, darf das Einladen nicht
-      // aufhalten. Der Link ohne Raute funktioniert; nur die Vorschau fehlt.
-    }
-
-    navigator.clipboard.writeText(fertig)
-    toast.success(t('messenger.inviteCopied'))
-  }
-
-  // Leave Group
-  const handleLeaveGroup = async (group: ChatGroupItem) => {
-    try {
-      const name = gruppenTitel(group)
-      await leaveGroup(group.id)
-      // Wer draußen ist, braucht die Schlüssel nicht mehr — und soll sie auch
-      // nicht behalten. Der Verlauf dieser Gruppe wird damit unlesbar, was
-      // genau die Zusage ist, die ein Austritt geben soll.
-      await verwirfGruppenSchluessel(group.id).catch(() => {})
-      // Und den Namen dazu: er lag versiegelt auf diesem Gerät, aber er lag
-      // da. Ein Austritt, der die Überschrift stehen lässt, ist keiner.
-      await vergissGruppenName(group.id).catch(() => {})
-      toast.success(t('messenger.groupLeft', { name }))
-      handleZurueckZurListe()
-      await loadData()
-    } catch {
-      toast.error(t('messenger.groupLeaveFailed'))
-    }
-  }
-
-  // Delete Group (triggered via Design-DNA Confirmation Dialog)
-  const handleDeleteGroup = (group: ChatGroupItem) => {
-    setGroupToDelete(group)
-  }
-
-  const handleConfirmDeleteGroup = async () => {
-    if (!groupToDelete) return
-    setIsDeletingGroup(true)
-    try {
-      const name = gruppenTitel(groupToDelete)
-      await deleteGroup(groupToDelete.id)
-      await verwirfGruppenSchluessel(groupToDelete.id).catch(() => {})
-      await vergissGruppenName(groupToDelete.id).catch(() => {})
-      toast.success(t('messenger.groupDeleted', { name }))
-      handleZurueckZurListe()
-      setGroupToDelete(null)
-      await loadData()
-    } catch {
-      toast.error(t('messenger.groupDeleteFailed'))
-    } finally {
-      setIsDeletingGroup(false)
-    }
-  }
-
   // Blockieren oder Aufheben aus dem Bestätigungsdialog, je nach heutigem Stand.
   const handleBlockConfirm = async () => {
     if (activeContact && isBlocked(activeContact.userId)) {
@@ -3299,91 +3086,6 @@ function MessengerSeite() {
     } catch {
       toast.error(t('messenger.eventSaveFailed'))
     }
-  }
-
-  /**
-   * Was in dieser Gruppe erlaubt ist, sagt das Backend.
-   *
-   * Vorher stand hier eine zweite Regel, die jedem Mitglied das Beitreten
-   * zusprach; das Backend verlangt dafür `join_group_calls` und antwortete
-   * danach mit 403. Ein Knopf, der sicher scheitert, ist schlimmer als keiner.
-   * Moderation und Freigabe hängen an der Gruppenrolle, nicht am Anrufrecht.
-   */
-  const groupCallPermissions = useMemo(() => {
-    if (!activeGroup) {
-      return {
-        canStart: false,
-        canJoin: false,
-        canShare: false,
-        canModerate: false,
-        canMute: false,
-        canKick: false,
-      }
-    }
-    return {
-      canStart: activeGroup.can_start_call === true,
-      canJoin: activeGroup.can_join_call === true,
-      canShare: activeGroup.can_share_screen === true,
-      // „Moderieren" heisst hier nur: den Raum für alle schliessen dürfen. Das
-      // hängt am Startrecht, weil genau das der Endpunkt prüft.
-      canModerate: activeGroup.can_start_call === true,
-      canMute: activeGroup.can_mute_others === true,
-      canKick: activeGroup.can_kick_from_call === true,
-    }
-  }, [activeGroup])
-
-  const handleStartGroupCall = async (joinExisting = false) => {
-    if (!activeGroup) return
-    if (joinExisting ? !groupCallPermissions.canJoin : !groupCallPermissions.canStart) {
-      toast.error(
-        joinExisting
-          ? t('messenger.noJoinCallRight')
-          : t('messenger.noStartCallRight')
-      )
-      return
-    }
-
-    // Beim Start bekommt jedes Mitglied den Raumschlüssel zugestellt. Wer
-    // später dazukommt, bekommt ihn im Raum nachgereicht.
-    const mitgliederIds = (activeGroup.members ?? []).map((member) => member.user_id)
-
-    let roomToken: string
-    try {
-      if (joinExisting) {
-        const existingToken = (activeGroup as ChatGroupItem & { room_token?: string }).room_token
-        if (!existingToken) {
-          toast.error(t('messenger.noCallRoom'))
-          return
-        }
-        roomToken = existingToken
-      } else {
-        const room = await starteGruppenanruf(activeGroup.id)
-        roomToken = room.room_token
-      }
-    } catch {
-      toast.error(
-        joinExisting
-          ? t('messenger.callOpenFailed')
-          : t('messenger.callStartFailed')
-      )
-      return
-    }
-
-    await useCallStore.getState().joinGroupCall(
-      {
-        id: activeGroup.id,
-        name: gruppenTitel(activeGroup),
-        avatarUrl: activeGroup.avatar_url ?? null,
-        canShare: groupCallPermissions.canShare,
-        canModerate: groupCallPermissions.canModerate,
-        canMute: groupCallPermissions.canMute,
-        canKick: groupCallPermissions.canKick,
-      },
-      roomToken,
-      // Nur der Startende verteilt; ein Beitretender hat den Schlüssel noch
-      // nicht und hätte nichts zu verteilen.
-      joinExisting ? undefined : mitgliederIds
-    )
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
@@ -4382,22 +4084,6 @@ function MessengerSeite() {
         aktiv={!messengerGesperrt && !!currentUserId}
       />
 
-      <FunkenRettungDialog
-        open={funkenRettung !== null}
-        onOpenChange={(offen) => {
-          if (!offen) setFunkenRettung(null)
-        }}
-        contactName={funkenRettung?.name ?? ''}
-        anzahl={funkenRettung?.anzahl ?? 0}
-        onConfirm={async () => {
-          const ziel = funkenRettung
-          setFunkenRettung(null)
-          // Gesendet wird in den offenen Chat. Hat jemand inzwischen
-          // gewechselt, lieber nichts als eine Rettung beim Falschen.
-          if (!ziel || activeContact?.userId !== ziel.partnerId) return
-          await handleSendMessage({ text: '', funkenRettung: true, antwortAuf: null })
-        }}
-      />
 
       {/* Die Wache liest Gruppen mit, die gerade nicht offen sind — sonst
           erschiene ein @-Abzeichen erst, wenn man die Gruppe ohnehin öffnet. */}
@@ -4410,11 +4096,6 @@ function MessengerSeite() {
         aktiv={!messengerGesperrt && !!currentUserId}
       />
 
-      <CreateGroupDialog
-        open={isCreateGroupOpen}
-        onOpenChange={setIsCreateGroupOpen}
-        onCreate={handleCreateGroup}
-      />
 
       <NotePickerDialog
         open={isNotePickerOpen}
@@ -4522,52 +4203,9 @@ function MessengerSeite() {
       />
 
       {/* Live Camera Snapshot Modal */}
-      <CameraSnapshotModal
-        open={isCameraModalOpen}
-        onOpenChange={(offen) => {
-          setIsCameraModalOpen(offen)
-          if (!offen) setAugenblickModus(false)
-        }}
-        titel={augenblickModus ? t('messenger.moment.take') : undefined}
-        bestaetigen={augenblickModus ? t('messenger.moment.send') : undefined}
-        nurKamera={augenblickModus}
-        mitStempel={augenblickModus}
-        onCapture={(dataUrl) => {
-          // Ein Augenblick geht sofort, ohne Umweg über die Eingabeleiste.
-          if (augenblickModus && activeContact) {
-            void handleSendMessage({
-              text: '',
-              img: { dataUrl, name: 'augenblick.jpg' },
-              augenblick: true,
-              antwortAuf: null,
-            })
-            return
-          }
-
-          // Die Kamera öffnet sich nur aus einem offenen Chat: das Foto
-          // kommt in dessen Eingabeleiste.
-          setSelectedImage({ dataUrl, name: 'kamera-aufnahme.jpg' })
-        }}
-      />
 
       {/* Group Permissions & Roles Management Modal */}
-      <GroupPermissionsModal
-        open={isGroupPermissionsOpen}
-        onOpenChange={setIsGroupPermissionsOpen}
-        group={activeGroup}
-        currentUserId={currentUserId || 0}
-        onGroupUpdated={(updatedGroup) => {
-          setActiveGroup(updatedGroup)
-          setGroups((prev) => prev.map((g) => (g.id === updatedGroup.id ? updatedGroup : g)))
-        }}
-      />
 
-      <DeleteGroupDialog
-        group={groupToDelete}
-        deleting={isDeletingGroup}
-        onCancel={() => setGroupToDelete(null)}
-        onConfirm={handleConfirmDeleteGroup}
-      />
 
       <ChatEntfernenDialog
         open={chatEntfernenOffen}
@@ -4579,33 +4217,62 @@ function MessengerSeite() {
         }}
       />
       {/* Das Hintergrundfenster — dasselbe, das der KI-Chat öffnet. */}
-      <ChatHintergrundDialog
-        bereich="messenger"
-        offen={isWallpaperModalOpen}
-        onOffenChange={setIsWallpaperModalOpen}
-      />
 
-      <ChatMuteDialog
-        open={isMuteModalOpen}
-        onOpenChange={setIsMuteModalOpen}
-        mailboxId={blindMailboxId || null}
+
+
+
+      <MessengerDialoge
+        isCreateGroupOpen={isCreateGroupOpen}
+        setIsCreateGroupOpen={setIsCreateGroupOpen}
+        onCreateGroup={handleCreateGroup}
+        funkenRettung={funkenRettung}
+        setFunkenRettung={setFunkenRettung}
+        onFunkenRettungBestaetigen={async () => {
+          const ziel = funkenRettung
+          setFunkenRettung(null)
+          if (!ziel || activeContact?.userId !== ziel.partnerId) return
+          await handleSendMessage({ text: '', funkenRettung: true, antwortAuf: null })
+        }}
+        activeContact={activeContact}
+        isCameraModalOpen={isCameraModalOpen}
+        setIsCameraModalOpen={setIsCameraModalOpen}
+        augenblickModus={augenblickModus}
+        setAugenblickModus={setAugenblickModus}
+        onCameraCapture={(dataUrl) => {
+          if (augenblickModus && activeContact) {
+            void handleSendMessage({
+              text: '',
+              img: { dataUrl, name: 'augenblick.jpg' },
+              augenblick: true,
+              antwortAuf: null,
+            })
+            return
+          }
+          setSelectedImage({ dataUrl, name: 'kamera-aufnahme.jpg' })
+        }}
+        isGroupPermissionsOpen={isGroupPermissionsOpen}
+        setIsGroupPermissionsOpen={setIsGroupPermissionsOpen}
+        activeGroup={activeGroup}
+        currentUserId={currentUserId}
+        onGroupUpdated={(updatedGroup) => {
+          setActiveGroup(updatedGroup)
+          setGroups((prev) => prev.map((g) => (g.id === updatedGroup.id ? updatedGroup : g)))
+        }}
+        groupToDelete={groupToDelete}
+        setGroupToDelete={setGroupToDelete}
+        isDeletingGroup={isDeletingGroup}
+        onConfirmDeleteGroup={handleConfirmDeleteGroup}
+        isWallpaperModalOpen={isWallpaperModalOpen}
+        setIsWallpaperModalOpen={setIsWallpaperModalOpen}
+        isMuteModalOpen={isMuteModalOpen}
+        setIsMuteModalOpen={setIsMuteModalOpen}
+        blindMailboxId={blindMailboxId}
         chatName={activeGroup ? gruppenTitel(activeGroup) : activeContact?.username ?? null}
-      />
-
-      <SafetyNumberDialog
-        open={sicherheitsnummern.offen}
-        onOpenChange={sicherheitsnummern.setOffen}
-        contactName={activeContact?.username || ''}
-        devices={sicherheitsnummern.geraete}
-        loading={sicherheitsnummern.laedt}
-      />
-
-      <BlockConfirmDialog
-        open={isBlockConfirmOpen}
-        onOpenChange={setIsBlockConfirmOpen}
-        contactName={activeContact?.username ?? ''}
+        sicherheitsnummern={sicherheitsnummern}
+        isBlockConfirmOpen={isBlockConfirmOpen}
+        setIsBlockConfirmOpen={setIsBlockConfirmOpen}
         blocked={Boolean(activeContact && isBlocked(activeContact.userId))}
-        onConfirm={handleBlockConfirm}
+        onBlockConfirm={handleBlockConfirm}
       />
 
       {/* Dateiauswahl für das Gruppenlogo (der sichtbare Knopf steht im Kopf) */}
