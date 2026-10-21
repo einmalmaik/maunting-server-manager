@@ -361,7 +361,9 @@ vi.mock('@/services/e2eeGeraet', () => ({
   onSchluesselWarnung: vi.fn((cb) => {
     schluesselWarnungCallback = cb
     return () => {
-      schluesselWarnungCallback = null
+      // Nur die eigene Anmeldung abmelden. Räumt ein alter Baum nach dem
+      // nächsten Mount ab, darf er dessen Callback nicht wieder löschen.
+      if (schluesselWarnungCallback === cb) schluesselWarnungCallback = null
     }
   }),
   sicherheitsnummer: vi.fn(async () => '11111 22222 33333 44444'),
@@ -3320,10 +3322,66 @@ describe('Messenger (Allround Chat)', () => {
         await waitFor(() => {
           expect(screen.queryByText(warnung)).not.toBeInTheDocument()
         })
+
+        // Der Rückweg holt sie auch nicht aus dem Sitzungszwischenspeicher
+        // zurück: sie war eine Warnung dieses Besuchs, kein Verlauf.
+        fireEvent.click(screen.getByRole('button', { name: /alice/i }))
+        await waitFor(() => {
+          expect(screen.queryByText(warnung)).not.toBeInTheDocument()
+        })
       } finally {
         vi.mocked(deriveBlindMailboxId).mockImplementation(
           ablage ?? (async () => 'test-blind-mailbox'),
         )
+      }
+    })
+
+    it('zeigt eine nur im Sitzungszwischenspeicher liegende Systemzeile nicht wieder an', async () => {
+      const { sessionChatCache } = await import('@/services/klartextSpeicher')
+      const ablage = vi.mocked(socialApi.fetchE2eeEnvelopes).getMockImplementation()!
+      // Der Abruf bleibt offen, sonst ersetzt er den Cache, bevor der Test ihn
+      // ansehen kann. Geprüft wird der Cache-Pfad, nicht der Netzpfad.
+      let abrufLoesen: ((wert: Awaited<ReturnType<typeof socialApi.fetchE2eeEnvelopes>>) => void) | null = null
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(
+        () => new Promise((resolve) => { abrufLoesen = resolve }),
+      )
+      try {
+        render(
+          <MemoryRouter>
+            <Messenger />
+          </MemoryRouter>
+        )
+        const alice = await screen.findByRole('button', { name: /alice/i })
+
+        // Erst jetzt füllen: der Klick auf Alice liest den Cache unmittelbar
+        // danach. So prüft der Test den Rückweg und nicht einen Startzustand.
+        sessionChatCache.set('test-blind-mailbox', [
+          {
+            id: 1,
+            clientUuid: 'normal-aus-dem-cache',
+            senderId: 101,
+            text: 'Normale Nachricht aus dem Zwischenspeicher',
+            createdAt: '2026-09-08T11:59:00Z',
+            isSelf: false,
+          },
+          {
+            id: 2,
+            clientUuid: 'sys-aus-dem-cache',
+            senderId: 0,
+            text: 'Alte Systemzeile aus dem Zwischenspeicher',
+            createdAt: '2026-09-08T12:00:00Z',
+            isSelf: false,
+            isSystem: true,
+          },
+        ])
+        fireEvent.click(alice)
+
+        // Erst wenn die normale Zeile steht, ist der Cache wirklich gelesen.
+        await screen.findByText('Normale Nachricht aus dem Zwischenspeicher')
+        expect(screen.queryByText('Alte Systemzeile aus dem Zwischenspeicher')).not.toBeInTheDocument()
+      } finally {
+        abrufLoesen?.([])
+        vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(ablage)
       }
     })
 

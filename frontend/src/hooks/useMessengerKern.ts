@@ -381,7 +381,12 @@ export function useMessengerKern({
       }
     }
 
-    const cached = sessionChatCache.get(blindMailboxId)
+    /**
+     * Systemzeilen gehören zum Besuch, nicht zum Verlauf. Der Zwischenspeicher
+     * hält den ganzen Verlauf inklusive Warnungen; beim Zurückwechseln würden
+     * sie sonst wieder auftauchen, obwohl das Gespräch sie längst verworfen hat.
+     */
+    const cached = sessionChatCache.get(blindMailboxId)?.filter((m) => !m.isSystem)
     if (cached && cached.length > 0) {
       setMessages((vorher) => mitSystemzeilen(vorher, cached))
       setLoadingMessages(false)
