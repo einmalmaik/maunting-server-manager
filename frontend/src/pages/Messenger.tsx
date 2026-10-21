@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useSearchParams, useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
   Button,
   Input,
@@ -54,7 +54,6 @@ import {
   type StickerAttachment,
   type StoryReplyAttachment,
 } from '@/components/social/ChatMessageBubble'
-import type { PresenceStatus } from '@/components/social/StatusIndicator'
 import {
   type ChatGroupItem,
   type ChatStoryItem,
@@ -80,12 +79,11 @@ import { useSprachaufnahme } from '@/hooks/useSprachaufnahme'
 import { useSprachwiedergabe } from '@/hooks/useSprachwiedergabe'
 import { useChatSuche } from '@/hooks/useChatSuche'
 import { useEntwuerfe } from '@/hooks/useEntwuerfe'
-import { useKontaktdaten } from '@/hooks/useKontaktdaten'
-import { useKontaktAusUrl } from '@/hooks/useKontaktAusUrl'
+import { useMessengerKontakte } from '@/pages/messenger/useMessengerKontakte'
+import { useMessengerAuswahl } from '@/pages/messenger/useMessengerAuswahl'
 import { useMessengerSync } from '@/hooks/useMessengerSync'
 import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
-import { useStoryAnsicht } from '@/hooks/useStoryAnsicht'
 import { useUeberallAnsicht } from '@/hooks/useUeberallAnsicht'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
@@ -143,7 +141,6 @@ import {
   vergissGruppenName,
 } from '@/services/gruppenName'
 import {
-  fuelleNamenNach,
   gespraechsPartner,
   merkeGespraech,
   vergissGespraech,
@@ -388,30 +385,57 @@ function MessengerSeite() {
   )
 
   const { user } = useAuthStore()
+  const currentUserId = user?.id || 0
   // Die Hülle hängt diese Seite gesperrt gar nicht erst ein. Die Schranken
   // unten bleiben trotzdem stehen: sie kosten nichts, und keiner der Effekte
   // soll davon abhängen, von wem die Seite gerendert wird.
   const messengerGesperrt = useMessengerSperre(istGesperrt)
-  const [searchParams, setSearchParams] = useSearchParams()
   const { inviteCode } = useParams<{ inviteCode?: string }>()
   const navigate = useNavigate()
-  const savedUserId = typeof window !== 'undefined' && window.sessionStorage ? sessionStorage.getItem('msm:active_messenger_user_id') : null
-  const queryUserId = searchParams.get('userId') || searchParams.get('contact') || savedUserId
-  const savedGroupId = typeof window !== 'undefined' && window.sessionStorage ? sessionStorage.getItem('msm:active_messenger_group_id') : null
-  const queryGroupId = searchParams.get('groupId') || savedGroupId
-
   const {
     friends,
     groups,
     setGroups,
-    teamMembers,
-    publicUsers,
     directChats,
     stories,
     setStories,
-    laden: loadData,
-    geladen: kontakteGeladen,
-  } = useKontaktdaten(user?.id || 0, messengerGesperrt)
+    loadData,
+    kontakteGeladen,
+    contactsList,
+    filteredContacts,
+    filteredGroups,
+    gruppenNachArchiv,
+    kontakteNachArchiv,
+    archivZahl,
+    archivUngelesen,
+    contactMailboxMap,
+    groupMailboxMap,
+    storyAnsicht,
+    searchQuery,
+    setSearchQuery,
+    filterTab,
+    setFilterTab,
+    mobileNavTab,
+    setMobileNavTab,
+    archivOffen,
+    setArchivOffen,
+  } = useMessengerKontakte({ currentUserId, messengerGesperrt, gruppenTitel })
+
+  const {
+    activeContact,
+    setActiveContact,
+    activeGroup,
+    setActiveGroup,
+    searchParams,
+    setSearchParams,
+    zeilenMenue,
+    setZeilenMenue,
+    widerruf,
+    setWiderruf,
+    handleZurueckZurListe,
+    handleAnheftenChat,
+    handleArchivieren,
+  } = useMessengerAuswahl({ kontakte: contactsList, gruppen: groups, kontakteGeladen, t })
 
   // Notification & Mute/Block Store
   const unreadCounts = useMessengerNotificationStore((s) => s.unreadCounts)
@@ -425,8 +449,6 @@ function MessengerSeite() {
   const mailboxDirectory = useMessengerNotificationStore((s) => s.mailboxDirectory)
   const pinnedChats = useMessengerNotificationStore((s) => s.pinnedChats)
   const archivedChats = useMessengerNotificationStore((s) => s.archivedChats)
-  const schalteAnheften = useMessengerNotificationStore((s) => s.schalteAnheften)
-  const schalteArchiv = useMessengerNotificationStore((s) => s.schalteArchiv)
   const merkeErwaehnung = useMessengerNotificationStore((s) => s.merkeErwaehnung)
 
   // Mute & Block modals
@@ -434,12 +456,8 @@ function MessengerSeite() {
   const [isBlockConfirmOpen, setIsBlockConfirmOpen] = useState(false)
 
   // Pre-computed mailbox IDs
-  const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
-  const [groupMailboxMap, setGroupMailboxMap] = useState<Record<number, string>>({})
   
   // Selection
-  const [activeContact, setActiveContact] = useState<ChatContact | null>(null)
-  const [activeGroup, setActiveGroup] = useState<ChatGroupItem | null>(null)
   const sicherheitsnummern = useSicherheitsnummern(activeContact?.userId)
   /**
    * Die eigenen Rollen der offenen Gruppe, entschlüsselt.
@@ -450,9 +468,6 @@ function MessengerSeite() {
    * der ehrliche Stand, und nicht etwa „keine Rechte".
    */
   const [gruppenRollenZustand, setGruppenRollenZustand] = useState<Gruppenzustand | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [filterTab, setFilterTab] = useState<'all' | 'groups' | 'friends' | 'teams' | 'public'>('all')
-  const [mobileNavTab, setMobileNavTab] = useState<'chats' | 'updates' | 'community'>('chats')
 
   // Group Permissions & Delete Modal State
   const [isGroupPermissionsOpen, setIsGroupPermissionsOpen] = useState(false)
@@ -686,7 +701,6 @@ function MessengerSeite() {
     entwuerfe.merke(blindMailboxId, text)
   }
 
-  const currentUserId = user?.id || 0
 
   /*
    * Jede bekannte Mailbox beim Strom anmelden, nicht nur die offene.
@@ -1000,358 +1014,6 @@ function MessengerSeite() {
     }
   }
 
-  // Combine Contacts
-  const contactsList: ChatContact[] = useMemo(() => {
-    const list: ChatContact[] = []
-    const seenUserIds = new Set<number>()
-    // Der Zähler gehört dieser Ansicht. Die Benutzer-Id tut es nicht, deshalb
-    // trägt sie den Schlüssel nur lesbar mit, nicht seine Eindeutigkeit.
-    let schluesselZaehler = 0
-    const naechsterSchluessel = (uid: number) => `k${++schluesselZaehler}-${uid}`
-
-    for (const f of friends) {
-      if (f.status === 'accepted' || (f as any).friend_user_id) {
-        const uid = f.user_id ?? (f as any).friend_user_id ?? f.id
-        // Liegt eine Freundschaft in beiden Richtungen im Bestand, kommt sie
-        // zweimal an. Ein Freund, ein Eintrag, wie bei den drei Quellen unten.
-        if (seenUserIds.has(uid)) continue
-        seenUserIds.add(uid)
-        list.push({
-          listKey: naechsterSchluessel(uid),
-          id: f.id,
-          userId: uid,
-          username: f.username,
-          avatarUrl: f.avatar_url,
-          status: (f.presence?.status as PresenceStatus) || 'invisible',
-          deviceType: f.presence?.device_type,
-          activityLabel: f.presence?.activity_label,
-          isFriend: true,
-          teamName: null,
-        })
-      }
-    }
-
-    for (const { member, teamName } of teamMembers) {
-      if (!seenUserIds.has(member.user_id)) {
-        seenUserIds.add(member.user_id)
-        list.push({
-          listKey: naechsterSchluessel(member.user_id),
-          id: member.user_id,
-          userId: member.user_id,
-          username: member.username,
-          avatarUrl: member.avatar_url,
-          status: 'invisible',
-          deviceType: null,
-          activityLabel: null,
-          isFriend: false,
-          teamName,
-        })
-      } else {
-        const existing = list.find((c) => c.userId === member.user_id)
-        if (existing && !existing.teamName) {
-          existing.teamName = teamName
-        }
-      }
-    }
-
-    for (const dc of directChats) {
-      if (!seenUserIds.has(dc.other_user_id)) {
-        seenUserIds.add(dc.other_user_id)
-        list.push({
-          listKey: naechsterSchluessel(dc.other_user_id),
-          id: dc.other_user_id,
-          userId: dc.other_user_id,
-          username: dc.other_username,
-          avatarUrl: dc.other_avatar_url || null,
-          status: (dc.presence?.status as PresenceStatus) || 'invisible',
-          deviceType: dc.presence?.device_type,
-          activityLabel: dc.presence?.activity_label,
-          isFriend: dc.is_friend,
-          teamName: null,
-          isPublicUser: dc.other_privacy === 'public',
-        })
-      }
-    }
-
-    for (const p of publicUsers) {
-      if (!seenUserIds.has(p.user_id)) {
-        seenUserIds.add(p.user_id)
-        list.push({
-          listKey: naechsterSchluessel(p.user_id),
-          id: p.user_id,
-          userId: p.user_id,
-          username: p.username,
-          avatarUrl: p.avatar_url || null,
-          status: (p.presence?.status as PresenceStatus) || 'invisible',
-          deviceType: p.presence?.device_type,
-          activityLabel: p.presence?.activity_label,
-          isFriend: Boolean(p.is_friend),
-          teamName: null,
-          isPublicUser: true,
-        })
-      } else {
-        const existing = list.find((c) => c.userId === p.user_id)
-        if (existing) {
-          existing.isPublicUser = true
-          if (p.avatar_url && !existing.avatarUrl) existing.avatarUrl = p.avatar_url
-        }
-      }
-    }
-
-    return list.sort((a, b) => {
-      const statusOrder: Record<string, number> = { online: 0, away: 1, invisible: 2 }
-      const diff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3)
-      if (diff !== 0) return diff
-      return a.username.localeCompare(b.username)
-    })
-  }, [friends, teamMembers, publicUsers, directChats])
-
-  /*
-   * Namenlose Gespräche benennen.
-   *
-   * Ein zugestelltes Chatgeheimnis bringt eine Konto-Id und keinen Namen — ein
-   * Anzeigename im Steuerumschlag wäre ein Feld, das der Absender frei wählt,
-   * und damit der Weg, sich in einer fremden Kontaktliste als jemand anderes
-   * auszugeben. Der Name kommt deshalb aus der Kontaktliste dieses Geräts, und
-   * zwar sobald sie geladen ist.
-   *
-   * `loadData()` danach: erst damit wandert der frisch gefundene Name auch in
-   * `directChats` und wird sichtbar.
-   */
-  useEffect(() => {
-    if (contactsList.length === 0) return
-    void fuelleNamenNach(
-      contactsList.map((c) => ({
-        userId: c.userId,
-        username: c.username,
-        avatarUrl: c.avatarUrl,
-      })),
-    )
-      .then((geaendert) => {
-        if (geaendert) void loadData()
-      })
-      .catch(() => {})
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactsList.length])
-
-  const filteredContacts = useMemo(() => {
-    return contactsList.filter((c) => {
-      if (filterTab === 'groups') return false
-      if (filterTab === 'friends' && !c.isFriend) return false
-      if (filterTab === 'teams' && !c.teamName) return false
-      if (filterTab === 'public' && !c.isPublicUser) return false
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase()
-        return (
-          c.username.toLowerCase().includes(q) ||
-          (c.teamName && c.teamName.toLowerCase().includes(q))
-        )
-      }
-      return true
-    })
-  }, [contactsList, filterTab, searchQuery])
-
-  const filteredGroups = useMemo(() => {
-    if (filterTab === 'friends' || filterTab === 'teams' || filterTab === 'public') return []
-    return groups.filter((g) => {
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase()
-        return (
-          gruppenTitel(g).toLowerCase().includes(q) ||
-          (g.description && g.description.toLowerCase().includes(q))
-        )
-      }
-      return true
-    })
-  }, [groups, filterTab, searchQuery])
-
-  /**
-   * Angeheftetes nach oben, Archiviertes heraus.
-   *
-   * Beides steht nur auf diesem Gerät: welche Gespräche jemandem wichtig sind,
-   * ist ein Metadatum ersten Ranges und hat auf keinem Server etwas zu suchen.
-   * Dieselbe Bauart wie das Stummschalten.
-   */
-  const ordne = useCallback(
-    <T,>(eintraege: T[], midVon: (e: T) => string | undefined) => {
-      const sichtbar: T[] = []
-      const imArchiv: T[] = []
-      for (const e of eintraege) {
-        const mid = midVon(e)
-        if (mid && archivedChats.includes(mid)) imArchiv.push(e)
-        else sichtbar.push(e)
-      }
-      sichtbar.sort((a, b) => {
-        const pa = pinnedChats.indexOf(midVon(a) || '')
-        const pb = pinnedChats.indexOf(midVon(b) || '')
-        if (pa === pb) return 0
-        return (pa < 0 ? 99 : pa) - (pb < 0 ? 99 : pb)
-      })
-      return { sichtbar, imArchiv }
-    },
-    [pinnedChats, archivedChats],
-  )
-
-  const gruppenNachArchiv = useMemo(
-    () => ordne(filteredGroups, (g) => groupMailboxMap[g.id]),
-    [ordne, filteredGroups, groupMailboxMap],
-  )
-  const kontakteNachArchiv = useMemo(
-    () => ordne(filteredContacts, (c) => contactMailboxMap[c.userId]),
-    [ordne, filteredContacts, contactMailboxMap],
-  )
-  /** Wie viele Chats im Archiv liegen und wie viel dort ungelesen ist. */
-  const archivZahl = gruppenNachArchiv.imArchiv.length + kontakteNachArchiv.imArchiv.length
-  const archivUngelesen = useMemo(() => {
-    let summe = 0
-    for (const g of gruppenNachArchiv.imArchiv) summe += unreadCounts[groupMailboxMap[g.id]] || 0
-    for (const c of kontakteNachArchiv.imArchiv) summe += unreadCounts[contactMailboxMap[c.userId]] || 0
-    return summe
-  }, [gruppenNachArchiv, kontakteNachArchiv, unreadCounts, groupMailboxMap, contactMailboxMap])
-
-  /** Der Chat, für den gerade das Langdruck-Menü der Liste offen ist. */
-  const [zeilenMenue, setZeilenMenue] = useState<{ mid: string; name: string } | null>(null)
-  /** Ob die archivierten Chats gerade mit angezeigt werden. */
-  const [archivOffen, setArchivOffen] = useState(false)
-  /**
-   * Der Rückweg nach einer Wischgeste.
-   *
-   * Eine Geste löst versehentlich aus. Ohne sichtbaren Rückweg wäre ein Chat
-   * weg, ohne dass jemand wüsste wohin — der Streifen unten in der Liste ist
-   * deshalb Teil der Funktion, nicht ihre Verzierung.
-   */
-  const [widerruf, setWiderruf] = useState<{ text: string; zurueck: () => void } | null>(null)
-
-  // Der Streifen verschwindet von selbst; sonst stünde er bis zum nächsten Mal.
-  useEffect(() => {
-    if (!widerruf) return
-    const uhr = window.setTimeout(() => setWiderruf(null), 6000)
-    return () => window.clearTimeout(uhr)
-  }, [widerruf])
-
-  // Mailbox-Verzeichnis und Zuordnungen im Benachrichtigungs-Store registrieren
-  useEffect(() => {
-    if (!currentUserId) return
-    let active = true
-    const store = useMessengerNotificationStore.getState()
-
-    for (const c of contactsList) {
-      deriveBlindMailboxId(currentUserId, c.userId).then((mid) => {
-        if (!active) return
-        setContactMailboxMap((prev) => (prev[c.userId] === mid ? prev : { ...prev, [c.userId]: mid }))
-        store.registerMailbox(mid, {
-          name: c.username,
-          avatarUrl: c.avatarUrl,
-          isGroup: false,
-          userId: c.userId,
-        })
-      }).catch(() => {})
-    }
-
-    for (const g of groups) {
-      deriveGroupBlindMailboxId(g.id).then((mid) => {
-        if (!active) return
-        setGroupMailboxMap((prev) => (prev[g.id] === mid ? prev : { ...prev, [g.id]: mid }))
-        store.registerMailbox(mid, {
-          name: gruppenTitel(g),
-          avatarUrl: g.avatar_url,
-          isGroup: true,
-          groupId: g.id,
-        })
-      }).catch(() => {})
-    }
-
-    return () => {
-      active = false
-    }
-  }, [contactsList, groups, currentUserId])
-
-  const storyAnsicht = useStoryAnsicht(stories, currentUserId, contactsList)
-
-  /**
-   * Kontakt- und Gruppenkennung aus der Adresse — samt der Prüfung, ob es den
-   * Chat überhaupt gibt. Der Block stand bis 10/2026 hier und ist jetzt in
-   * `useKontaktAusUrl`; die Seite entscheidet nur noch, was sie übergibt.
-   */
-  useKontaktAusUrl({
-    queryUserId,
-    queryGroupId,
-    kontakte: contactsList,
-    gruppen: groups,
-    kontakteGeladen,
-    activeContact,
-    activeGroup,
-    setActiveContact,
-    setActiveGroup,
-    searchParams,
-    setSearchParams,
-    t,
-  })
-
-  /**
-   * Geht zurück zur Kontaktliste und räumt Auswahl, Speicher und URL-Parameter
-   * vollständig auf, damit spätere Aktualisierungen den Chat nicht wieder öffnen.
-   */
-  const handleZurueckZurListe = useCallback(() => {
-    try {
-      sessionStorage.removeItem('msm:active_messenger_user_id')
-      sessionStorage.removeItem('msm:active_messenger_group_id')
-    } catch {}
-    setActiveContact(null)
-    setActiveGroup(null)
-    const next = new URLSearchParams(searchParams)
-    let geaendert = false
-    if (next.has('userId')) {
-      next.delete('userId')
-      geaendert = true
-    }
-    if (next.has('contact')) {
-      next.delete('contact')
-      geaendert = true
-    }
-    if (next.has('groupId')) {
-      next.delete('groupId')
-      geaendert = true
-    }
-    if (geaendert) {
-      setSearchParams(next, { replace: true })
-    }
-  }, [searchParams, setSearchParams])
-
-  // Synchronize active conversation with search params and sessionStorage
-  useEffect(() => {
-    if (activeContact) {
-      try {
-        sessionStorage.setItem('msm:active_messenger_user_id', String(activeContact.userId))
-        sessionStorage.removeItem('msm:active_messenger_group_id')
-      } catch {}
-      const cur = searchParams.get('userId') || searchParams.get('contact')
-      if (cur !== String(activeContact.userId) || searchParams.has('groupId')) {
-        const next = new URLSearchParams(searchParams)
-        next.set('userId', String(activeContact.userId))
-        next.delete('groupId')
-        setSearchParams(next, { replace: true })
-      }
-    } else if (activeGroup) {
-      try {
-        sessionStorage.setItem('msm:active_messenger_group_id', String(activeGroup.id))
-        sessionStorage.removeItem('msm:active_messenger_user_id')
-      } catch {}
-      const cur = searchParams.get('groupId')
-      if (cur !== String(activeGroup.id) || searchParams.has('userId') || searchParams.has('contact')) {
-        const next = new URLSearchParams(searchParams)
-        next.set('groupId', String(activeGroup.id))
-        next.delete('userId')
-        next.delete('contact')
-        setSearchParams(next, { replace: true })
-      }
-    } else {
-      try {
-        sessionStorage.removeItem('msm:active_messenger_user_id')
-        sessionStorage.removeItem('msm:active_messenger_group_id')
-      } catch {}
-    }
-  }, [activeContact, activeGroup, searchParams, setSearchParams])
 
   // When active contact or active group changes, derive mailbox ID
   /**
@@ -3725,39 +3387,6 @@ function MessengerSeite() {
   }
 
   const isChatOpen = Boolean(activeContact || activeGroup)
-
-  /**
-   * Anheften und Archivieren — beides bleibt auf diesem Gerät.
-   *
-   * Der Hinweis mit „Widerrufen" ist kein Schmuck: eine Wischgeste löst
-   * versehentlich aus, und ohne Rückweg wäre der Chat weg, ohne dass jemand
-   * wüsste wohin.
-   */
-  const handleAnheftenChat = (mid: string) => {
-    const war = pinnedChats.includes(mid)
-    const ergebnis = schalteAnheften(mid)
-    if (!ergebnis.ok) {
-      toast.error(t('messenger.pinLimit', { count: PINS_MAX }))
-      return
-    }
-    setWiderruf({
-      text: war ? t('messenger.unpinned') : t('messenger.pinned'),
-      zurueck: () => {
-        schalteAnheften(mid)
-      },
-    })
-  }
-
-  const handleArchivieren = (mid: string) => {
-    const war = archivedChats.includes(mid)
-    schalteArchiv(mid)
-    setWiderruf({
-      text: war ? t('messenger.unarchived') : t('messenger.archived'),
-      zurueck: () => {
-        schalteArchiv(mid)
-      },
-    })
-  }
 
   /** Ein Chat aus der Liste geht auf: gelesen, und der Trenner merkt sich, wo man stand. */
   const oeffneAusListe = (mid: string | undefined) => {
