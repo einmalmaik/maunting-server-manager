@@ -141,6 +141,8 @@ export function useKontaktAusUrl(optionen: KontaktAusUrlOptionen): KontaktAusUrl
     gepruefterKontaktRef.current = targetId
 
     let aktiv = true
+    /** Ob dieser Lauf sein Ergebnis noch anwenden durfte. */
+    let fertig = false
     void (async () => {
       // Ein bestehender Chat überlebt eine Profiländerung: der Server prüft
       // beim Senden `can_message_user` und lässt Antworten weiter zu. Ohne
@@ -175,10 +177,19 @@ export function useKontaktAusUrl(optionen: KontaktAusUrlOptionen): KontaktAusUrl
         isPublicUser: profil?.privacy === 'public',
       })
       setActiveGroup(null)
+      fertig = true
     })()
 
     return () => {
       aktiv = false
+      // Der Merker darf einen **Abbruch** nicht überleben. Lief der Effekt neu
+      // an, weil sich die Kontaktliste geändert hat, stiege der nächste Lauf
+      // sonst sofort aus — das Ergebnis dieses Laufs ist aber verworfen, und
+      // der Deep-Link öffnete nie. Ein abgeschlossener Lauf lässt ihn stehen:
+      // sonst fragte jede Kontaktaktualisierung dieselbe Kennung erneut.
+      if (!fertig && gepruefterKontaktRef.current === targetId) {
+        gepruefterKontaktRef.current = null
+      }
     }
   }, [
     queryUserId,

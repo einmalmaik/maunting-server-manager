@@ -419,8 +419,16 @@ export function useMessengerSenden(optionen: Optionen) {
   }
 
 
+  /**
+   * Sendet eine Nachricht.
+   *
+   * Der Rückgabewert sagt, ob der Versand **angenommen** wurde: `false` heißt,
+   * dass einer der Riegel gegriffen hat (kein Ziel, kein Recht, ein laufender
+   * Versand) und nichts angelegt wurde. „Erneut senden“ hängt davon ab — die
+   * alte Zeile darf erst fallen, wenn ihre Ersetzung existiert.
+   */
   // Send message (text, note, cal, img, audio, file, sticker)
-  const handleSendMessage = async (auftrag: SendeAuftrag = {}) => {
+  const handleSendMessage = async (auftrag: SendeAuftrag = {}): Promise<boolean> => {
     const {
       text: customText,
       note,
@@ -446,7 +454,7 @@ export function useMessengerSenden(optionen: Optionen) {
     if (editingMessage && !fremdesZiel && !auftrag.augenblick && !auftrag.funkenRettung) {
       const textToSave = customText !== undefined ? customText : inputText
       await handleEditMessage(editingMessage, textToSave)
-      return
+      return false
     }
 
     const rawText = customText !== undefined ? customText : inputText.trim()
@@ -456,7 +464,7 @@ export function useMessengerSenden(optionen: Optionen) {
       (!fremdesZiel && ((!activeContact && !activeGroup) || !blindMailboxId)) ||
       !currentUserId
     ) {
-      return
+      return false
     }
 
     // Die Rechtelage der Gruppe, bevor irgendetwas verschlüsselt wird. Das
@@ -464,7 +472,7 @@ export function useMessengerSenden(optionen: Optionen) {
     // Weiterleiten, Sprachnachricht, Videonotiz, Sticker.
     if (!zielDirekt && !darfSchreiben) {
       toast.error(t('messenger.sendNoRight'))
-      return
+      return false
     }
     if (
       !zielDirekt &&
@@ -472,7 +480,7 @@ export function useMessengerSenden(optionen: Optionen) {
       (note || cal || img || audio || file || sticker || storyReply || videoNote)
     ) {
       toast.error(t('messenger.attachNoRight'))
-      return
+      return false
     }
 
     // Die Videonotiz wird vor dem Verschlüsseln gemessen, wie jede andere Datei
@@ -484,7 +492,7 @@ export function useMessengerSenden(optionen: Optionen) {
       toast.error(
         t('messenger.videoNoteTooLarge', { limit: Math.floor(maxAnhangBytes() / (1024 * 1024)) })
       )
-      return
+      return false
     }
 
     /*
@@ -505,17 +513,17 @@ export function useMessengerSenden(optionen: Optionen) {
         funkenPartner && !fremdesZiel?.groupId ? useFunkenStore.getState().kernVon(funkenPartner, jetzt) : null
       if (!kern) {
         toast.error(t('messenger.moment.friendsOnly'))
-        return
+        return false
       }
       const markenZeit = new Date(jetzt).toISOString()
       if (auftrag.funkenRettung) {
         if (!rettungMoeglich(kern, jetzt)) {
           toast.error(t('messenger.streak.restoreUnavailable'))
-          return
+          return false
         }
         rettungsMarke = baueWiederherstellungNutzlast(markenZeit, kern)
       } else {
-        if (!img) return
+        if (!img) return false
         augenblickMarke = baueAugenblickNutzlast(markenZeit, kern)
       }
     }
@@ -538,7 +546,7 @@ export function useMessengerSenden(optionen: Optionen) {
      * auflaufen. Das Weiterleiten ruft in einer Schleife auf, aber mit
      * `await` — jeder Durchgang gibt den Riegel im `finally` wieder frei.
      */
-    if (sendeLaeuft.current) return
+    if (sendeLaeuft.current) return false
     sendeLaeuft.current = true
 
     /**
@@ -880,6 +888,7 @@ export function useMessengerSenden(optionen: Optionen) {
       sendeLaeuft.current = false
       setSending(false)
     }
+    return true
   }
 
 

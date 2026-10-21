@@ -6,7 +6,7 @@ import type { ChatContact } from '@/components/social/sidebar/ConversationListIt
 import { useKontaktdaten } from '@/hooks/useKontaktdaten'
 import { useStoryAnsicht } from '@/hooks/useStoryAnsicht'
 import { deriveBlindMailboxId, deriveGroupBlindMailboxId } from '@/services/e2eeCrypto'
-import { fuelleNamenNach } from '@/services/gespraechsListe'
+import { fuelleNamenNach, zeigeGespraech } from '@/services/gespraechsListe'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 
 export type MessengerFilterTab = 'all' | 'groups' | 'friends' | 'teams' | 'public'
@@ -25,7 +25,7 @@ interface Optionen {
  */
 export function useMessengerKontakte({ currentUserId, messengerGesperrt, gruppenTitel }: Optionen) {
   const {
-    friends, groups, setGroups, teamMembers, publicUsers, directChats, stories, setStories,
+    friends, groups, setGroups, teamMembers, publicUsers, directChats, versteckte, stories, setStories,
     laden: loadData, geladen: kontakteGeladen,
   } = useKontaktdaten(currentUserId, messengerGesperrt)
 
@@ -40,7 +40,14 @@ export function useMessengerKontakte({ currentUserId, messengerGesperrt, gruppen
   const [contactMailboxMap, setContactMailboxMap] = useState<Record<number, string>>({})
   const [groupMailboxMap, setGroupMailboxMap] = useState<Record<number, string>>({})
 
-  const contactsList: ChatContact[] = useMemo(() => {
+  /**
+   * Alle Gegenstellen — auch die aus der Liste genommenen.
+   *
+   * Sie brauchen ihr Mailbox-Abo weiter: eine Nachricht in einem versteckten
+   * Gespräch soll die Zeile zurückholen, und Push kennt kein „ausgeblendet“. Nur
+   * die Anzeige lässt sie weg (`contactsList`).
+   */
+  const alleKontakte: ChatContact[] = useMemo(() => {
     const list: ChatContact[] = []
     const seen = new Set<number>()
     let zaehler = 0
@@ -106,14 +113,51 @@ export function useMessengerKontakte({ currentUserId, messengerGesperrt, gruppen
     })
   }, [friends, teamMembers, publicUsers, directChats])
 
+  const versteckt = useMemo(() => new Set(versteckte), [versteckte])
+
+  /** Was die Seitenleiste zeigt: alles außer den aus der Liste genommenen. */
+  const contactsList = useMemo(
+    () => alleKontakte.filter((c) => !versteckt.has(c.userId)),
+    [alleKontakte, versteckt],
+  )
+
+  /**
+   * Kommt in einem versteckten Gespräch etwas an, gehört die Zeile zurück.
+   *
+   * Ohne diesen Weg bliebe eine neue Nachricht unsichtbar, bis jemand den
+   * Push-Hinweis öffnet: die Liste zeigt das Gespräch nicht mehr, gelesen wird
+   * nur das offene. Die Mailbox steht in der Zuordnung, weil sie aus
+   * `alleKontakte` entsteht.
+   */
+  useEffect(() => {
+    if (versteckt.size === 0) return
+    const beiEreignis = (e: Event) => {
+      const detail = (e as CustomEvent<{ type?: string; blind_mailbox_id?: string; sender_user_id?: number }>)
+        .detail
+      if (detail?.type !== 'e2ee_blind_message' || !detail.blind_mailbox_id) return
+      if (detail.sender_user_id && Number(detail.sender_user_id) === Number(currentUserId)) return
+      const treffer = Object.entries(contactMailboxMap).find(
+        ([, mailbox]) => mailbox === detail.blind_mailbox_id,
+      )
+      if (!treffer) return
+      const userId = Number(treffer[0])
+      if (!versteckt.has(userId)) return
+      void zeigeGespraech(userId)
+        .then(() => loadData())
+        .catch(() => {})
+    }
+    window.addEventListener('msm:sync-event', beiEreignis)
+    return () => window.removeEventListener('msm:sync-event', beiEreignis)
+  }, [versteckt, contactMailboxMap, currentUserId, loadData])
+
   // Namenlose Gespräche bekommen ihren Namen aus der Kontaktliste dieses Geräts.
   useEffect(() => {
-    if (!contactsList.length) return
-    void fuelleNamenNach(contactsList.map((c) => ({
+    if (!alleKontakte.length) return
+    void fuelleNamenNach(alleKontakte.map((c) => ({
       userId: c.userId, username: c.username, avatarUrl: c.avatarUrl,
     }))).then((geaendert) => { if (geaendert) void loadData() }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contactsList.length])
+  }, [alleKontakte.length])
 
   const filteredContacts = useMemo(() => contactsList.filter((c) => {
     if (filterTab === 'groups') return false
@@ -166,7 +210,7 @@ export function useMessengerKontakte({ currentUserId, messengerGesperrt, gruppen
     if (!currentUserId) return
     let active = true
     const store = useMessengerNotificationStore.getState()
-    for (const c of contactsList) {
+    for (const c of alleKontakte) {
       deriveBlindMailboxId(currentUserId, c.userId).then((mid) => {
         if (!active) return
         setContactMailboxMap((prev) => (prev[c.userId] === mid ? prev : { ...prev, [c.userId]: mid }))
@@ -181,9 +225,12 @@ export function useMessengerKontakte({ currentUserId, messengerGesperrt, gruppen
       }).catch(() => {})
     }
     return () => { active = false }
-  }, [contactsList, groups, currentUserId, gruppenTitel])
+    // `alleKontakte`, nicht `contactsList`: ein verstecktes Gespräch bleibt
+    // abonniert und zugeordnet, sonst käme die Nachricht nie an, die es
+    // zurückholen soll.
+  }, [alleKontakte, groups, currentUserId, gruppenTitel])
 
-  const storyAnsicht = useStoryAnsicht(stories, currentUserId, contactsList)
+  const storyAnsicht = useStoryAnsicht(stories, currentUserId, alleKontakte)
 
   return {
     friends, groups, setGroups, teamMembers, publicUsers, directChats, stories, setStories,

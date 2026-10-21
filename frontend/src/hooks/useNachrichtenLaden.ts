@@ -159,12 +159,6 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         setVerfallSekunden,
         zeigeSystemzeile,
       })
-      // Angewendet heißt erledigt. Ab jetzt würde ein erneutes Anwenden
-      // dieselbe Bearbeitung, Löschung oder Reaktion nur noch einmal setzen —
-      // die Systemzeile der Verfallsfrist käme jedoch doppelt. Was hier
-      // scheitert, bleibt für den nächsten Durchlauf liegen.
-      vergissEigeneWirkungen(currentMid)
-
       const findeAenderung = (m: ChatMessage) =>
         aenderungen.finde(m, (urheber) => urheber !== undefined && Number(urheber) === Number(m.senderId))
 
@@ -378,6 +372,19 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         void saveLocalMessages(currentMid, combined.slice(-200))
         return combined
       })
+
+      /**
+       * Angewendet heißt erledigt — aber erst **hier**.
+       *
+       * Die aufbewahrten Wirkungen der eigenen Zweitgeräte fielen bis 10/2026
+       * direkt nach dem Auswerten weg, also bevor der Verlauf geschrieben war.
+       * Scheiterte der Schreibweg danach (Ablage voll, Messenger gesperrt),
+       * stand die Bearbeitung nirgends mehr: die Quelle war verbraucht, die
+       * Zeile unverändert. Jetzt fällt sie erst, wenn der neue Stand gesetzt
+       * ist — ein zweiter Durchlauf wendet dieselbe Wirkung idempotent noch
+       * einmal an.
+       */
+      await vergissEigeneWirkungen(currentMid).catch(() => {})
 
       /**
        * Die Leiste wird aus der Ablage abgeglichen, nicht aus dem Umschlag.

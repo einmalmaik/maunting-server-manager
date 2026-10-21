@@ -896,7 +896,7 @@ export async function entferneLokaleNachricht(
 /**
  * Entfernt alle Nachrichten einer Mailbox aus der lokalen Ablage.
  *
- * Der Gegenpol zu `vergissGespraech`: wer ein Gespräch aus der Liste nimmt,
+ * Der Gegenpol zu `versteckeGespraech`: wer ein Gespräch aus der Liste nimmt,
  * erwartet, dass auch der örtliche Verlauf geht. Ohne diesen Weg blieb die
  * versiegelte Zeile liegen und `ladeUmschlagKlartexte`/`loadLocalMessages`
  * holten sie beim nächsten Öffnen zurück — ein gelöschter Chat, der wieder da
@@ -904,46 +904,48 @@ export async function entferneLokaleNachricht(
  *
  * Gelesen wird über den Mailbox-Index, nicht über die Mailbox-Zeile: die
  * entsteht erst mit einer echten Umschlagkennung.
+ *
+ * **Fehler werden weitergereicht.** Ein Gespräch, das in der Ablage bleibt,
+ * ist nicht entfernt; der Aufrufer zeigt dann den Fehler statt „entfernt“.
  */
 export async function leereMailboxLokal(blindMailboxId: string): Promise<void> {
   if (!blindMailboxId) return
-  try {
-    const db = await openLocalDatabase()
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE_MESSAGES, STORE_KLARTEXTE, STORE_MAILBOXES, STORE_ENTWUERFE], 'readwrite')
-      const nachrichten = tx.objectStore(STORE_MESSAGES)
-      const index = nachrichten.index('by_mailbox')
-      const req = index.openKeyCursor(IDBKeyRange.only(blindMailboxId))
-      req.onsuccess = () => {
-        const cursor = req.result
-        if (!cursor) return
-        nachrichten.delete(cursor.primaryKey)
-        cursor.continue()
-      }
-      req.onerror = () => reject(req.error)
+  // Kein stilles Schlucken mehr: wer ein Gespräch entfernt, erfährt, wenn die
+  // Ablage es nicht hergibt. Bis 10/2026 meldete die Seite „Chat entfernt“, und
+  // der Verlauf lag weiter auf der Platte.
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([STORE_MESSAGES, STORE_KLARTEXTE, STORE_MAILBOXES, STORE_ENTWUERFE], 'readwrite')
+    const nachrichten = tx.objectStore(STORE_MESSAGES)
+    const index = nachrichten.index('by_mailbox')
+    const req = index.openKeyCursor(IDBKeyRange.only(blindMailboxId))
+    req.onsuccess = () => {
+      const cursor = req.result
+      if (!cursor) return
+      nachrichten.delete(cursor.primaryKey)
+      cursor.continue()
+    }
+    req.onerror = () => reject(req.error)
 
-      // Der Schlüssel ist `[blindMailboxId, envelopeId]`; die Spanne trifft
-      // genau diese Mailbox, ohne jede Klartextzeile des Kontos anzufassen.
-      const klartexte = tx.objectStore(STORE_KLARTEXTE)
-      const klartextReq = klartexte.openKeyCursor(
-        IDBKeyRange.bound([blindMailboxId, -Infinity], [blindMailboxId, Infinity]),
-      )
-      klartextReq.onsuccess = () => {
-        const cursor = klartextReq.result
-        if (!cursor) return
-        klartexte.delete(cursor.primaryKey)
-        cursor.continue()
-      }
-      klartextReq.onerror = () => reject(klartextReq.error)
+    // Der Schlüssel ist `[blindMailboxId, envelopeId]`; die Spanne trifft
+    // genau diese Mailbox, ohne jede Klartextzeile des Kontos anzufassen.
+    const klartexte = tx.objectStore(STORE_KLARTEXTE)
+    const klartextReq = klartexte.openKeyCursor(
+      IDBKeyRange.bound([blindMailboxId, -Infinity], [blindMailboxId, Infinity]),
+    )
+    klartextReq.onsuccess = () => {
+      const cursor = klartextReq.result
+      if (!cursor) return
+      klartexte.delete(cursor.primaryKey)
+      cursor.continue()
+    }
+    klartextReq.onerror = () => reject(klartextReq.error)
 
-      tx.objectStore(STORE_MAILBOXES).delete(blindMailboxId)
-      tx.objectStore(STORE_ENTWUERFE).delete(blindMailboxId)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error)
-    })
-  } catch {
-    // Ohne Ablage gibt es nichts zu löschen.
-  }
+    tx.objectStore(STORE_MAILBOXES).delete(blindMailboxId)
+    tx.objectStore(STORE_ENTWUERFE).delete(blindMailboxId)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+  })
 }
 
 /**

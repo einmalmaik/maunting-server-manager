@@ -856,6 +856,36 @@ describe('Offline Storage & Unified Real-Time SSE Sync Engine', () => {
       window.removeEventListener('msm:message-confirmed', onConfirmed)
     })
 
+    it('verliert keine Nachricht, die während der Fehlermeldung dazukommt', async () => {
+      // Die endgültige Meldung schreibt den Status in die Ablage und öffnet
+      // damit ein Fenster. Wer in ihm sendet, hängt seine Nachricht an die
+      // Warteschlange. Der vorher gelesene Stand kennt sie nicht; ihn danach
+      // zurückzuschreiben löschte die neue Nachricht still.
+      const aufgegeben = enqueueMessageMutation({
+        blind_mailbox_id: 'mailbox-abc',
+        ciphertext_envelope: 'cipher-aufgegeben',
+        recipient_id: 42,
+        client_uuid: 'uuid-aufgegeben',
+      })
+      setOutbox([{ ...aufgegeben, retryCount: 5 }])
+
+      vi.mocked(lokalesNachrichtenUpdate).mockImplementationOnce(async () => {
+        enqueueMessageMutation({
+          blind_mailbox_id: 'mailbox-abc',
+          ciphertext_envelope: 'cipher-neu',
+          recipient_id: 42,
+          client_uuid: 'uuid-neu',
+        })
+      })
+      vi.mocked(client.api).mockRejectedValue(
+        Object.assign(new Error('Unprocessable Entity'), { status: 422 }),
+      )
+
+      await replayOutbox()
+
+      expect(getOutbox().map((m) => m.id)).toEqual(['uuid-neu'])
+    })
+
     it('schreibt den bestätigten Status vor dem Ereignis in die Ablage', async () => {
       // Der Wettlauf aus dem Fehlerbericht: `loadMessages` las den alten Stand
       // (`queued`) und überschrieb die eben bestätigte Nachricht wieder mit der

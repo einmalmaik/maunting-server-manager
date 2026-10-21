@@ -16,6 +16,47 @@ def test_retention_days_constant():
     assert E2EE_ENVELOPE_RETENTION_DAYS == 30
 
 
+def test_der_abgleich_beginnt_bei_den_aeltesten(db: Session):
+    """Seite für Seite vollständig — nicht die neuesten und dann ins Leere.
+
+    Ohne `since_id` lieferte der Dienst bisher die neuesten Umschläge. Wer damit
+    einen Rückstand nachholt, setzt `since_id` auf deren höchste Kennung; die
+    nächste Seite liegt danach hinter dem Fenster und ist leer. Auf einer
+    vollen Mailbox fielen so genau die Schlüsselzustellungen weg, und ein
+    gespeicherter Cursor machte den Sprung endgültig.
+    """
+    box = "box-paging-test-1"
+    jetzt = _now()
+    db.add_all([
+        E2eeBlindEnvelope(
+            blind_mailbox_id=box,
+            ciphertext_envelope=f"ciphertext-{i}",
+            client_uuid=f"uuid-{i}",
+            created_at=jetzt,
+        )
+        for i in range(5)
+    ])
+    db.commit()
+
+    neueste = SocialService.get_blind_envelopes(db, box, limit=3)
+    assert [e.client_uuid for e in neueste] == ["uuid-2", "uuid-3", "uuid-4"]
+
+    aelteste = SocialService.get_blind_envelopes(db, box, limit=3, oldest_first=True)
+    assert [e.client_uuid for e in aelteste] == ["uuid-0", "uuid-1", "uuid-2"]
+
+    gelesen: list[str] = []
+    seit = 0
+    while True:
+        seite = SocialService.get_blind_envelopes(
+            db, box, since_id=seit, limit=3, oldest_first=seit == 0
+        )
+        gelesen.extend(e.client_uuid for e in seite)
+        if len(seite) < 3:
+            break
+        seit = max(e.id for e in seite)
+    assert gelesen == [f"uuid-{i}" for i in range(5)]
+
+
 def test_get_blind_envelopes_filters_expired(db: Session):
     box = "box-retention-test-1"
     now = _now()

@@ -264,7 +264,10 @@ def get_pending_e2ee_devices(
     return e2ee_device_service.ausstehende_geraete(db, user)
 
 
-@router.post("/e2ee/devices/self/remove", dependencies=[Depends(_check_social_enabled), Depends(verify_csrf)])
+@router.post(
+    "/e2ee/devices/self/remove",
+    dependencies=[Depends(_check_social_enabled), Depends(verify_csrf), Depends(auth_rate_limit)],
+)
 def remove_own_e2ee_device(
     req: E2eeDeviceRemoveRequest,
     db: Session = Depends(get_db),
@@ -289,6 +292,11 @@ def remove_own_e2ee_device(
 
     **Das eigene Gerät ist kein Ziel.** Sonst wäre der Weg ein Abmelden mit
     Nebenwirkung: das Verzeichnis verlöre einen Eintrag, den es behalten muss.
+
+    **`auth_rate_limit`.** Hier wird ein Passwort oder ein Einmalcode geprüft.
+    Ohne die strenge Grenze bot die Route einen zweiten Ort, an dem sich diese
+    Geheimnisse raten ließen — die Geräteunterschrift davor ist wiederverwendbar
+    und hält niemanden auf, der ein freigegebenes Gerät kontrolliert.
     """
     hindernis = e2ee_device_service.entfernen_hindernis(
         db, user, req.device_id, anfrage_familie=familie

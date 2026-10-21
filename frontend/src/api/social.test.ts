@@ -45,6 +45,21 @@ it('liest eine Mailbox Seite für Seite, bis nichts mehr kommt', async () => {
   // Anzahl: Umschläge werden gelöscht, eine Zählung überspränge dann welche.
   expect(String(api.mock.calls[0][0])).toContain('limit=200')
   expect(String(api.mock.calls[1][0])).toContain('since_id=200')
+  // Der erste Abruf verlangt die **ältesten** Umschläge. Mit den neuesten
+  // beginnt der Abgleich bei einer vollen Mailbox sonst hinter dem Rückstand:
+  // `since_id` springt über alles dazwischen hinweg und die nächste Seite ist
+  // leer.
+  expect(String(api.mock.calls[0][0])).toContain('oldest_first=true')
+  expect(String(api.mock.calls[1][0])).not.toContain('oldest_first')
+})
+
+it('beginnt einen Abgleich mit Cursor nicht bei den ältesten', async () => {
+  // Mit `since_id` sortiert der Server von selbst aufsteigend; ein zweiter
+  // Modus daneben wäre nur eine zweite Wahrheit.
+  const api = vi.spyOn(client, 'api').mockResolvedValue([])
+  await fetchAlleE2eeEnvelopes('mailbox', 900)
+  expect(String(api.mock.calls[0][0])).toContain('since_id=900')
+  expect(String(api.mock.calls[0][0])).not.toContain('oldest_first')
 })
 
 it('keeps legacy attachments usable without a secret mailbox', async () => {

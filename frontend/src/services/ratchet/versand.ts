@@ -32,7 +32,9 @@ export async function baueZustellungen(
   basisUuid: string,
 ): Promise<DrZustellung[]> {
   const meins = await geraetVeroeffentlichen()
-  const eigene = (await eigenesVerzeichnis(kontext.eigeneId, meins.kennung)).filter(
+  const eigene = (
+    await eigenesVerzeichnis(kontext.eigeneId, meins.kennung, meins.paar.publicKeyJwk)
+  ).filter(
     (g) => g.device_id !== meins.kennung,
   )
   const fremde = await verlangeGeraeteVon(kontext.peerId)
@@ -142,7 +144,12 @@ export async function baueZustellungen(
  * von vor der eigenen Anmeldung ist kein Befund. Keine Antwort auch nicht —
  * ob das Relais erreichbar ist, entscheidet der Versand selbst.
  */
-async function eigenesVerzeichnis(eigeneId: number, kennung: string): Promise<E2eeGeraetItem[]> {
+async function eigenesVerzeichnis(
+  eigeneId: number,
+  kennung: string,
+  publicKeyJwk: string,
+): Promise<E2eeGeraetItem[]> {
+  const eigenes = { kennung, publicKeyJwk }
   const fuehrt = (liste: E2eeGeraetItem[]) => liste.some((g) => g.device_id === kennung)
   try {
     // **Mit wartenden Geräten.** Ein Gerät, das seinen Signaturschlüssel
@@ -153,14 +160,14 @@ async function eigenesVerzeichnis(eigeneId: number, kennung: string): Promise<E2
     const liste = await verzeichnisVon(eigeneId, {
       frisch: true,
       mitWartenden: true,
-      eigenesGeraetId: kennung,
+      eigenes,
     })
     if (fuehrt(liste)) return liste
     vergessenGeraete(eigeneId)
     const nochmal = await verzeichnisVon(eigeneId, {
       frisch: true,
       mitWartenden: true,
-      eigenesGeraetId: kennung,
+      eigenes,
     })
     if (fuehrt(nochmal)) return nochmal
   } catch {

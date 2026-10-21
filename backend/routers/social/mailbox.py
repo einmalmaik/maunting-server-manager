@@ -265,6 +265,13 @@ def fetch_blind_mailbox_envelopes(
     blind_mailbox_id: str,
     since_id: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
+    oldest_first: bool = Query(
+        False,
+        description=(
+            "Ohne since_id die aeltesten statt der neuesten Umschlaege liefern — "
+            "fuer einen vollstaendigen Abgleich Seite fuer Seite."
+        ),
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     nachweis: str | None = Depends(mailbox_token),
@@ -276,7 +283,11 @@ def fetch_blind_mailbox_envelopes(
     SocialService.assert_mailbox_zugang(db, current_user.id, blind_mailbox_id, nachweis)
 
     envelopes = SocialService.get_blind_envelopes(
-        db, blind_mailbox_id=blind_mailbox_id, since_id=since_id, limit=limit
+        db,
+        blind_mailbox_id=blind_mailbox_id,
+        since_id=since_id,
+        limit=limit,
+        oldest_first=oldest_first,
     )
     return [
         {

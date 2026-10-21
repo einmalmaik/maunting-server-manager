@@ -10,13 +10,16 @@ import { CreateGroupDialog } from '@/components/social/modals/CreateGroupDialog'
 import { DeleteGroupDialog } from '@/components/social/modals/DeleteGroupDialog'
 import { FunkenRettungDialog } from '@/components/social/modals/FunkenRettungDialog'
 import { GroupPermissionsModal } from '@/components/social/GroupPermissionsModal'
-import { SafetyNumberDialog } from '@/components/social/modals/SafetyNumberDialog'
+import {
+  SafetyNumberDialog,
+  type SicherheitsnummerGeraet,
+} from '@/components/social/modals/SafetyNumberDialog'
 import { ChatHintergrundDialog } from '@/features/chatHintergrund'
 
 interface Sicherheitsnummern {
   offen: boolean
   setOffen: (offen: boolean) => void
-  geraete: any[]
+  geraete: SicherheitsnummerGeraet[]
   laedt: boolean
 }
 

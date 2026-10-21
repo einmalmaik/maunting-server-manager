@@ -899,14 +899,14 @@ describe('useKonversation', () => {
 
       expect(gelesen).toEqual([])
       // Aber sie ist nicht verloren: der Chat mit C ist nur gerade zu.
-      expect(eigeneWirkungenFuer('dm-1-9').map((w) => w.payload)).toEqual([payload])
+      expect((await eigeneWirkungenFuer('dm-1-9')).map((w) => w.payload)).toEqual([payload])
     })
 
     it('holt eine aufbewahrte Wirkung nach, sobald ihr Gespräch offen ist', async () => {
       // Das Web war zu, als die App gelöscht hat. Der Geräte-Cursor ist längst
       // darüber hinweg; ohne die Ablage bliebe die Nachricht hier stehen.
       const payload = JSON.stringify({ type: 'delete_message', mailbox: 'dm-1-2', actor_id: ICH })
-      merkeEigeneWirkung({
+      await merkeEigeneWirkung({
         mailbox: 'dm-1-2',
         payload,
         zeitpunkt: '2026-10-21T09:00:00Z',
@@ -916,6 +916,50 @@ describe('useKonversation', () => {
       const gelesen = await result.current.liesUmschlaege()
 
       expect(gelesen?.some((l: any) => l.text === payload)).toBe(true)
+    })
+
+    it('verliert beim Wechsel des Gesprächs keine schon eingesammelte Wirkung', async () => {
+      // `holeGeraeteSteuerung` schiebt seinen Cursor weiter, sobald es gelesen
+      // hat. Wechselt der Mensch während des anschließenden Abrufs, endet
+      // dieser Lauf mit `null` — die Wirkung wäre ohne die Ablage weg, obwohl
+      // ihre Quelle verbraucht ist.
+      const payload = JSON.stringify({
+        type: 'edit_message',
+        mailbox: 'dm-1-2',
+        actor_id: ICH,
+        new_text: 'berichtigt',
+      })
+      const { holeGeraeteSteuerung } = await import('@/services/gruppenSchluessel')
+      let freigeben!: () => void
+      const bremse = new Promise<void>((aufloesen) => {
+        freigeben = aufloesen
+      })
+      vi.mocked(holeGeraeteSteuerung).mockImplementationOnce(async (_id, _e, empfange) => {
+        empfange?.(payload, { id: 7, created_at: '2026-10-21T10:00:00Z' })
+        await bremse
+        return 0
+      })
+
+      const optionen = (peerId: number) => ({
+        ziel: { art: 'direkt' as const, peerId },
+        eigeneId: ICH,
+        identitaetRef,
+        meldeSitzungsbruch: vi.fn(),
+        meldeAufbauAbgelehnt: vi.fn(),
+      })
+      const { result, rerender } = renderHook(
+        (props: ReturnType<typeof optionen>) => useKonversation(props),
+        { initialProps: optionen(DU) },
+      )
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+
+      const lauf = result.current.liesUmschlaege()
+      rerender(optionen(3))
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-3'))
+      freigeben()
+
+      expect(await lauf).toBeNull()
+      expect((await eigeneWirkungenFuer('dm-1-2')).map((w) => w.payload)).toEqual([payload])
     })
   })
 })

@@ -9,6 +9,7 @@ import {
   type ChatGroupItem,
 } from '@/api/social'
 import { starteGruppenanruf } from '@/api/calls'
+import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import {
   baueEinladungsKarte,
   einladungsschluesselAus,
@@ -30,7 +31,7 @@ interface Optionen {
   currentUserId: number
   activeGroup: ChatGroupItem | null
   setActiveGroup: Dispatch<SetStateAction<ChatGroupItem | null>>
-  setActiveContact: Dispatch<SetStateAction<any>>
+  setActiveContact: Dispatch<SetStateAction<ChatContact | null>>
   setGroups: Dispatch<SetStateAction<ChatGroupItem[]>>
   loadData: () => Promise<unknown>
   gruppenTitel: (gruppe: { name?: string | null } | null | undefined) => string

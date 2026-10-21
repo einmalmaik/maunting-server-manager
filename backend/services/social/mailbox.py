@@ -371,9 +371,25 @@ class MailboxMixin:
 
     @classmethod
     def get_blind_envelopes(
-        cls, db: Session, blind_mailbox_id: str, since_id: int = 0, limit: int = 50
+        cls,
+        db: Session,
+        blind_mailbox_id: str,
+        since_id: int = 0,
+        limit: int = 50,
+        oldest_first: bool = False,
     ) -> list[E2eeBlindEnvelope]:
-        """Holt blinde Umschläge aus einer Mailbox ab (maximal 30 Tage alt)."""
+        """Holt blinde Umschläge aus einer Mailbox ab (maximal 30 Tage alt).
+
+        Ohne `since_id` gibt es zwei Lesarten, und beide werden gebraucht:
+
+        * **die neuesten** (Vorgabe) — für ein Fenster, das den laufenden
+          Verkehr zeigt;
+        * **die ältesten** (`oldest_first`) — für einen Abgleich, der Seite für
+          Seite alles nachholt. Wer bei 0 beginnt und die neuesten bekommt,
+          springt mit `since_id` über den Rest hinweg: die nächste Seite ist
+          leer, und alles dazwischen ist verloren. Genau das passierte einem
+          Gerät, das eine Weile nicht offen war (`fetchAlleE2eeEnvelopes`).
+        """
         cutoff = datetime.now(timezone.utc) - timedelta(days=E2EE_ENVELOPE_RETENTION_DAYS)
         query = db.query(E2eeBlindEnvelope).filter(
             E2eeBlindEnvelope.blind_mailbox_id == blind_mailbox_id,
@@ -385,7 +401,7 @@ class MailboxMixin:
 
         total = query.count()
         fetch_limit = min(limit, 200)
-        if total > fetch_limit:
+        if total > fetch_limit and not oldest_first:
             sub = query.order_by(E2eeBlindEnvelope.id.desc()).limit(fetch_limit).subquery()
             from sqlalchemy import select
             return (

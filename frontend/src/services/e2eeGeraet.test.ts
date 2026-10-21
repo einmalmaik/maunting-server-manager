@@ -601,6 +601,42 @@ describe('e2eeGeraet', () => {
       expect(liste.map((g) => g.device_id)).toEqual([eigenes.kennung, 'zweit'])
     })
 
+    it('nimmt auf dem eigenen Konto kein Gerät an, das nur der Server freigibt', async () => {
+      // Der Fall aus der Durchsicht: der Server trägt auf dem **eigenen** Konto
+      // ein Gerät ein und meldet es als freigegeben. Ohne Unterschrift eines
+      // vertrauten Geräts wäre jede ausgehende Nachricht zusätzlich für diesen
+      // Schlüssel verschlüsselt — mitgelesen, ohne Warnung.
+      await mitWarnungen(async (warnungen) => {
+        const eigene = await eigenesGeraet()
+        fremdeGeraete.liste = [
+          { device_id: eigene.kennung, public_key: eigene.paar.publicKeyJwk, is_approved: true },
+        ] as any
+        await verzeichnisVon(10)
+
+        const untergeschoben = {
+          device_id: 'fremd-00001',
+          public_key: 'pk-fremd',
+          is_approved: true,
+        }
+        fremdeGeraete.liste = [
+          { device_id: eigene.kennung, public_key: eigene.paar.publicKeyJwk, is_approved: true },
+          untergeschoben,
+        ] as any
+        // Die Liste wird zehn Minuten gehalten; ohne das Verwerfen käme die
+        // Prüfung gar nicht erst an den neuen Eintrag heran.
+        vergessenGeraete(10)
+
+        const liste = await verzeichnisVon(10)
+
+        expect(liste.map((g) => g.device_id)).toEqual([eigene.kennung])
+        expect(warnungen).toContainEqual({
+          userId: 10,
+          typ: 'unbestaetigt',
+          geraete: ['fremd-00001'],
+        })
+      })
+    })
+
     it('gibt einem Gerät, das der Server einträgt, nichts', async () => {
       // Genau der Fall, gegen den `is_approved` nicht hilft: der Server trägt
       // selbst ein Gerät ein und meldet es als freigegeben.

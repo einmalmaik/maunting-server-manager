@@ -942,6 +942,45 @@ def test_entfernen_verlangt_den_nachweis_des_kontos(client: TestClient, db: Sess
     assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["telefon-0001"]
 
 
+def test_entfernen_teilt_die_strenge_anmeldegrenze(client: TestClient, db: Session, clean_db):
+    """Ein Ort zum Raten weniger.
+
+    Die Geräteunterschrift davor ist wiederverwendbar: wer ein freigegebenes
+    Gerät kontrolliert, kann sie beliebig oft vorlegen und dazwischen Passwort
+    oder Einmalcode raten. Ohne `auth_rate_limit` war diese Route dafür ein
+    eigener, großzügigerer Ort neben dem Login.
+    """
+    user = _konto(db, "entfernen4")
+    user.password_hash = AuthService.hash_password("richtig-genug-8")
+    db.commit()
+
+    kopf, familie = _sitzung(db, user)
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    _, lap_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie=familie)
+    _, fremd_familie = _sitzung(db, user)
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "Laptop", lap_ecdsa, familie=fremd_familie)
+    assert e2ee_device_service.bestaetigen(
+        db, user, "laptop-00002", "telefon-0001", _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    )
+
+    rumpf = {
+        "device_id": "laptop-00002",
+        "approver_device_id": "telefon-0001",
+        "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+        "password": "falsch-aber-lang",
+    }
+    antworten = [
+        client.post("/api/social/e2ee/devices/self/remove", headers=kopf, json=rumpf).status_code
+        for _ in range(12)
+    ]
+
+    assert antworten[0] == 403
+    assert 429 in antworten
+    # Nichts wurde entfernt — die Grenze greift vor der Wirkung.
+    assert len(e2ee_device_service.geraete(db, user.id)) == 2
+
+
 def test_entfernen_ohne_passwort_und_ohne_faktor_kommt_mit_der_sitzung_aus(
     client: TestClient, db: Session, clean_db
 ):

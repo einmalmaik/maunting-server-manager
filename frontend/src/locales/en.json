@@ -7684,6 +7684,7 @@
     "removeChatMessage": "The history with {{name}} will be deleted from this device. The friendship stays.",
     "removeChatConfirm": "Remove from list",
     "chatRemoved": "Chat removed from the list",
+    "chatRemoveFailed": "The chat could not be removed. Please try again.",
     "stateRead": "Read by the other party",
     "stateDelivered": "Delivered",
     "stateUndelivered": "Not delivered yet",

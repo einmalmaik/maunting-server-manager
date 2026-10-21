@@ -547,13 +547,24 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
           if (idx >= 0) {
             const retryCount = (afterErrOutbox[idx].retryCount || 0) + 1
             if (retryCount > 5) {
-              afterErrOutbox.splice(idx, 1)
               await meldeEndgueltigGescheitert(mutation, 'versuche-erschoepft')
+              // **Nach** dem Warten lesen, dann nur die erschöpfte Zeile
+              // entfernen. Die Meldung schreibt in die Ablage und öffnet damit
+              // ein Fenster: wer in ihm eine Nachricht sendet, hängt sie an die
+              // Warteschlange. Der vorher gelesene Stand kennt sie nicht — ihn
+              // zurückzuschreiben löschte die neue Nachricht still (Regel 45).
+              setOutbox(getOutbox().filter((m) => m.id !== mutation.id))
               failed++
             } else {
-              afterErrOutbox[idx].retryCount = retryCount
+              // Der Zähler ist ein kurzer Weg ohne Warten dazwischen; gelesen
+              // wird trotzdem frisch, damit die Zeile noch existiert.
+              const frisch = getOutbox()
+              const i = frisch.findIndex((m) => m.id === mutation.id)
+              if (i >= 0) {
+                frisch[i].retryCount = retryCount
+                setOutbox(frisch)
+              }
             }
-            setOutbox(afterErrOutbox)
           }
           // Weiter mit dem nächsten Auftrag: dieser hier hat seinen Versuch für
           // diesen Lauf gehabt. `versucht` verhindert die Endlosschleife.

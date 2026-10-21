@@ -69,6 +69,16 @@ export interface Gespraech {
   blindMailboxId?: string | null
   /** Zuletzt gebraucht. Ordnet die Liste, sonst nichts. */
   zuletzt: number
+  /**
+   * Aus der Liste genommen, aber nicht gelöscht.
+   *
+   * Ein Freund, ein Teammitglied oder ein öffentliches Profil steht auch ohne
+   * Gespräch in der Kontaktliste. „Aus der Liste entfernen“ muss deshalb
+   * irgendwo merken, dass dieses Gespräch nicht mehr gezeigt wird — sonst
+   * steht die Zeile beim nächsten `loadData` wieder da, obwohl die Meldung
+   * „entfernt“ erschien.
+   */
+  versteckt?: boolean
 }
 
 let stand: Map<number, Gespraech> | null = null
@@ -100,6 +110,7 @@ function alsGespraech(userId: number, roh: unknown): Gespraech | null {
     avatarUrl: typeof r.avatarUrl === 'string' && r.avatarUrl ? r.avatarUrl.slice(0, 512) : null,
     blindMailboxId: mailbox,
     zuletzt: typeof r.zuletzt === 'number' && Number.isFinite(r.zuletzt) ? r.zuletzt : 0,
+    ...(r.versteckt === true ? { versteckt: true } : {}),
   }
 }
 
@@ -176,8 +187,52 @@ export async function merkeGespraech(
     zuletzt: Date.now(),
   })
   if (!geprueft) return
+  // Neues Leben holt ein verstecktes Gespräch zurück: wer es öffnet oder
+  // anschreibt, will es wieder sehen.
   karte.set(userId, geprueft)
   await schreibeStand()
+}
+
+/**
+ * Nimmt ein Gespräch aus der Liste, ohne es zu löschen.
+ *
+ * Name, Bild und Mailbox bleiben stehen — sie tragen das Abonnement und die
+ * Zuordnung einer ankommenden Nachricht. Nur die Anzeige fällt weg
+ * (`gespraechsListe`). Kommt dort etwas an, holt `zeigeGespraech` es zurück.
+ */
+export async function versteckeGespraech(
+  userId: number,
+  angabe: { username?: string | null; avatarUrl?: string | null } = {},
+): Promise<void> {
+  if (!Number.isInteger(userId) || userId <= 0) return
+  const karte = await ladeGespraeche()
+  const bisher = karte.get(userId)
+  const geprueft = alsGespraech(userId, {
+    username: (angabe.username ?? bisher?.username ?? '').trim(),
+    avatarUrl: angabe.avatarUrl ?? bisher?.avatarUrl ?? null,
+    blindMailboxId: bisher?.blindMailboxId ?? null,
+    zuletzt: bisher?.zuletzt ?? Date.now(),
+    versteckt: true,
+  })
+  if (!geprueft) return
+  karte.set(userId, geprueft)
+  await schreibeStand()
+}
+
+/** Holt ein verstecktes Gespräch zurück in die Liste. */
+export async function zeigeGespraech(userId: number): Promise<void> {
+  const karte = await ladeGespraeche()
+  const bisher = karte.get(userId)
+  if (!bisher?.versteckt) return
+  const { versteckt: _versteckt, ...sichtbar } = bisher
+  karte.set(userId, sichtbar)
+  await schreibeStand()
+}
+
+/** Welche Gespräche gerade aus der Liste genommen sind. */
+export async function versteckteGespraeche(): Promise<Set<number>> {
+  const karte = await ladeGespraeche()
+  return new Set([...karte.values()].filter((g) => g.versteckt).map((g) => g.userId))
 }
 
 /**
@@ -255,7 +310,7 @@ export function leereGespraeche(): void {
 export async function gespraechsListe(): Promise<DirectChatItem[]> {
   const karte = await ladeGespraeche()
   return [...karte.values()]
-    .filter((g): g is Gespraech & { username: string } => Boolean(g.username))
+    .filter((g): g is Gespraech & { username: string } => Boolean(g.username) && !g.versteckt)
     .sort((a, b) => b.zuletzt - a.zuletzt)
     .map((g, i) => ({
       // Eine Ordnungszahl, keine Datenbankkennung: die Zeile, auf die sie

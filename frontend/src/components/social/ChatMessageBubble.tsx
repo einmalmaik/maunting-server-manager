@@ -1030,14 +1030,19 @@ function ChatMessageBubbleContent({
           (msg.status === 'failed' ? (
             <Kurzinfo text={t('messenger.stateFailedRetry')} seite="ende" lage="oben">
               {aktionen.onErneutSenden ? (
-                <button
+                /* Der gemeinsame Knopf trägt das Fingerziel: unter `md` wird er
+                   44 px breit und hoch, statt ein 14-px-Symbol zu treffen. */
+                <Button
                   type="button"
+                  variant="ghost"
+                  size="icon"
+                  fingerziel
                   onClick={() => aktionen.onErneutSenden!(msg)}
                   aria-label={t('messenger.stateFailedRetry')}
-                  className="inline-flex items-center text-status-destructive hover:opacity-70 transition-opacity"
+                  className="text-status-destructive hover:opacity-70"
                 >
-                  <AlertCircle className="w-3.5 h-3.5" />
-                </button>
+                  <AlertCircle className="w-3.5 h-3.5" aria-hidden="true" />
+                </Button>
               ) : (
                 <span
                   role="img"

@@ -33,8 +33,11 @@ const geraeteCache = new Map<
   { geraete: E2eeGeraetItem[]; geholtAm: number }
 >()
 
-function cacheSchluessel(userId: number, mitWartenden: boolean): string {
-  return `${userId}:${mitWartenden ? 'alle' : 'frei'}`
+function cacheSchluessel(userId: number, mitWartenden: boolean, eigenes: boolean): string {
+  // Die Sicht „mit dem eigenen Gerät" ist eine andere Antwort als die ohne:
+  // die eigene wartende Zeile steht nur dort. Ein gemeinsamer Eintrag nähme
+  // dem Sendepfad genau die Zeile, für die er herkommt.
+  return `${userId}:${mitWartenden ? 'alle' : 'frei'}:${eigenes ? 'eigen' : 'fremd'}`
 }
 
 /**
@@ -189,9 +192,16 @@ export async function pruefeGeraeteBeleg(
 async function holeGeraete(
   userId: number,
   frist = CACHE_FRIST_MS,
-  { mitWartenden = false, eigenesGeraetId }: { mitWartenden?: boolean; eigenesGeraetId?: string } = {},
+  {
+    mitWartenden = false,
+    eigenes,
+  }: {
+    mitWartenden?: boolean
+    /** Dieses Gerät, wie der Aufrufer es kennt. Siehe `vertrauteGeraete`. */
+    eigenes?: { kennung: string; publicKeyJwk: string }
+  } = {},
 ): Promise<E2eeGeraetItem[]> {
-  const schluessel = cacheSchluessel(userId, mitWartenden)
+  const schluessel = cacheSchluessel(userId, mitWartenden, Boolean(eigenes))
   const cached = geraeteCache.get(schluessel)
   if (cached && Date.now() - cached.geholtAm < frist) {
     return cached.geraete
@@ -208,13 +218,11 @@ async function holeGeraete(
     // Steht dieses Gerät in der freigegebenen Liste, hat ein anderes es
     // inzwischen freigegeben — der Hinweis kann weg. Ein wartendes zählt hier
     // nicht.
-    const eigenes = ramGeraetFuer(userId)
-    if (eigenes && roh.some((g) => g.device_id === eigenes.kennung && g.is_approved !== false)) {
+    const lokal = ramGeraetFuer(userId)
+    if (lokal && roh.some((g) => g.device_id === lokal.kennung && g.is_approved !== false)) {
       setzeEigeneFreigabe(true)
     }
-    const geraete = await vertrauteGeraete(userId, roh, {
-      eigenesGeraetId: eigenesGeraetId ?? eigenes?.kennung,
-    })
+    const geraete = await vertrauteGeraete(userId, roh, eigenes)
     geraeteCache.set(schluessel, { geraete, geholtAm: Date.now() })
     return geraete
   } catch (fehler) {
@@ -241,18 +249,23 @@ export async function verzeichnisVon(
   {
     frisch = false,
     mitWartenden = false,
-    eigenesGeraetId,
-  }: { frisch?: boolean; mitWartenden?: boolean; eigenesGeraetId?: string } = {},
+    eigenes,
+  }: {
+    frisch?: boolean
+    mitWartenden?: boolean
+    /** Dieses Gerät, wie der Aufrufer es kennt. Siehe `vertrauteGeraete`. */
+    eigenes?: { kennung: string; publicKeyJwk: string }
+  } = {},
 ): Promise<E2eeGeraetItem[]> {
-  return holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS, {
-    mitWartenden,
-    eigenesGeraetId,
-  })
+  return holeGeraete(userId, frisch ? FRISCH_MS : CACHE_FRIST_MS, { mitWartenden, eigenes })
 }
 
 export function vergessenGeraete(userId: number): void {
-  geraeteCache.delete(cacheSchluessel(userId, false))
-  geraeteCache.delete(cacheSchluessel(userId, true))
+  for (const mitWartenden of [false, true]) {
+    for (const eigenes of [false, true]) {
+      geraeteCache.delete(cacheSchluessel(userId, mitWartenden, eigenes))
+    }
+  }
 }
 
 /** Leert den gesamten Zwischenspeicher im Arbeitsspeicher. */

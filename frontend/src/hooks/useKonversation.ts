@@ -36,7 +36,11 @@ import {
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
 import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
-import { eigeneWirkungenFuer, merkeEigeneWirkung } from '@/services/eigeneWirkungen'
+import {
+  eigeneWirkungenFuer,
+  merkeEigeneWirkung,
+  merkeEigeneWirkungen,
+} from '@/services/eigeneWirkungen'
 import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
@@ -375,6 +379,28 @@ export function useKonversation({
     // Weg blieb ein Häkchen, ein Edit oder eine Löschung auf dem Gerät, an dem
     // sie passiert ist.
     const eigeneSteuerung: Lesung[] = []
+    /**
+     * Was dieser Durchlauf schon eingesammelt hat, geht bei einem Abbruch nicht
+     * verloren.
+     *
+     * `holeGeraeteSteuerung` schiebt seinen Cursor weiter, sobald es die Pakete
+     * gelesen hat. Wechselt der Mensch danach das Gespräch, endet dieser Lauf
+     * mit `null` — und ohne diese Ablage wäre eine Bearbeitung oder Löschung aus
+     * der App weg, obwohl ihre Quelle verbraucht ist. Abgelegt wird sie unter
+     * ihrer eigenen Mailbox; der nächste Durchlauf liest sie über
+     * `eigeneWirkungenFuer` wieder ein und wendet sie mit denselben Prüfungen
+     * an.
+     */
+    const behalteEigeneSteuerung = () => {
+      const offen = eigeneSteuerung.flatMap((lesung) =>
+        lesung.art === 'klartext'
+          ? [{ mailbox: mid, payload: lesung.text, zeitpunkt: lesung.env.created_at }]
+          : [],
+      )
+      eigeneSteuerung.length = 0
+      if (offen.length === 0) return
+      void merkeEigeneWirkungen(offen).catch(() => {})
+    }
     await holeGeraeteSteuerung(
       eigeneId,
       (umschlag) => decryptE2eeHybridWithKeyring(umschlag, schluessel),
@@ -394,11 +420,15 @@ export function useKonversation({
         // verloren zu gehen.
         if (roh.mailbox !== mid) {
           if (typeof roh.mailbox === 'string') {
-            merkeEigeneWirkung({
+            // Der Schreibweg ist asynchron (das Siegel rechnet) und darf den
+            // Leseumlauf nicht aufhalten. Was nicht geschrieben werden kann —
+            // etwa im verschlossenen Zustand — bleibt liegen, statt den
+            // Durchlauf zu kippen.
+            void merkeEigeneWirkung({
               mailbox: roh.mailbox,
               payload: klartext,
               zeitpunkt: env.created_at,
-            })
+            }).catch(() => {})
           }
           return
         }
@@ -418,7 +448,10 @@ export function useKonversation({
         })
       },
     ).catch(() => 0)
-    if (aktuelleMailbox.current !== mid) return null
+    if (aktuelleMailbox.current !== mid) {
+      behalteEigeneSteuerung()
+      return null
+    }
 
     /**
      * Aus welchen Mailboxen dieser Durchlauf liest.
@@ -449,7 +482,10 @@ export function useKonversation({
     } else {
       lesen = [mid]
     }
-    if (aktuelleMailbox.current !== mid) return null
+    if (aktuelleMailbox.current !== mid) {
+      behalteEigeneSteuerung()
+      return null
+    }
 
     const umschlaege = (
       await Promise.all(
@@ -465,7 +501,10 @@ export function useKonversation({
       // Sortiert wird nach Zeit, und bei Gleichstand nach Nummer — sonst
       // sprängen die Nachrichten zweier Mailboxen im Verlauf hin und her.
       .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
-    if (aktuelleMailbox.current !== mid) return null
+    if (aktuelleMailbox.current !== mid) {
+      behalteEigeneSteuerung()
+      return null
+    }
     // Was hier steht, ist schon einmal geöffnet worden. Unverzichtbar, nicht
     // bloß schnell: ein Ratchet-Nachrichtenschlüssel ist nach dem ersten Öffnen
     // verbraucht, ein zweiter Versuch am selben Umschlag muss scheitern.
@@ -680,7 +719,7 @@ export function useKonversation({
     // Paket der Gegenseite — Signatur, `actor_id`, `mailbox`-Bindung.
     gelesen.push(...eigeneSteuerung)
     // Dazu, was ein anderes Gerät geschickt hat, während dieser Chat zu war.
-    eigeneWirkungenFuer(mid).forEach((wirkung, i) => {
+    ;(await eigeneWirkungenFuer(mid)).forEach((wirkung, i) => {
       gelesen.push({
         art: 'klartext',
         env: {
@@ -695,7 +734,10 @@ export function useKonversation({
       })
     })
 
-    if (aktuelleMailbox.current !== mid) return null
+    if (aktuelleMailbox.current !== mid) {
+      behalteEigeneSteuerung()
+      return null
+    }
 
     if (gruppenKontext && fehlenderSchluessel.keyId) {
       // Gedrosselt und ohne Warten: die Antwort kommt als Umschlag im nächsten

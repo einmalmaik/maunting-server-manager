@@ -7684,6 +7684,7 @@
     "removeChatMessage": "Der Verlauf mit {{name}} wird von diesem Gerät gelöscht. Die Freundschaft bleibt bestehen.",
     "removeChatConfirm": "Aus Liste entfernen",
     "chatRemoved": "Chat aus der Liste entfernt",
+    "chatRemoveFailed": "Der Chat konnte nicht entfernt werden. Bitte erneut versuchen.",
     "stateRead": "Vom Gesprächspartner gelesen",
     "stateDelivered": "Zugestellt",
     "stateUndelivered": "Noch nicht zugestellt",

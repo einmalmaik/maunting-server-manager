@@ -102,6 +102,7 @@ import { merkeGruppenName } from '@/services/gruppenName'
 import {
   gespraechsPartner,
   vergissGespraech,
+  versteckeGespraech,
 } from '@/services/gespraechsListe'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
 import { wirksameGruppenrechte } from '@/services/gruppenRollen'
@@ -1576,15 +1577,16 @@ function MessengerSeite() {
       return
     }
 
-    if (msg.clientUuid) {
-      setMessages((prev) => prev.filter((m) => m.clientUuid !== msg.clientUuid))
-      await entferneLokaleNachricht(blindMailboxId, {
-        clientUuid: msg.clientUuid,
-        id: msg.id,
-      }).catch(() => {})
-    }
-
-    await handleSendMessage({
+    /**
+     * Erst senden, dann aufräumen.
+     *
+     * Bis 10/2026 fiel die alte Zeile **vor** dem Versand. Lief gerade ein
+     * anderer Versand, wies `handleSendMessage` den neuen Auftrag still ab —
+     * und die alte Nachricht war trotzdem weg: nicht gesendet, nicht mehr
+     * sichtbar, nicht wiederholbar. Jetzt entscheidet die Annahme des Versands,
+     * ob die alte Zeile fällt; sonst bleibt sie samt „Erneut senden“ stehen.
+     */
+    const angenommen = await handleSendMessage({
       text: msg.text,
       antwortAuf: msg.antwortAuf ?? null,
       img: msg.imageAttachment,
@@ -1596,6 +1598,15 @@ function MessengerSeite() {
       storyReply: msg.storyReply,
       weitergeleitet: msg.weitergeleitet,
     })
+    if (!angenommen) return
+
+    if (msg.clientUuid) {
+      setMessages((prev) => prev.filter((m) => m.clientUuid !== msg.clientUuid))
+      await entferneLokaleNachricht(blindMailboxId, {
+        clientUuid: msg.clientUuid,
+        id: msg.id,
+      }).catch(() => {})
+    }
   }
 
   /**
@@ -1610,9 +1621,26 @@ function MessengerSeite() {
     const userId = activeContact.userId
     const mid = blindMailboxId
 
-    await vergissGespraech(userId).catch(() => {})
+    try {
+      // Erst der örtliche Verlauf. Scheitert das, ist der Chat **nicht**
+      // entfernt: dann bleibt er offen und in der Liste, und die Meldung sagt
+      // den Fehler, statt Erfolg zu behaupten. Umgekehrt wäre der Verlauf weg
+      // und die Zeile stünde noch da.
+      if (mid) await leereMailboxLokal(mid)
+      // **Verstecken, nicht vergessen.** Ein Freund, ein Teammitglied oder ein
+      // öffentliches Profil steht auch ohne Gespräch in der Kontaktliste; ein
+      // gelöschter Gesprächseintrag allein ließ die Zeile deshalb stehen, obwohl
+      // „entfernt“ erschien. Die Freundschaft bleibt unberührt.
+      await versteckeGespraech(userId, {
+        username: activeContact.username,
+        avatarUrl: activeContact.avatarUrl,
+      })
+    } catch {
+      toast.error(t('messenger.chatRemoveFailed'))
+      return
+    }
+
     if (mid) {
-      await leereMailboxLokal(mid).catch(() => {})
       sessionChatCache.delete(mid)
       vergissMailbox(mid)
       useMessengerNotificationStore.getState().markAsRead(mid)

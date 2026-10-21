@@ -722,10 +722,12 @@ export async function fetchE2eeEnvelopes(
   blindMailboxId: string,
   sinceId?: number,
   limit?: number,
+  oldestFirst?: boolean,
 ): Promise<BlindEnvelopeItem[]> {
   const params = new URLSearchParams()
   if (sinceId) params.set('since_id', String(sinceId))
   if (limit) params.set('limit', String(limit))
+  if (oldestFirst) params.set('oldest_first', 'true')
   const query = params.size > 0 ? `?${params.toString()}` : ''
   return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`, {
     headers: nachweisKopf(blindMailboxId),
@@ -746,6 +748,13 @@ export async function fetchE2eeEnvelopes(
  * Bricht die Verbindung mitten in der zweiten Seite ab, bleibt die Ausnahme
  * stehen — der nächste Durchlauf beginnt am zuletzt vollständig gelesenen
  * Stand.
+ *
+ * **Die erste Seite muss die älteste sein.** Ohne `since_id` liefert der Server
+ * die *neuesten* 200. Wer damit beginnt und dann `since_id` auf deren höchste
+ * Kennung setzt, bekommt als zweite Seite nichts mehr: alles dazwischen — bei
+ * einer vollen Mailbox genau die Schlüsselzustellungen — wäre für immer weg,
+ * und ein gespeicherter Cursor machte den Sprung endgültig. Deshalb nennt der
+ * erste Abruf `oldest_first`; ab da sortiert `since_id` von selbst aufsteigend.
  */
 export async function fetchAlleE2eeEnvelopes(
   blindMailboxId: string,
@@ -755,7 +764,7 @@ export async function fetchAlleE2eeEnvelopes(
   const alle: BlindEnvelopeItem[] = []
   let seit = sinceId
   for (;;) {
-    const seite = await fetchE2eeEnvelopes(blindMailboxId, seit, SEITE)
+    const seite = await fetchE2eeEnvelopes(blindMailboxId, seit, SEITE, seit === 0)
     alle.push(...seite)
     if (seite.length < SEITE) return alle
     const naechste = seite.reduce((hoechste, env) => Math.max(hoechste, env.id), seit)

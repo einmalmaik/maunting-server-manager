@@ -125,6 +125,10 @@ function melde(event: SchluesselWarnungEvent): void {
  * `is_approved` ist ein Wort des Servers, und ein Server kann ein Gerät
  * eintragen und freigeben, wie er will. Geglaubt wird deshalb nur:
  *
+ * 0. dem **eigenen** Gerät, wenn Kennung und öffentlicher Schlüssel zu dem
+ *    passen, das hier liegt — auch wartend. Ein anderes wartendes Gerät des
+ *    eigenen Kontos ist kein Ziel (`is_approved === false`); es hat nie etwas
+ *    bekommen, und der Server entscheidet nicht, wer mithört;
  * 1. beim ersten Kontakt allem, was er zeigt (anders geht es nicht — das ist
  *    der Moment für die Sicherheitsnummer);
  * 2. danach jedem Gerät mit denselben Schlüsseln wie beim letzten Mal;
@@ -136,69 +140,71 @@ function melde(event: SchluesselWarnungEvent): void {
  * nach Verlust aller Geräte für immer stumm.
  *
  * Das eigene Gerät zählt immer: seine Schlüssel liegen hier.
+ *
+ * `eigenes` ist dieses Gerät, wie der Aufrufer es eben veröffentlicht hat.
+ * Ohne die Angabe wird die Ablage gefragt. Der Sendepfad übergibt es, weil er
+ * die Kennung in der Hand hat und nicht davon abhängen soll, ob der
+ * Arbeitsspeicher der Ablage gerade gefüllt ist.
  */
 export async function vertrauteGeraete(
   userId: number,
   liste: E2eeGeraetItem[],
-  { eigenesGeraetId }: { eigenesGeraetId?: string } = {},
+  eigenes?: { kennung: string; publicKeyJwk: string },
 ): Promise<E2eeGeraetItem[]> {
-  const hashes = await Promise.all(liste.map((g) => sha256Hex(utf8ToBytes(g.public_key))))
+  const lokal = ramGeraetFuer(userId)
+  const eigenesGeraet =
+    eigenes ?? (lokal ? { kennung: lokal.kennung, publicKeyJwk: lokal.paar.publicKeyJwk } : null)
+  const eigenesKonto = angemeldetesKonto()
+
+  /**
+   * Ein wartendes Gerät des **eigenen** Kontos ist kein Ziel — außer diesem.
+   *
+   * `is_approved` ist ein Wort des Servers; wer es für ein Ziel hält, schickt
+   * seine Nachrichten an einen Schlüssel, den der Server selbst eingetragen
+   * haben kann. Ausgenommen ist allein das Gerät, dessen privater Schlüssel
+   * hier liegt: der Vergleich von Kennung **und** öffentlichem Schlüssel mit
+   * der örtlichen Ablage ist der Nachweis, den nur dieses Gerät führen kann.
+   *
+   * Für fremde Konten kommt `mitWartenden` gar nicht erst an — der Server gibt
+   * Dritten nur freigegebene Geräte heraus.
+   */
+  const wartend: string[] = []
+  const sicht =
+    eigenesKonto === null || userId !== eigenesKonto
+      ? liste
+      : liste.filter((g) => {
+          if (g.is_approved !== false) return true
+          const istDieses =
+            eigenesGeraet?.kennung === g.device_id &&
+            eigenesGeraet.publicKeyJwk === g.public_key
+          if (!istDieses) wartend.push(g.device_id)
+          return istDieses
+        })
+  if (wartend.length > 0) melde({ userId, typ: 'unbestaetigt', geraete: wartend })
+
+  const hashes = await Promise.all(sicht.map((g) => sha256Hex(utf8ToBytes(g.public_key))))
   const fingerabdruck = (i: number): VertrautesGeraet => ({
     k: hashes[i],
-    s: liste[i].signing_public_key || '',
+    s: sicht[i].signing_public_key || '',
   })
   const bekannt = liesVertraute(userId)
 
-  /**
-   * Für das **eigene** Konto entscheidet der Server, welche Geräte freigegeben
-   * sind: `GET /e2ee/devices/<id>` liefert Dritten ausschließlich bestätigte
-   * Geräte, und ein Gerät ohne Freigabe kommt hier nur mit `mitWartenden` an.
-   *
-   * Die Signaturkette bleibt für **fremde** Konten scharf. Dort schützt sie
-   * davor, dass der Server ein Gerät unterschiebt (Regel 21/41). Auf dem
-   * eigenen Konto ist sie eine zweite, langsamere Wahrheit neben der Liste: ein
-   * Gerät, das der Server freigegeben hat und das dieses Konto selbst gerade
-   * benutzt, wurde dadurch blockiert, dass `approved_by` auf ihm selbst stand
-   * (`_selbst_beglaubigen`). Genau das hielt Web, Pontis und MSS davon ab, sich
-   * gegenseitig zu beliefern.
-   *
-   * Das **eigene** Gerät zählt immer, auch wenn es wartet: seine Schlüssel
-   * liegen hier, und der Sendepfad braucht es, um überhaupt etwas zu bauen.
-   * Ein anderes wartendes Gerät des eigenen Kontos bekommt weiterhin nichts.
-   */
-  const eigenesKonto = angemeldetesKonto()
-  if (eigenesKonto !== null && userId === eigenesKonto) {
-    const vertraut = new Map<string, VertrautesGeraet>()
-    const offen: string[] = []
-    liste.forEach((g, i) => {
-      if (g.device_id === eigenesGeraetId || g.is_approved !== false) {
-        vertraut.set(g.device_id, fingerabdruck(i))
-      } else {
-        offen.push(g.device_id)
-      }
-    })
-    schreibeVertraute(userId, { ...(bekannt ?? {}), ...Object.fromEntries(vertraut) })
-    if (offen.length > 0) melde({ userId, typ: 'unbestaetigt', geraete: offen })
-    return liste.filter((g) => vertraut.has(g.device_id))
-  }
-
   if (bekannt === null) {
     const neu: VertrauteListe = {}
-    liste.forEach((g, i) => {
+    sicht.forEach((g, i) => {
       neu[g.device_id] = fingerabdruck(i)
     })
     schreibeVertraute(userId, neu)
-    return liste
+    return sicht
   }
 
-  const eigenes = ramGeraetFuer(userId)
   const vertraut = new Map<string, VertrautesGeraet>()
   const offen: number[] = []
-  liste.forEach((g, i) => {
+  sicht.forEach((g, i) => {
     const fp = fingerabdruck(i)
     const alt = bekannt[g.device_id]
     const istEigenes =
-      eigenes?.kennung === g.device_id && eigenes.paar.publicKeyJwk === g.public_key
+      eigenesGeraet?.kennung === g.device_id && eigenesGeraet.publicKeyJwk === g.public_key
     // Ein Signaturschlüssel, der zu einem bekannten Gerät nachkommt, ist die
     // Nachrüstung des Bestands und kein Austausch.
     const gleich = alt && alt.k === fp.k && (alt.s === fp.s || alt.s === '')
@@ -212,7 +218,7 @@ export async function vertrauteGeraete(
     weiter = false
     for (let n = 0; n < offen.length; n += 1) {
       const i = offen[n]
-      const g = liste[i]
+      const g = sicht[i]
       const von = g.approved_by
       if (!von || von === g.device_id || !g.approval_signature) continue
       const schluessel = vertraut.get(von)?.s || bekannt[von]?.s
@@ -227,14 +233,14 @@ export async function vertrauteGeraete(
     }
   }
 
-  if (vertraut.size === 0 && liste.length > 0) {
+  if (vertraut.size === 0 && sicht.length > 0) {
     const neu: VertrauteListe = {}
-    liste.forEach((g, i) => {
+    sicht.forEach((g, i) => {
       neu[g.device_id] = fingerabdruck(i)
     })
     schreibeVertraute(userId, neu)
-    melde({ userId, typ: 'konto_neustart', geraete: liste.map((g) => g.device_id) })
-    return liste
+    melde({ userId, typ: 'konto_neustart', geraete: sicht.map((g) => g.device_id) })
+    return sicht
   }
 
   // Entfernte Geräte bleiben in der Liste: ihr Signaturschlüssel beglaubigt
@@ -242,9 +248,9 @@ export async function vertrauteGeraete(
   schreibeVertraute(userId, { ...bekannt, ...Object.fromEntries(vertraut) })
   if (neuFreigegeben.length > 0) melde({ userId, typ: 'neues_geraet', geraete: neuFreigegeben })
   if (offen.length > 0) {
-    melde({ userId, typ: 'unbestaetigt', geraete: offen.map((i) => liste[i].device_id) })
+    melde({ userId, typ: 'unbestaetigt', geraete: offen.map((i) => sicht[i].device_id) })
   }
-  return liste.filter((g) => vertraut.has(g.device_id))
+  return sicht.filter((g) => vertraut.has(g.device_id))
 }
 
 /**

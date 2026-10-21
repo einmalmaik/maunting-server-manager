@@ -3669,8 +3669,104 @@ describe('Messenger (Allround Chat)', () => {
       await waitFor(() => {
         expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
       })
-      expect((await ladeGespraeche()).has(101)).toBe(false)
+      // Die Zeile ist auch für einen **Freund** weg. Bis 10/2026 fiel nur der
+      // Gesprächseintrag; die Kontaktliste fügte alice als Freundin wieder
+      // hinzu, und die Zeile stand trotz „entfernt“ weiter da.
+      await waitFor(() => expect(screen.queryByText('alice')).not.toBeInTheDocument())
+      // Gemerkt wird das Verstecken, nicht ein Löschen: das Gespräch bleibt
+      // samt Namen und Mailbox für eine ankommende Nachricht erhalten.
+      expect((await ladeGespraeche()).get(101)?.versteckt).toBe(true)
       expect(sessionStorage.getItem('msm:active_messenger_user_id')).toBeNull()
+    })
+
+    it('meldet einen Fehler, wenn der örtliche Verlauf nicht gelöscht werden kann', async () => {
+      // Bis 10/2026 verschluckte `leereMailboxLokal` jeden Fehler, und die Seite
+      // meldete „Chat entfernt“, während der Verlauf auf der Platte blieb.
+      const { leereMailboxLokal } = await import('@/services/messengerLocalStore')
+      vi.mocked(leereMailboxLokal).mockRejectedValueOnce(new Error('IndexedDB verweigert'))
+
+      render(
+        <MemoryRouter>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      fireEvent.click(await screen.findByText('alice'))
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.removeChatFromList')))
+      fireEvent.click(await screen.findByText(i18n.t('messenger.removeChatConfirm')))
+
+      const { useToastStore } = await import('@/stores/toastStore')
+      await waitFor(() => {
+        expect(useToastStore.getState().toasts.map((m) => m.message)).toContain(
+          i18n.t('messenger.chatRemoveFailed'),
+        )
+      })
+      // Der Chat bleibt offen und in der Liste — die Löschung hat nicht
+      // stattgefunden.
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
+      expect((await ladeGespraeche()).get(101)?.versteckt).not.toBe(true)
+    })
+
+    it('löscht eine gescheiterte Nachricht erst, wenn der neue Versand angenommen ist', async () => {
+      // Bis 10/2026 fiel die alte Zeile **vor** dem Versand. Lief gerade ein
+      // anderer Versand, wies `handleSendMessage` den Auftrag still ab — und
+      // die Nachricht war trotzdem weg: nicht gesendet, nicht sichtbar, nicht
+      // wiederholbar. Mit gedrosseltem Versand ist genau dieses Fenster offen.
+      const { baueZustellungen } = await import('@/services/ratchetSitzung')
+      nachrichten.set('test-blind-mailbox', [
+        {
+          id: 1,
+          clientUuid: 'gescheitert-1',
+          senderId: 1,
+          text: 'Nicht angekommen',
+          createdAt: '2026-09-08T12:00:00Z',
+          isSelf: true,
+          status: 'failed',
+        },
+      ])
+      let freigeben!: () => void
+      vi.mocked(baueZustellungen).mockReturnValueOnce(
+        new Promise((resolve) => {
+          freigeben = () => resolve([])
+        }) as never,
+      )
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+      await screen.findByText('Nicht angekommen')
+
+      // Ein Versand läuft und hängt an der verschlüsselten Zustellung.
+      fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
+        target: { value: 'Gerade unterwegs' },
+      })
+      // Erst wenn `baueZustellungen` hängt, läuft der Versand wirklich.
+      await waitFor(() => expect(socialApi.sendTypingSignal).toHaveBeenCalled())
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
+      await waitFor(() => expect(baueZustellungen).toHaveBeenCalled())
+
+      // In diesem Fenster „Erneut senden“ drücken: der Auftrag wird abgewiesen,
+      // die gescheiterte Zeile muss bleiben.
+      const { entferneLokaleNachricht } = await import('@/services/messengerLocalStore')
+      vi.mocked(entferneLokaleNachricht).mockClear()
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.stateFailedRetry')))
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Die Zeile steht noch — und niemand hat sie aus der Ablage genommen.
+      expect(screen.getByText('Nicht angekommen')).toBeInTheDocument()
+      expect(screen.getByLabelText(i18n.t('messenger.stateFailedRetry'))).toBeInTheDocument()
+      expect(entferneLokaleNachricht).not.toHaveBeenCalledWith(
+        'test-blind-mailbox',
+        expect.objectContaining({ clientUuid: 'gescheitert-1' }),
+      )
+
+      freigeben()
     })
   })
 })

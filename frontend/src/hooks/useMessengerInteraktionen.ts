@@ -49,7 +49,8 @@ interface Optionen {
   beendeAuswahl: () => void
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>
   sendE2eeControlMessage: (payload: Record<string, unknown>) => Promise<void>
-  handleSendMessage: (auftrag?: SendeAuftrag) => Promise<void>
+  /** `false` heißt: ein Riegel hat gegriffen, es wurde nichts angelegt. */
+  handleSendMessage: (auftrag?: SendeAuftrag) => Promise<boolean>
 }
 
 export function useMessengerInteraktionen(optionen: Optionen) {
