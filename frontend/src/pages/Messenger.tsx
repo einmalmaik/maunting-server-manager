@@ -36,7 +36,7 @@ import {
   ArrowDown,
   AtSign,
 } from 'lucide-react'
-import { useCallStore, setzeAnrufIdentitaet } from '@/stores/useCallStore'
+import { useCallStore } from '@/stores/useCallStore'
 import { apiUrl } from '@/config/api'
 import {
   CircularVideoNoteRecorder,
@@ -58,10 +58,10 @@ import {
   type ChatStoryItem,
   joinGroupByInvite,
   sendFriendRequest,
-  relayE2eeEnvelope,
   sendTypingSignal,
   getGroupInviteInfo,
 } from '@/api/social'
+import { deriveBlindMailboxId } from '@/services/e2eeCrypto'
 import { maxAnhangBytes } from '@/services/medienKrypto'
 import {
   type AudioAttachment,
@@ -69,7 +69,7 @@ import {
   type ImageAttachment,
   type MedienBindungsKontext,
 } from '@/components/social/ChatMediaAttachments'
-import { baueVersandFuer, useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
+import { baueVersandFuer } from '@/hooks/useKonversation'
 import { useSprachaufnahme } from '@/hooks/useSprachaufnahme'
 import { useSprachwiedergabe } from '@/hooks/useSprachwiedergabe'
 import { useChatSuche } from '@/hooks/useChatSuche'
@@ -77,11 +77,10 @@ import { useEntwuerfe } from '@/hooks/useEntwuerfe'
 import { useMessengerKontakte } from '@/pages/messenger/useMessengerKontakte'
 import { useMessengerAuswahl } from '@/pages/messenger/useMessengerAuswahl'
 import { useGruppenAktionen } from '@/hooks/useGruppenAktionen'
+import { useMessengerKern } from '@/hooks/useMessengerKern'
 import { useMessengerSync } from '@/hooks/useMessengerSync'
-import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { useSicherheitsnummern } from '@/hooks/useSicherheitsnummern'
 import { useUeberallAnsicht } from '@/hooks/useUeberallAnsicht'
-import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   loadNotesOfflineFirst,
   loadCalendarEventsOfflineFirst,
@@ -94,27 +93,15 @@ import {
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem } from '@/pages/Calendar'
 import {
-  deriveBlindMailboxId,
-  scrubPlaintextStorage,
-} from '@/services/e2eeCrypto'
-import {
   resolveIdentity,
   forgetRecipientPublicKey,
   E2eeRecipientKeyMissingError,
-  IDENTITY_LOADING,
-  type E2eeIdentity,
 } from '@/services/e2eeIdentity'
 import {
   logischeUuid,
   DrGeraetNichtEingetragenError,
   DrZustellungFehlgeschlagenError,
 } from '@/services/ratchetSitzung'
-import {
-  geraeteVon,
-  eigenesGeraetFreigegeben,
-  onEigeneFreigabe,
-  onSchluesselWarnung,
-} from '@/services/e2eeGeraet'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { abonniereBekannteGespraeche } from '@/services/gruppenSchluessel'
 import {
@@ -125,7 +112,6 @@ import {
 import { merkeGruppenName } from '@/services/gruppenName'
 import {
   gespraechsPartner,
-  merkeGespraech,
   vergissGespraech,
 } from '@/services/gespraechsListe'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
@@ -133,9 +119,7 @@ import { wirksameGruppenrechte } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
   leereMailboxLokal,
-  loadLocalMessages,
   saveLocalMessages,
-  sichereDauerhafteAblage,
   updateMessageInLocalStore,
   sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
@@ -171,10 +155,8 @@ import {
   stufenLabel,
   VERFALL_STUFEN,
   verfaelltAm as berechneVerfall,
-  verfallsfrist,
   verfallStand,
 } from '@/services/nachrichtVerfall'
-import { ladeEntwurf } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu } from '@/services/nachrichtVersand'
 import { ErwaehnungsWache } from '@/components/social/ErwaehnungsWache'
@@ -505,25 +487,11 @@ function MessengerSeite() {
   }, [])
 
   // Conversation state
-  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputText, setInputText] = useState('')
-  const [loadingMessages, setLoadingMessages] = useState(false)
-  const [sending, setSending] = useState(false)
-  // Der Identitätsschlüssel gehört dem Konto. `state` sagt, ob dieses Gerät ihn
-  // gerade öffnen kann; `decryptionKeys` enthält zusätzlich die alten
-  // Gerätesschlüssel, ohne die der Verlauf von vor der Umstellung stumm bliebe.
-  const [identity, setIdentity] = useState<E2eeIdentity>(IDENTITY_LOADING)
-  // `loadMessages` läuft auch aus Listenern, die nur an `blindMailboxId`
-  // hängen. Läse es die Identität aus der Closure, bliebe dort für immer der
-  // Stand vom Zeitpunkt der Registrierung stehen — und wäre das `loading`,
-  // käme über diesen Weg nie wieder eine Nachricht an.
-  const identityRef = useRef<E2eeIdentity>(IDENTITY_LOADING)
-  identityRef.current = identity
   // Ein Gerät legt seinen Schlüssel beim ersten Öffnen selbst an. Es gibt
   // nichts einzurichten, also auch keinen Zustand, in dem das Schreiben auf
   // Dauer gesperrt wäre — nur die kurze Spanne bis `ready`. Ist der Messenger
   // per PIN zu, steht ohnehin der Sperrschirm statt dieser Leiste.
-  const istSchreibenGesperrt = Boolean(activeContact) && identity.state === 'loading'
 
   // Attachments
   const [isNotePickerOpen, setIsNotePickerOpen] = useState(false)
@@ -557,9 +525,6 @@ function MessengerSeite() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const justSentRef = useRef<boolean>(false)
-  const activeMailboxIdRef = useRef<string>('')
-  const currentLoadSeqRef = useRef<number>(0)
-
   // Message Editing State
   const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(null)
 
@@ -577,9 +542,6 @@ function MessengerSeite() {
    * Mehrfachauswahl: aus der Kopfzeile wird eine Aktionsleiste. Zurück und
    * Escape beenden sie, wie überall, wo `useMehrfachauswahl` gilt.
    */
-  const auswahlReihe = useMemo(() => messages.map(auswahlSchluessel), [messages])
-  const wahl = useMehrfachauswahl(auswahlReihe)
-  const auswahlModus = wahl.auswahl !== null
   /** Was weitergeleitet werden soll, und wie weit das Neu-Hochladen ist. */
   const [weiterzuleiten, setWeiterzuleiten] = useState<ChatMessage[] | null>(null)
   const [wlFortschritt, setWlFortschritt] = useState<{ gesamt: number; fertig: number } | null>(null)
@@ -591,10 +553,43 @@ function MessengerSeite() {
   const [verfallSekunden, setVerfallSekunden] = useState(0)
   const [verfallOffen, setVerfallOffen] = useState(false)
 
-  const highestIncomingIdAcknowledgedRef = useRef<number>(0)
-  const highestIncomingIdDeliveredRef = useRef<number>(0)
-  const maxPartnerReadIdRef = useRef<number>(0)
-  const maxPartnerDeliveredIdRef = useRef<number>(0)
+  const gruppenrechteVonRef = useRef<(konto: number) => Set<string>>(() => new Set())
+  const wahlLeerenRef = useRef<() => void>(() => {})
+  const kern = useMessengerKern({
+    t,
+    currentUserId,
+    friends,
+    activeContact,
+    activeGroup,
+    messengerGesperrt,
+    gruppenrechteVon: (konto) => gruppenrechteVonRef.current(konto),
+    setAngeheftet,
+    setVerfallSekunden,
+    markAsRead,
+    isBlocked,
+    readReceiptsEnabled,
+    onGespraechWechsel: () => {
+      setAntwortAuf(null)
+      chatSuche.schliesse()
+      setAngeheftet(null)
+      wahlLeerenRef.current()
+      setInputText('')
+    },
+    onEntwurf: setInputText,
+  })
+  const {
+    messages, setMessages, loadingMessages, sending, setSending,
+    identity, setIdentity, identityRef, geraetWartet, blindMailboxId, konversation,
+    sendE2eeControlMessage, loadMessages, zeigeSystemzeile,
+    eingabeBeruehrtRef, highestIncomingIdAcknowledgedRef, highestIncomingIdDeliveredRef,
+    maxPartnerReadIdRef, maxPartnerDeliveredIdRef,
+  } = kern
+  const auswahlReihe = useMemo(() => messages.map(auswahlSchluessel), [messages])
+  const wahl = useMehrfachauswahl(auswahlReihe)
+  wahlLeerenRef.current = wahl.leeren
+  const auswahlModus = wahl.auswahl !== null
+  const istSchreibenGesperrt = Boolean(activeContact) && identity.state === 'loading'
+
 
   // Real-time typing & voice recording indicator state
   const [partnerActivity, setPartnerActivity] = useState<{ status: 'typing' | 'recording'; username?: string } | null>(null)
@@ -747,110 +742,6 @@ function MessengerSeite() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserId, gespraechsAbdruck])
 
-  // Identität des Kontos auflösen und Klartextreste aus der Altzeit entfernen.
-  //
-  // Hier wird bewusst nichts erzeugt und nichts veröffentlicht. Vorher stand an
-  // dieser Stelle `getOrGenerateLocalKeyPair` plus Upload: jedes Gerät schrieb
-  // seinen eigenen Schlüssel auf das Konto, überschrieb den des vorigen, und ab
-  // da war der ganze Verlauf auf beiden Seiten unlesbar. Fehlt der Schlüssel
-  // hier, lautet die Antwort `locked` und der Benutzer entsperrt ihn selbst.
-  useEffect(() => {
-    scrubPlaintextStorage()
-    if (!currentUserId) return
-    // Gesperrt gibt die Ablage den Geräteausweis nicht heraus, und das ist so
-    // gewollt. Hier trotzdem zu fragen, hieße: der Versuch scheitert, die
-    // Identität bleibt auf `loading` stehen — und weil dieser Effekt nur am
-    // Konto hängt, käme er nach dem Entsperren nie wieder vorbei. Die Folge war
-    // eine Eingabeleiste, die dauerhaft „zuerst den Schlüssel entsperren"
-    // verlangte, obwohl längst entsperrt war. Deshalb steht der Sperrzustand
-    // mit in den Abhängigkeiten: geht das Schloss auf, wird neu gefragt.
-    if (messengerGesperrt) return
-    let active = true
-
-    // Legt beim ersten Mal den Geräteschlüssel an und meldet ihn beim Konto.
-    // Es gibt nichts mehr nachzureichen: der Schlüssel gehört diesem Gerät und
-    // war noch nie woanders.
-    resolveIdentity(currentUserId)
-      .then((next) => {
-        if (active) setIdentity(next)
-      })
-      .catch(() => {})
-
-    return () => {
-      active = false
-    }
-  }, [currentUserId, messengerGesperrt])
-
-  /**
-   * Den Verlauf vor dem Aufräumen des Browsers schützen.
-   *
-   * Steht vor der Übernahme des Altbestands, und zwar mit Absicht: gleich
-   * danach wird der alte Kontoschlüssel gelöscht, und ab dann ist die lokale
-   * Ablage die einzige Stelle, an der der eigene Gesprächsanteil existiert.
-   * Erst das Dach, dann einräumen.
-   */
-  useEffect(() => {
-    if (!currentUserId) return
-    void sichereDauerhafteAblage()
-  }, [currentUserId])
-
-  /**
-   * Der Verlauf aus der Zeit des Kontoschlüssels zieht einmal um.
-   *
-   * Nur Direktchats: Gruppennachrichten von damals lagen unter einem Schlüssel,
-   * der sich aus der Gruppenkennung ableiten ließ, und den gibt es nicht mehr —
-   * für sie ist nichts zu retten. Läuft genau einmal je Gerät und Konto, siehe
-   * `altbestandUebernahme.ts`; danach ist der Kontoschlüssel gelöscht.
-   */
-  useEffect(() => {
-    if (!currentUserId || friends.length === 0) return
-    // Gesperrt bricht der Umzug bei der ersten Zeile ab, die geschrieben werden
-    // soll. Verloren geht dabei nichts — der alte Schlüssel bleibt liegen, und
-    // beim nächsten Anlauf fängt es von vorn an. Trotzdem nicht anfangen: ein
-    // Durchlauf, der nur scheitern kann, ist keine Arbeit, sondern Lärm.
-    if (messengerGesperrt) return
-    let active = true
-
-    Promise.all(friends.map((f) => deriveBlindMailboxId(currentUserId, f.user_id)))
-      .then((mailboxen) => {
-        if (!active) return
-        return uebernimmAltbestand(currentUserId, mailboxen)
-      })
-      .catch(() => {})
-
-    return () => {
-      active = false
-    }
-  }, [currentUserId, friends.length, messengerGesperrt])
-
-  // Ein Funke gibt es nur unter Freunden, und er beginnt mit der Freundschaft.
-  // Dieselbe Auswahl wie in `contactsList`.
-  useEffect(() => {
-    useFunkenStore.getState().setzeFreunde(
-      friends
-        .filter((f) => f.status === 'accepted' || (f as any).friend_user_id)
-        .map((f) => ({ userId: Number(f.user_id ?? (f as any).friend_user_id ?? f.id), seit: f.created_at })),
-    )
-  }, [friends])
-
-  // Der Anruf-Store braucht dieselbe Identität, um Raumschlüssel zu verpacken
-  // und auszupacken. Er hängt bewusst nicht selbst am Schlüsselbund: er soll
-  // nicht wissen, wie eine Identität zustande kommt, nur dass es eine gibt.
-  useEffect(() => {
-    if (!currentUserId) {
-      setzeAnrufIdentitaet(null)
-      return
-    }
-    if (identity.state !== 'ready' || !identity.sendPair) {
-      return
-    }
-    setzeAnrufIdentitaet({
-      userId: currentUserId,
-      publicKeyJwk: identity.sendPair.publicKeyJwk,
-      decryptionKeys: identity.decryptionKeys,
-    })
-  }, [currentUserId, identity])
-
   const handleStoryCreated = (story: ChatStoryItem) => {
     setStories((prev) => [story, ...prev])
     toast.success(t('messenger.storyPublished'))
@@ -963,151 +854,6 @@ function MessengerSeite() {
    * Verfahrens liegen jetzt in `useKonversation`; hier bleibt, was die
    * Oberfläche davon merkt.
    */
-  const gespraechsZiel = useMemo<GespraechsZiel>(() => {
-    if (activeGroup) {
-      return {
-        art: 'gruppe',
-        groupId: activeGroup.id,
-        mitglieder: (activeGroup.members ?? []).map((m) => m.user_id),
-        istEigentuemer: activeGroup.role === 'owner',
-      }
-    }
-    if (activeContact) return { art: 'direkt', peerId: activeContact.userId }
-    return { art: 'keins' }
-  }, [activeGroup?.id, activeGroup?.members, activeContact?.userId])
-
-  /**
-   * Schreibt die Systemzeile zum Sitzungsbruch in den Verlauf.
-   *
-   * Gedrosselt auf einmal je Gerät und Minute. Ohne die Drossel schaukeln sich
-   * zwei Clients hoch, die beide gleichzeitig den Bruch bemerken, und der
-   * Verlauf füllt sich mit Systemzeilen statt mit Nachrichten.
-   */
-  const sitzungsMeldungRef = useRef<Map<string, number>>(new Map())
-  const sitzungNeuGemeldet = useCallback((geraet: string) => {
-    const jetzt = Date.now()
-    const zuletzt = sitzungsMeldungRef.current.get(geraet) || 0
-    if (jetzt - zuletzt < 60_000) return
-    sitzungsMeldungRef.current.set(geraet, jetzt)
-
-    const zeile: ChatMessage = {
-      id: jetzt,
-      clientUuid: `sys-dr-${geraet}-${jetzt}`,
-      senderId: 0,
-      text: t('messenger.sessionRebuilt'),
-      createdAt: new Date().toISOString(),
-      isSelf: false,
-      isSystem: true,
-    }
-    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
-  }, [])
-
-  /**
-   * Schreibt die Systemzeile zu einem abgewiesenen Sitzungsaufbau.
-   *
-   * Jeder Aufbau meldet sich nur einmal — er bleibt gemerkt. Gedrosselt wird
-   * trotzdem, je Gerät und Minute: wer Fälschungen in Serie schickt, soll den
-   * Verlauf nicht mit Warnungen zuschütten können.
-   */
-  const aufbauMeldungRef = useRef<Map<string, number>>(new Map())
-  const aufbauAbgelehnt = useCallback((geraet: string) => {
-    const jetzt = Date.now()
-    const zuletzt = aufbauMeldungRef.current.get(geraet) || 0
-    if (jetzt - zuletzt < 60_000) return
-    aufbauMeldungRef.current.set(geraet, jetzt)
-
-    const zeile: ChatMessage = {
-      id: jetzt,
-      clientUuid: `sys-dr-abgewiesen-${geraet}-${jetzt}`,
-      senderId: 0,
-      text: t('messenger.sessionSetupRejected'),
-      createdAt: new Date().toISOString(),
-      isSelf: false,
-      isSystem: true,
-    }
-    setMessages((prev) => sortMessagesChronologically([...prev, zeile]))
-  }, [t])
-
-  /**
-   * Eine Systemzeile in den offenen Verlauf schreiben.
-   *
-   * Nur Anzeige und nur für diese Sitzung: sie wandert nicht in die lokale
-   * Ablage und reist nirgendwohin. Die Gegenseite schreibt sich ihre eigene,
-   * wenn sie den Umschlag sieht.
-   */
-  const zeigeSystemzeile = useCallback((text: string) => {
-    const jetzt = Date.now()
-    setMessages((prev) =>
-      sortMessagesChronologically([
-        ...prev,
-        {
-          id: jetzt,
-          clientUuid: `sys-${jetzt}`,
-          senderId: 0,
-          text,
-          createdAt: new Date().toISOString(),
-          isSelf: false,
-          isSystem: true,
-        },
-      ]),
-    )
-  }, [])
-
-  // Geräteverzeichnis: wer die Liste holt, prüft sie (`vertrauteGeraete`) und
-  // meldet, was ihm auffällt. Das eigene Konto gehört dazu — ein Gerät, das
-  // jemand mit deinem Passwort einträgt, sollst zuerst du sehen.
-  useEffect(() => {
-    if (!activeContact?.userId) return
-    geraeteVon(activeContact.userId).catch(() => {})
-  }, [activeContact?.userId])
-
-  useEffect(() => {
-    if (!currentUserId) return
-    geraeteVon(currentUserId).catch(() => {})
-  }, [currentUserId])
-
-  // Ein wartendes Gerät bekommt nichts. Ohne Hinweis sähe das aus wie ein
-  // kaputter Messenger — also steht oben, was zu tun ist.
-  const [geraetWartet, setGeraetWartet] = useState(eigenesGeraetFreigegeben() === false)
-  useEffect(() => onEigeneFreigabe((frei) => setGeraetWartet(frei === false)), [])
-
-  useEffect(() => {
-    const abbestellen = onSchluesselWarnung((ev) => {
-      if (currentUserId === ev.userId) {
-        const text = {
-          neues_geraet: t('messenger.ownNewDevice'),
-          unbestaetigt: t('messenger.ownUnverifiedDeviceWarning'),
-          konto_neustart: t('messenger.ownAccountResetWarning'),
-        }[ev.typ]
-        zeigeSystemzeile(text)
-        return
-      }
-      let name = ''
-      if (activeContact && activeContact.userId === ev.userId) {
-        name = activeContact.username || t('messenger.thisContact')
-      } else if (activeGroup) {
-        const member = (activeGroup.members ?? []).find((m) => Number(m.user_id) === ev.userId)
-        if (member) name = member.username || t('messenger.thisContact')
-      }
-      if (!name) return
-      const text = {
-        neues_geraet: t('messenger.newDeviceDetected', { name }),
-        unbestaetigt: t('messenger.unverifiedDeviceWarning', { name }),
-        konto_neustart: t('messenger.accountResetWarning', { name }),
-      }[ev.typ]
-      zeigeSystemzeile(text)
-    })
-    return abbestellen
-  }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])
-
-  const konversation = useKonversation({
-    ziel: gespraechsZiel,
-    eigeneId: currentUserId,
-    identitaetRef: identityRef,
-    meldeSitzungsbruch: sitzungNeuGemeldet,
-    meldeAufbauAbgelehnt: aufbauAbgelehnt,
-  })
-  const blindMailboxId = konversation.blindMailboxId
 
   /*
    * Das offene Gespräch in den versiegelten örtlichen Speicher.
@@ -1122,165 +868,6 @@ function MessengerSeite() {
    * mehr ist, verschwände sonst samt seinem Chatverlauf aus der Liste, und ein
    * Verlauf ohne Zeile ist ein Verlauf, den niemand mehr findet.
    */
-  useEffect(() => {
-    if (!activeContact) return
-    void merkeGespraech(activeContact.userId, {
-      username: activeContact.username,
-      avatarUrl: activeContact.avatarUrl,
-      blindMailboxId: blindMailboxId,
-    }).catch(() => {})
-  }, [activeContact?.userId, activeContact?.username, blindMailboxId])
-
-  /**
-   * Welchem Gespräch der Zustand unten gehört.
-   *
-   * Die Mailbox-Kennung entsteht asynchron. Zwischen „Chat offen" und
-   * „Kennung abgeleitet" darf das Eingabefeld nicht geleert werden — sonst
-   * verschwindet, was jemand in genau diesem Moment tippt. Der Schlüssel aus
-   * Konto oder Gruppe ändert sich in dieser Spanne nicht.
-   */
-  const gespraechsZielRef = useRef('')
-  /** Für welches Gespräch der Entwurf schon geholt wurde. */
-  const entwurfGeholtRef = useRef('')
-  /** Ob hier schon getippt wurde — ein später Entwurf darf das nicht ersetzen. */
-  const eingabeBeruehrtRef = useRef(false)
-
-  /**
-   * Der Wechsel in ein anderes Gespräch.
-   *
-   * Zählerstände zurücksetzen, den lokalen Verlauf zeigen, solange der Abruf
-   * läuft, und die Benachrichtigungen umhängen. Alles davon ist Anzeige und
-   * gehört deshalb hierher, nicht in den Hook.
-   */
-  useEffect(() => {
-    let active = true
-
-    /**
-     * Der Wechsel wird **vor** dem frühen Ausstieg festgestellt.
-     *
-     * Beim ersten Öffnen ist die Mailbox noch leer, und `activeMailboxIdRef`
-     * steht ebenfalls auf leer: der Effekt kehrte zurück, ohne das Feld zu
-     * leeren. Kam die Kennung kurz darauf, galt derselbe Chat als „neu", und
-     * der eben getippte Text verschwand. Jetzt gehört das Leeren dem Wechsel
-     * des Gegenübers, nicht dem Eintreffen der Kennung.
-     */
-    const zielSchluessel = activeGroup
-      ? `g:${activeGroup.id}`
-      : activeContact
-        ? `u:${activeContact.userId}`
-        : ''
-    const neuesGespraech = gespraechsZielRef.current !== zielSchluessel
-    gespraechsZielRef.current = zielSchluessel
-
-    if (neuesGespraech) {
-      setAntwortAuf(null)
-      chatSuche.schliesse()
-      setAngeheftet(null)
-      wahl.leeren()
-      setInputText('')
-      eingabeBeruehrtRef.current = false
-      // Wer den Chat verlässt, findet beim nächsten Öffnen seinen Entwurf
-      // wieder — der Merker gehört nur zu diesem Besuch.
-      if (!zielSchluessel) entwurfGeholtRef.current = ''
-    }
-
-    if (activeMailboxIdRef.current === blindMailboxId) return
-    activeMailboxIdRef.current = blindMailboxId
-    // Der eigene Quittungsstand kommt aus der Ablage, nicht von null. Sonst
-    // quittiert jeder Chatwechsel dieselbe letzte Nachricht erneut. Was die
-    // Gegenseite quittiert hat, wird dagegen bei jedem Abruf neu aus den
-    // Umschlägen gelesen und darf hier zurückfallen.
-    const stand = quittungsstand(blindMailboxId)
-    highestIncomingIdAcknowledgedRef.current = stand.gelesen
-    highestIncomingIdDeliveredRef.current = stand.zugestellt
-    maxPartnerReadIdRef.current = 0
-    maxPartnerDeliveredIdRef.current = 0
-    useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
-
-    if (!blindMailboxId) {
-      setMessages([])
-      setLoadingMessages(Boolean(activeContact || activeGroup))
-      return
-    }
-
-    // Frist und angefangener Text gehören zu diesem Chat, nicht zum vorigen.
-    setVerfallSekunden(verfallsfrist(blindMailboxId))
-    if (entwurfGeholtRef.current !== zielSchluessel) {
-      entwurfGeholtRef.current = zielSchluessel
-      // Wer schon tippt, wartet nicht auf den Entwurf von gestern.
-      if (!eingabeBeruehrtRef.current) {
-        ladeEntwurf(blindMailboxId)
-          .then((text) => {
-            if (!active || activeMailboxIdRef.current !== blindMailboxId) return
-            if (text && !eingabeBeruehrtRef.current) setInputText(text)
-          })
-          .catch(() => {})
-      }
-    }
-
-    const cached = sessionChatCache.get(blindMailboxId)
-    if (cached && cached.length > 0) {
-      setMessages(cached)
-      setLoadingMessages(false)
-    } else {
-      setMessages([])
-      setLoadingMessages(true)
-      loadLocalMessages(blindMailboxId)
-        .then((localMsgs) => {
-          if (active && activeMailboxIdRef.current === blindMailboxId && localMsgs.length > 0) {
-            sessionChatCache.set(blindMailboxId, localMsgs)
-            setMessages(localMsgs)
-            setLoadingMessages(false)
-          }
-        })
-        .catch(() => {})
-    }
-
-    return () => {
-      active = false
-    }
-  }, [blindMailboxId, activeContact?.userId, activeGroup?.id])
-
-  /**
-   * Schickt einen Steuerumschlag (Quittung, Änderung, Löschung, Reaktion …).
-   *
-   * **Wirft.** Bis 09/2026 verschluckte diese Funktion jeden Fehler, und der
-   * Aufrufer hielt ein gescheitertes Senden für erfolgreich. Bei einer Quittung
-   * ist das verschmerzbar; bei einer Reaktion, die lokal steht und nie ankommt,
-   * ist es eine Lüge. Jeder Aufrufer entscheidet selbst, ob er den Fehler zeigt
-   * oder schluckt — hier wird er nur nicht mehr versteckt.
-   */
-  const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
-    if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
-    const clientUuid =
-      typeof crypto !== 'undefined' && crypto.randomUUID
-        ? crypto.randomUUID()
-        : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-    // Steuerpakete laufen im Direktchat über den Hybridumschlag und in der
-    // Gruppe über den geteilten Schlüssel — beides ohne Absenderkopf. Ohne den
-    // Beleg hier konnte die Gegenseite `actor_id` auf eine fremde Kennung
-    // setzen und damit fremde Nachrichten umschreiben oder löschen.
-    const payload = JSON.stringify(
-      await signiereNutzlast(blindMailboxId, currentUserId, {
-        actor_id: currentUserId,
-        ...payloadObj,
-        // **Für welche Unterhaltung diese Wirkung gilt.** Die Kopien für die
-        // eigenen Zweitgeräte landen in einer gemeinsamen Geräte-Mailbox; ohne
-        // diese Marke wendete das Web eine Löschung aus der App auf den gerade
-        // offenen Chat an, der damit nichts zu tun hat. Sie steht im
-        // signierten Teil, sonst könnte sie umgeschrieben werden.
-        mailbox: blindMailboxId,
-        client_uuid: clientUuid,
-      }),
-    )
-    const auftraege = await konversation.baueSteuerversand(
-      payload,
-      clientUuid,
-      String(payloadObj.type || 'control'),
-    )
-    await Promise.all(auftraege.map((auftrag) => relayE2eeEnvelope(auftrag)))
-  }
-
   // Load and decrypt messages (non-flickering background sync + real-time)
   /**
    * Was ein Konto in der offenen Gruppe darf.
@@ -1305,6 +892,7 @@ function MessengerSeite() {
     },
     [activeGroup, gruppenRollenZustand],
   )
+  gruppenrechteVonRef.current = gruppenrechteVon
 
   /**
    * Ob ich fremde Nachrichten in dieser Gruppe entfernen darf.
@@ -1332,32 +920,6 @@ function MessengerSeite() {
   const darfSchreiben = !activeGroup || gruppenrechteVon(currentUserId).has('send_messages')
   const darfAnhaengen = !activeGroup || gruppenrechteVon(currentUserId).has('attach_media')
 
-  const loadMessages = useNachrichtenLaden({
-    blindMailboxId,
-    currentUserId,
-    activeContact,
-    activeGroup,
-    gruppenrechteVon,
-    t,
-    messages,
-    setMessages,
-    setLoadingMessages,
-    setAngeheftet,
-    setVerfallSekunden,
-    zeigeSystemzeile,
-    markAsRead,
-    isBlocked,
-    readReceiptsEnabled,
-    konversation,
-    identityRef,
-    activeMailboxIdRef,
-    currentLoadSeqRef,
-    maxPartnerReadIdRef,
-    maxPartnerDeliveredIdRef,
-    highestIncomingIdDeliveredRef,
-    highestIncomingIdAcknowledgedRef,
-    sendE2eeControlMessage,
-  })
 
   /**
    * Reagieren — dieselbe Bewegung setzt und nimmt zurück.
