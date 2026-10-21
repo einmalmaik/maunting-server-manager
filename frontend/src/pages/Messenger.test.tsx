@@ -3280,6 +3280,53 @@ describe('Messenger (Allround Chat)', () => {
       ).toBeInTheDocument()
     })
 
+    it('lässt eine Warnung beim Wechsel in ein anderes Gespräch nicht mitwandern', async () => {
+      const { deriveBlindMailboxId } = await import('@/services/e2eeCrypto')
+      const ablage = vi.mocked(deriveBlindMailboxId).getMockImplementation()!
+      // Der Teststellvertreter lieferte bisher für jedes Gegenüber dieselbe
+      // Mailbox. Ein echter Wechsel braucht zwei verschiedene.
+      vi.mocked(deriveBlindMailboxId).mockImplementation(async (_eigene, fremd) => `mbox-${fremd}`)
+      vi.mocked(socialApi.getFriends).mockResolvedValue([
+        {
+          id: 101, user_id: 101, username: 'alice', avatar_url: null,
+          status: 'accepted', is_requester: false, created_at: '2026-09-01T00:00:00Z',
+          presence: { status: 'online', device_type: 'web' },
+        },
+        {
+          id: 104, user_id: 104, username: 'bob', avatar_url: null,
+          status: 'accepted', is_requester: false, created_at: '2026-09-01T00:00:00Z',
+          presence: { status: 'online', device_type: 'web' },
+        },
+      ])
+      try {
+        render(
+          <MemoryRouter initialEntries={['/chat?userId=101']}>
+            <Messenger />
+          </MemoryRouter>
+        )
+        await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+        act(() => {
+          schluesselWarnungCallback!({
+            userId: 101,
+            typ: 'unbestaetigt',
+            geraete: ['dev-101'],
+          })
+        })
+        const warnung = /alice hat ein Gerät, das nicht auf einem bekannten Gerät freigegeben wurde/
+        expect(await screen.findByText(warnung)).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: /bob/i }))
+        await waitFor(() => {
+          expect(screen.queryByText(warnung)).not.toBeInTheDocument()
+        })
+      } finally {
+        vi.mocked(deriveBlindMailboxId).mockImplementation(
+          ablage ?? (async () => 'test-blind-mailbox'),
+        )
+      }
+    })
+
     it('behält die eigene Schlüsselwarnung, während der Verlauf noch lädt', async () => {
       const { loadLocalMessages } = await import('@/services/messengerLocalStore')
       const ablage = vi.mocked(loadLocalMessages).getMockImplementation()!

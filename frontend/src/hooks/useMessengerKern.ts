@@ -319,6 +319,17 @@ export function useMessengerKern({
       onGespraechWechsel()
       eingabeBeruehrtRef.current = false
       if (!zielSchluessel) entwurfGeholtRef.current = ''
+
+      // Alte Warnungen gehören zum alten Gespräch. Der Wechsel kann vor der
+      // neuen Mailbox ankommen; deshalb fallen sie hier schon aus dem Verlauf,
+      // nicht erst beim späteren Ersetzen durch den Abruf.
+      for (const schluessel of [...systemzeilenRef.current.keys()]) {
+        if (schluessel !== zielSchluessel) systemzeilenRef.current.delete(schluessel)
+      }
+      const erlaubt = new Set(
+        (systemzeilenRef.current.get(zielSchluessel) ?? []).map((m) => m.clientUuid),
+      )
+      setMessages((vorher) => vorher.filter((m) => !m.isSystem || (m.clientUuid && erlaubt.has(m.clientUuid))))
     }
 
     if (activeMailboxIdRef.current === blindMailboxId) return
@@ -336,14 +347,6 @@ export function useMessengerKern({
      * Ein Wechsel des Gesprächs verwirft sie; bleibt das Gespräch dasselbe und
      * trifft nur die Kennung ein, bleiben sie stehen.
      */
-    if (neuesGespraech) {
-      // Alte Warnungen gehören zum alten Gespräch. Nur der neue Schlüssel
-      // bleibt, damit eine Zeile aus genau diesem Wechsel nicht verloren geht.
-      for (const schluessel of [...systemzeilenRef.current.keys()]) {
-        if (schluessel !== zielSchluessel) systemzeilenRef.current.delete(schluessel)
-      }
-    }
-
     const mitSystemzeilen = (vorher: ChatMessage[], basis: ChatMessage[]) => {
       const gemerkt = systemzeilenRef.current.get(zielSchluessel) ?? []
       const ausVerlauf = neuesGespraech ? [] : vorher.filter((m) => m.isSystem)
