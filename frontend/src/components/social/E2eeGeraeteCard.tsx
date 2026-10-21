@@ -10,17 +10,17 @@ import {
 import { Button, Input, PasswordInput } from '@/Singra/UI'
 import {
   eigenesGeraet,
-  entferneGeraet,
   gebeGeraetFrei,
   geraeteZuruecksetzen,
   gibMichSelbstFrei,
   sicherheitsnummer,
   vertrauteGeraete,
 } from '@/services/e2eeGeraet'
+import { geraeteBezeichnung } from '@/services/geraeteBezeichnung'
 import { FaktorWechsel, useZweitfaktor } from '@/components/auth/ZweitfaktorNachweis'
 import { useAuthStore } from '@/stores/authStore'
-import { confirm } from '@/stores/confirmStore'
 import { toast } from '@/stores/toastStore'
+import { GeraetEntfernenDialog } from './GeraetEntfernenDialog'
 
 /**
  * Die Geräte, an die Nachrichten für dieses Konto verschlüsselt werden.
@@ -36,9 +36,19 @@ import { toast } from '@/stores/toastStore'
  * unterschreibt dieses Gerät (`gebeGeraetFrei`, `entferneGeraet`) — und kann
  * es deshalb nur, solange es selbst freigegeben ist.
  *
+ * **Freigeben heißt auch nachziehen.** Ein Gerät kann freigegeben sein, ohne
+ * dass eine Unterschrift darunter steht (Erstgerät, `wieder_freigeben`); die
+ * Signaturkette nennt das „Ohne gültige Freigabe“, und bis 10/2026 gab es
+ * dafür keinen Knopf. Jetzt steht er in beiden Fällen.
+ *
+ * **Entfernen fragt nach dem Nachweis.** Der Dialog (`GeraetEntfernenDialog`)
+ * holt ihn nach der Kaskade aus dem Fehlerbericht: eingerichteter zweiter
+ * Faktor, sonst Passwort, und nur bei einem Konto ohne beides die Sitzung.
+ *
  * Das eigene Gerät steht in der Liste, hat aber keinen Knopf. Es würde sich
  * sofort wieder eintragen, und im selben Tab nicht einmal das:
- * `geraetVeroeffentlichen` meldet sich je Sitzung genau einmal.
+ * `geraetVeroeffentlichen` meldet sich je Sitzung genau einmal — und der
+ * Server weist den Selbstausschluss ab (`entfernen_hindernis`).
  */
 export function E2eeGeraeteCard() {
   const { t } = useTranslation()
@@ -62,6 +72,8 @@ export function E2eeGeraeteCard() {
   const [sicherheitsnummern, setSicherheitsnummern] = useState<Record<string, string>>({})
   const [fehler, setFehler] = useState(false)
   const [meineKennung, setMeineKennung] = useState<string | null>(null)
+  /** Das Gerät, dessen Entfernen gerade bestätigt wird — null heißt: Dialog zu. */
+  const [zuEntfernen, setZuEntfernen] = useState<E2eeGeraetItem | null>(null)
   const [laeuft, setLaeuft] = useState<string | null>(null)
   const [passwort, setPasswort] = useState('')
   const [confirmationWord, setConfirmationWord] = useState('')
@@ -140,28 +152,6 @@ export function E2eeGeraeteCard() {
     }
   }
 
-  const entfernen = async (geraet: E2eeGeraetItem) => {
-    const ok = await confirm({
-      title: t('profile.e2eeDevices.removeTitle'),
-      message: t('profile.e2eeDevices.removeMessage'),
-      confirmText: t('profile.e2eeDevices.remove'),
-      danger: true,
-    })
-    if (!ok) return
-
-    setLaeuft(geraet.device_id)
-    try {
-      // Vergisst auch den Cache: sonst verschlüsselte dieser Tab noch bis zu
-      // zehn Minuten lang gegen die gerade entfernte Adresse.
-      await entferneGeraet(geraet)
-      toast.success(t('profile.e2eeDevices.removed'))
-      await laden()
-    } catch (err: any) {
-      toast.error(err?.message || t('common.error'))
-    } finally {
-      setLaeuft(null)
-    }
-  }
 
   const neuBeginnen = async () => {
     if (!passwort) return
@@ -440,7 +430,12 @@ export function E2eeGeraeteCard() {
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-sm font-medium text-on-surface">
-                      {geraet.label || t('profile.e2eeDevices.unnamed')}
+                      {/* Ein Eintrag ohne Namen ist kein Name: das eigene Gerät
+                          zeigt deshalb seine abgeleitete Bezeichnung, statt
+                          sich selbst „unbenannt" zu nennen. Für fremde Geräte
+                          füllt der Server den Standardnamen ein. */}
+                      {geraet.label ||
+                        (istMeins ? geraeteBezeichnung() : t('profile.e2eeDevices.unnamed'))}
                     </span>
                     {istMeins && (
                       <span className="inline-flex items-center rounded-full border border-secondary/20 bg-secondary/10 px-2 py-0.5 text-xs font-medium text-secondary">
@@ -481,7 +476,19 @@ export function E2eeGeraeteCard() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 self-start sm:self-auto">
-                  {!istMeins && ichBinFrei && geraet.is_approved === false && (
+                  {/*
+                    Freigeben heißt zweierlei: ein wartendes Gerät zulassen und
+                    eine Freigabe nachziehen, die keine Unterschrift trägt.
+                    Bis 10/2026 stand hier nur `is_approved === false`, und
+                    genau daran scheiterte der Fehlerbericht: das Web-Frontend
+                    war freigegeben (Zustimmung des Servers), aber kein Gerät
+                    hatte seinen Schlüssel unterschrieben. Auf dem Telefon stand
+                    daneben „Ohne gültige Freigabe" — und kein Knopf.
+                  */}
+                  {!istMeins &&
+                    ichBinFrei &&
+                    (geraet.is_approved === false ||
+                      nichtGedeckt?.has(geraet.device_id) === true) && (
                     <Button
                       variant="primary"
                       disabled={laeuft === geraet.device_id}
@@ -491,11 +498,17 @@ export function E2eeGeraeteCard() {
                       {t('profile.e2eeDevices.approve')}
                     </Button>
                   )}
+                  {/*
+                    Jedes freigegebene Gerät entfernt jedes andere — auch das
+                    Web-Frontend. Genau dafür ist dieser Knopf da: eine fremde
+                    oder übernommene Browser-Sitzung muss von der MSS-App oder
+                    dem Browser aus verschwinden können.
+                  */}
                   {!istMeins && (ichBinFrei || geraet.is_approved === false) && (
                     <Button
                       variant="secondary"
                       disabled={laeuft === geraet.device_id}
-                      onClick={() => void entfernen(geraet)}
+                      onClick={() => setZuEntfernen(geraet)}
                       className="text-error hover:bg-error/10 hover:text-error"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
@@ -507,6 +520,17 @@ export function E2eeGeraeteCard() {
             )
           })}
         </ul>
+      )}
+
+      {zuEntfernen && (
+        <GeraetEntfernenDialog
+          geraet={zuEntfernen}
+          sicherheitsnummer={sicherheitsnummern[zuEntfernen.device_id]}
+          onOpenChange={(offen) => {
+            if (!offen) setZuEntfernen(null)
+          }}
+          onEntfernt={laden}
+        />
       )}
     </section>
   )

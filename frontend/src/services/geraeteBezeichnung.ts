@@ -22,11 +22,20 @@ import { geraeteArt } from '@/desktop/geraeteArt'
 /** Der Server nimmt höchstens 64 Zeichen (`e2ee_device_service.MAX_BEZEICHNUNG`). */
 const HOECHSTENS = 60
 
+/**
+ * Der Name, den ein Browser-Login ohne eigene Bezeichnung bekommt.
+ *
+ * Dieselbe Zeichenkette wie `e2ee_device_service.STANDARD_BEZEICHNUNG`: der
+ * Server setzt sie für den Bestand ein, dieser Client ersetzt sie beim ersten
+ * Start durch den genaueren Namen dieses Browsers.
+ */
+export const STANDARD_BEZEICHNUNG = 'Web-Frontend'
+
 function laufendeApp(): string {
   const tauri =
     typeof window !== 'undefined' &&
     ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
-  if (!tauri) return 'Web-Frontend'
+  if (!tauri) return STANDARD_BEZEICHNUNG
   // Der Browser teilt sich mit MSS Kopplung und Transport, ist aber eine eigene
   // App — und stand bis 09/2026 als „desktop“ in derselben Liste.
   return geraeteArt() === 'browser' ? 'Pondys Browser' : 'MSS-App'
@@ -58,7 +67,7 @@ export function geraeteBezeichnung(): string {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
   const app = laufendeApp()
   const system = systemName(ua)
-  const browser = app === 'Web-Frontend' ? browserName(ua) : ''
+  const browser = app === STANDARD_BEZEICHNUNG ? browserName(ua) : ''
   const plattform = [browser, system].filter(Boolean).join('/')
   return (plattform ? `${app} · ${plattform}` : app).slice(0, HOECHSTENS)
 }

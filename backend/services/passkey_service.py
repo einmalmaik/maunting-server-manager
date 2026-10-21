@@ -50,7 +50,7 @@ from services import login_challenge_service
 # Zwecke fordert der Benutzer selbst an (`/auth/passkey/options`); Login und
 # OAuth bekommen ihre Optionen aus dem jeweiligen Anmeldeschritt.
 ZWECKE_ANGEMELDET = frozenset({
-    "2fa_disable", "device_pairing", "e2ee_reset", "e2ee_reapprove",
+    "2fa_disable", "device_pairing", "e2ee_reset", "e2ee_reapprove", "e2ee_remove",
     "password_change", "email_change", "account_delete", "data_export",
     "oauth_link", "2fa_change", "vault_reset", "kamera_sicherung",
 })

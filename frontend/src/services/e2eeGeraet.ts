@@ -47,7 +47,7 @@ import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { erzeugeSignaturPaar, pruefe, signiere, type SignaturPaar } from './absenderSignatur'
 import { generateLocalE2eeKeyPair, type LocalE2eeKeyPair } from './e2eeCrypto'
-import { geraeteBezeichnung } from './geraeteBezeichnung'
+import { STANDARD_BEZEICHNUNG, geraeteBezeichnung } from './geraeteBezeichnung'
 import {
   MessengerVerschlossenError,
   entsiegleZeile,
@@ -63,6 +63,7 @@ import {
   removeEigenesGeraet,
   resetEigeneGeraete,
   type E2eeGeraetItem,
+  type EntfernenNachweis,
   type ReapproveEigenesGeraetInput,
   type ResetEigeneGeraeteInput,
 } from '@/api/social'
@@ -449,13 +450,34 @@ let veroeffentlichtAls: string | null = null
 async function veroeffentliche(
   geraet: EigenesGeraet,
   label: string,
+  approvalSignature = '',
 ): Promise<E2eeGeraetItem> {
   return putEigenesGeraet({
     deviceId: geraet.kennung,
     publicKey: geraet.paar.publicKeyJwk,
     signingPublicKey: geraet.signaturPaar.publicKeyJwk,
     label,
+    approvalSignature,
   })
+}
+
+/**
+ * Die eigene Unterschrift über die eigene Freigabe — nur für das Erstgerät.
+ *
+ * Das erste Gerät eines Kontos gibt sich selbst frei, weil es niemanden gibt,
+ * der es freigeben könnte. Ohne Unterschrift stand danach in der Liste
+ * „freigegeben", während die Signaturkette „Ohne gültige Freigabe" sagte. Die
+ * Unterschrift belegt nur, dass dieses Gerät seinen eigenen Schlüssel kennt —
+ * ein anderes freigegebenes Gerät ersetzt sie (`gebeGeraetFrei`).
+ */
+async function selbstSignatur(geraet: EigenesGeraet): Promise<string> {
+  const daten = await freigabeDaten(
+    meinKonto(),
+    geraet.kennung,
+    geraet.paar.publicKeyJwk,
+    geraet.signaturPaar.publicKeyJwk,
+  )
+  return signiere(daten, geraet.signaturPaar.privateKeyJwk)
 }
 
 /**
@@ -471,6 +493,12 @@ async function veroeffentliche(
  * Liste, denn `_auffrischen` übernimmt jedes nicht-leere Label. Deshalb wird
  * erst nachgesehen, was der Server führt, und nur ein leeres Feld bekommt die
  * abgeleitete Bezeichnung — einmal, danach ist sie da.
+ *
+ * Ein **generisches** Label gilt dabei wie ein leeres: der Server setzt für
+ * einen Browser ohne Namen `Web-Frontend` ein, damit der Bestand nicht mehr
+ * als „Unbenanntes Gerät" erscheint. Der genauere Name dieses Browsers
+ * (`Web-Frontend · Chrome/Windows`) ersetzt ihn beim ersten Start; ein von
+ * einem Menschen gewählter Name bleibt unangetastet.
  */
 export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet> {
   const geraet = await eigenesGeraet()
@@ -478,7 +506,8 @@ export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet>
 
   const eigenerName = (label || '').trim()
   let antwort = await veroeffentliche(geraet, eigenerName)
-  if (!eigenerName && !(antwort?.label || '').trim()) {
+  const gespeichert = (antwort?.label || '').trim()
+  if (!eigenerName && (!gespeichert || gespeichert === STANDARD_BEZEICHNUNG)) {
     const abgeleitet = geraeteBezeichnung()
     if (abgeleitet) {
       try {
@@ -486,6 +515,16 @@ export async function geraetVeroeffentlichen(label = ''): Promise<EigenesGeraet>
       } catch {
         // Der Eintrag steht bereits. Der Name ist Komfort, kein Zugang.
       }
+    }
+  }
+
+  // Erstgerät: die Freigabe trägt keine Unterschrift. Sie nachzureichen macht
+  // `is_approved` und die Signaturkette deckungsgleich.
+  if (antwort?.is_approved !== false && !(antwort?.approval_signature || '').trim()) {
+    try {
+      antwort = await veroeffentliche(geraet, '', await selbstSignatur(geraet))
+    } catch {
+      // Ohne Unterschrift bleibt das Gerät freigegeben; die Liste sagt es nur.
     }
   }
 
@@ -957,7 +996,10 @@ export async function gebeGeraetFrei(geraet: E2eeGeraetItem): Promise<void> {
  * Entfernt ein Gerät des eigenen Kontos. Ein freigegebenes verlangt die
  * Unterschrift dieses Geräts; ein wartendes nicht — es hat nie etwas bekommen.
  */
-export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
+export async function entferneGeraet(
+  geraet: E2eeGeraetItem,
+  nachweis: EntfernenNachweis = {},
+): Promise<void> {
   const konto = meinKonto()
   let unterschrift: { kennung: string; sig: string } | null = null
   if (geraet.is_approved !== false) {
@@ -965,7 +1007,7 @@ export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
       await entfernenDaten(konto, geraet.device_id, geraet.public_key),
     )
   }
-  await removeEigenesGeraet(geraet.device_id, unterschrift?.kennung, unterschrift?.sig)
+  await removeEigenesGeraet(geraet.device_id, unterschrift?.kennung, unterschrift?.sig, nachweis)
   vergessenGeraete(konto)
 }
 
@@ -985,7 +1027,10 @@ export async function entferneGeraet(geraet: E2eeGeraetItem): Promise<void> {
  */
 export async function gibMichSelbstFrei(nachweis: ReapproveEigenesGeraetInput): Promise<void> {
   const meins = await eigenesGeraet()
-  await reapproveEigenesGeraet(meins.kennung, nachweis)
+  // Die eigene Unterschrift reist mit: sonst bleibt der Eintrag „freigegeben"
+  // ohne Freigabe, und jedes andere Gerät zeigt genau diesen Widerspruch.
+  const signatur = await selbstSignatur(meins).catch(() => '')
+  await reapproveEigenesGeraet(meins.kennung, { ...nachweis, signature: signatur })
   setzeEigeneFreigabe(true)
   vergessenGeraete(meinKonto())
 }

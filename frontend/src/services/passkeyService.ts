@@ -180,6 +180,7 @@ export type PasskeyZweck =
   | 'device_pairing'
   | 'e2ee_reset'
   | 'e2ee_reapprove'
+  | 'e2ee_remove'
   | 'password_change'
   | 'email_change'
   | 'account_delete'

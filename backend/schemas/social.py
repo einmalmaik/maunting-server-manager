@@ -561,6 +561,12 @@ class E2eeDeviceUpdate(BaseModel):
     # sich so, bis er einmal neu gestartet ist.
     signing_public_key: str = Field(default="", max_length=2048)
     label: str = Field(default="", max_length=64)
+    # Die eigene Unterschrift ueber die eigene Freigabe. Nur das erste Geraet
+    # eines Kontos reicht sie mit: es gibt niemanden, der es freigeben koennte,
+    # und ohne sie stand in der Liste „freigegeben", waehrend die Signaturkette
+    # „ohne gueltige Freigabe" sagte. Ein freigegebenes Geraet ersetzt sie
+    # jederzeit durch seine Unterschrift (`e2ee_device_service.bestaetigen`).
+    approval_signature: str = Field(default="", max_length=256)
 
     @field_validator("device_id")
     @classmethod
@@ -616,8 +622,11 @@ class E2eeDeviceSelfApproveRequest(BaseModel):
     - Bei aktivem 2FA: der eingerichtete Faktor — otp_code (TOTP) oder passkey.
     - Ohne 2FA: das Passwort, bei Konten ohne Passwort das Wort RESET.
 
-    `approved_by` bleibt danach leer: der Server gibt die Zustellung frei, aber
-    niemand hat den Schluessel unterschrieben.
+    Reicht der Client seine eigene Unterschrift ueber die Freigabe mit
+    (`signature`), steht sie danach in `approval_signature`: der Server gibt die
+    Zustellung frei, und das Geraet belegt, dass es den eigenen Schluessel
+    kennt. Eine Unterschrift eines anderen freigegebenen Geraets ersetzt sie
+    (`e2ee_device_service.bestaetigen`).
     """
 
     device_id: str = Field(..., min_length=8, max_length=64)
@@ -625,14 +634,29 @@ class E2eeDeviceSelfApproveRequest(BaseModel):
     confirmation: str | None = Field(default=None, max_length=64)
     otp_code: str | None = Field(default=None, max_length=32)
     passkey: Zweitnachweis | None = None
+    signature: str = Field(default="", max_length=256)
 
 
 class E2eeDeviceRemoveRequest(BaseModel):
-    """Entfernen eines Geraets. Unterschrift ist Pflicht, wenn es freigegeben ist."""
+    """Entfernen eines Geraets — mit Unterschrift und frischem Nachweis.
+
+    Die Unterschrift eines freigegebenen Geraets (`entfernen_daten`) ist
+    Pflicht, wenn das Ziel freigegeben ist. Dazu kommt die Nachweispflicht aus
+    der Sicherheitskaskade: der eingerichtete zweite Faktor (Passkey oder Code),
+    sonst das Passwort. Nur ein Konto ohne beides — Social Login ohne Passwort —
+    kommt mit der Sitzung allein aus; das prueft der Server an den
+    eingerichteten Faktoren, nie an einem Feld des Clients.
+
+    Ein **wartendes** Geraet braucht keinen Nachweis: es hat nie etwas bekommen,
+    und die Kopplung mit falscher Sicherheitsnummer muss sofort abbrechbar sein.
+    """
 
     device_id: str = Field(..., min_length=8, max_length=64)
     approver_device_id: str = Field(default="", max_length=64)
     signature: str = Field(default="", max_length=256)
+    password: str | None = Field(default=None, max_length=512)
+    otp_code: str | None = Field(default=None, max_length=32)
+    passkey: Zweitnachweis | None = None
 
 
 class E2eeDeviceResetRequest(BaseModel):

@@ -28,13 +28,28 @@ function installiereLocalStorage() {
   }
 }
 
-const { hochgeladen, fremdeGeraete, uebernommen, umbenennen, gespeicherterName, wiederFreigegeben } =
+const {
+  hochgeladen,
+  fremdeGeraete,
+  uebernommen,
+  umbenennen,
+  gespeicherterName,
+  gespeicherteSignatur,
+  wiederFreigegeben,
+} =
   vi.hoisted(() => ({
-  hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
+  hochgeladen: [] as {
+    deviceId: string
+    publicKey: string
+    label: string
+    approvalSignature?: string
+  }[],
   /** Was `self/reapprove` bekommen hat — Kennung und Nachweis. */
   wiederFreigegeben: [] as { deviceId: string; nachweis: unknown }[],
   /** Was serverseitig schon als Label steht — der Name überlebt einen Neustart. */
   gespeicherterName: { wert: '' },
+  /** Die Selbst-Signatur des Erstgeräts, wie sie der Server führt. */
+  gespeicherteSignatur: { wert: '' },
   fremdeGeraete: {
     liste: [] as { device_id: string; public_key: string }[],
     rufe: 0,
@@ -53,17 +68,27 @@ vi.mock('./ratchetSpeicher', () => ({
 }))
 
 vi.mock('@/api/social', () => ({
-  putEigenesGeraet: vi.fn(async (req: { deviceId: string; publicKey: string; label: string }) => {
-    hochgeladen.push(req)
-    // Der Server überschreibt ein Label nur mit einem nicht-leeren Wert
-    // (`_auffrischen`); ein leerer Aufruf lässt den gespeicherten stehen.
-    if (!gespeicherterName.wert && req.label) gespeicherterName.wert = req.label
-    return {
-      device_id: req.deviceId,
-      public_key: req.publicKey,
-      label: gespeicherterName.wert || req.label,
-    }
-  }),
+  putEigenesGeraet: vi.fn(
+    async (req: {
+      deviceId: string
+      publicKey: string
+      label: string
+      approvalSignature?: string
+    }) => {
+      hochgeladen.push(req)
+      // Der Server überschreibt ein Label nur mit einem nicht-leeren Wert
+      // (`_auffrischen`); ein leerer Aufruf lässt den gespeicherten stehen.
+      if (!gespeicherterName.wert && req.label) gespeicherterName.wert = req.label
+      // Und eine nachgereichte Selbst-Signatur bleibt am Eintrag stehen.
+      if (req.approvalSignature) gespeicherteSignatur.wert = req.approvalSignature
+      return {
+        device_id: req.deviceId,
+        public_key: req.publicKey,
+        label: gespeicherterName.wert || req.label,
+        approval_signature: gespeicherteSignatur.wert,
+      }
+    },
+  ),
   getE2eeGeraete: vi.fn(async () => {
     fremdeGeraete.rufe += 1
     if (fremdeGeraete.fehler) throw fremdeGeraete.fehler
@@ -165,6 +190,7 @@ describe('e2eeGeraet', () => {
     hochgeladen.length = 0
     wiederFreigegeben.length = 0
     gespeicherterName.wert = ''
+    gespeicherteSignatur.wert = ''
     fremdeGeraete.liste = []
     fremdeGeraete.rufe = 0
     setzeAngemeldetesKonto(10)
@@ -248,7 +274,9 @@ describe('e2eeGeraet', () => {
     platte.clear()
     const geraet = await geraetVeroeffentlichen('Arbeitsrechner')
 
-    expect(hochgeladen).toHaveLength(1)
+    // Zwei Meldungen: der Name und, weil der Eintrag noch keine Unterschrift
+    // trug, die Selbst-Signatur. Beide Male nur der öffentliche Teil.
+    expect(hochgeladen).toHaveLength(2)
     expect(hochgeladen[0].publicKey).toBe(geraet.paar.publicKeyJwk)
 
     // Gesucht wird nach dem **Wert** des privaten Exponenten, nicht nach dem
@@ -284,10 +312,28 @@ describe('e2eeGeraet', () => {
       platte.clear()
       await geraetVeroeffentlichen()
 
-      expect(hochgeladen).toHaveLength(2)
       expect(hochgeladen[0].label).toBe('')
       expect(hochgeladen[1].label).toMatch(/^(Web-Frontend|MSS-App|Pondys Browser)/)
       expect(hochgeladen[1].label.length).toBeLessThanOrEqual(64)
+      // Und danach die Selbst-Signatur des Erstgeräts, ohne die die Liste
+      // „freigegeben“ neben „ohne gültige Freigabe“ zeigte.
+      expect(hochgeladen).toHaveLength(3)
+      expect(hochgeladen[2].label).toBe('')
+      expect(hochgeladen[2].approvalSignature).toBeTruthy()
+      expect(gespeicherteSignatur.wert).toBe(hochgeladen[2].approvalSignature)
+    }, 60_000)
+
+    it('ersetzt einen generischen Namen durch die genauere Bezeichnung', async () => {
+      // Der Server setzt für Bestandsgeräte `Web-Frontend` ein. Das ist besser
+      // als „unbenannt“, aber dieser Browser weiß, wer er ist.
+      platte.clear()
+      gespeicherterName.wert = 'Web-Frontend'
+      await geraetVeroeffentlichen()
+
+      // Die Nachreichung passiert, obwohl der Server schon einen Namen führt:
+      // früher löste nur ein leeres Feld sie aus.
+      expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toMatch(/^(Web-Frontend|MSS-App|Pondys Browser)/)
     }, 60_000)
 
     it('überschreibt einen vorhandenen Namen nicht', async () => {
@@ -298,16 +344,21 @@ describe('e2eeGeraet', () => {
       gespeicherterName.wert = 'Arbeitsrechner'
       await geraetVeroeffentlichen()
 
-      expect(hochgeladen).toHaveLength(1)
+      // Melden und (ohne Unterschrift) die Selbst-Signatur nachreichen — der
+      // Name selbst bleibt dabei unangetastet.
+      expect(hochgeladen).toHaveLength(2)
       expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toBe('')
+      expect(gespeicherterName.wert).toBe('Arbeitsrechner')
     }, 60_000)
 
     it('nimmt einen ausdrücklich genannten Namen unverändert', async () => {
       platte.clear()
       await geraetVeroeffentlichen('Telefon')
 
-      expect(hochgeladen).toHaveLength(1)
       expect(hochgeladen[0].label).toBe('Telefon')
+      expect(gespeicherterName.wert).toBe('Telefon')
+      expect(hochgeladen[1].approvalSignature).toBeTruthy()
     }, 60_000)
   })
 
@@ -319,9 +370,12 @@ describe('e2eeGeraet', () => {
       const meins = await eigenesGeraet()
       await gibMichSelbstFrei({ password: 'geheim' })
 
-      expect(wiederFreigegeben).toEqual([
-        { deviceId: meins.kennung, nachweis: { password: 'geheim' } },
-      ])
+      expect(wiederFreigegeben).toHaveLength(1)
+      expect(wiederFreigegeben[0].deviceId).toBe(meins.kennung)
+      // Der Nachweis reist mit, und die eigene Unterschrift dazu: sonst bleibt
+      // der Eintrag „freigegeben“ ohne Freigabe.
+      expect(wiederFreigegeben[0].nachweis).toMatchObject({ password: 'geheim' })
+      expect((wiederFreigegeben[0].nachweis as { signature?: string }).signature).toBeTruthy()
       expect(eigenesGeraetFreigegeben()).toBe(true)
     }, 60_000)
   })

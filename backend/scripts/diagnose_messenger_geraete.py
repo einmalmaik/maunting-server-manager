@@ -133,7 +133,12 @@ def befund(db, user: User) -> dict:
         andere = len([f for f in freigegeben if f.id != e.id])
         hinweise: list[str] = []
         if not (e.label or "").strip():
-            hinweise.append("ohne Namen — erscheint als „Unbenanntes Gerät“.")
+            # Seit 10/2026 liefert die Schnittstelle dafür den Standardnamen
+            # (`e2ee_device_service.STANDARD_BEZEICHNUNG`). Die Zeile bleibt
+            # trotzdem auffällig: niemand hat diesen Namen gewählt.
+            hinweise.append(
+                "ohne eigenen Namen — erscheint als „Web-Frontend“ (Standardname)."
+            )
         if e.is_approved and not (e.approval_signature or "").strip() and andere > 0:
             hinweise.append(
                 "Ohne Unterschrift freigegeben: normal beim ersten Gerät und nach "

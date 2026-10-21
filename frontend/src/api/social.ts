@@ -249,6 +249,8 @@ export async function putEigenesGeraet(payload: {
   publicKey: string
   signingPublicKey?: string
   label?: string
+  /** Selbst-Signatur des Erstgeräts über seine eigene Freigabe. */
+  approvalSignature?: string
 }): Promise<E2eeGeraetItem> {
   return api<E2eeGeraetItem>('/social/e2ee/devices/self', {
     method: 'PUT',
@@ -257,6 +259,7 @@ export async function putEigenesGeraet(payload: {
       public_key: payload.publicKey,
       signing_public_key: payload.signingPublicKey ?? '',
       label: payload.label ?? '',
+      approval_signature: payload.approvalSignature ?? '',
     }),
   })
 }
@@ -289,6 +292,8 @@ export interface ReapproveEigenesGeraetInput {
   otp_code?: string | null
   /** Unterschriebene Passkey-Antwort (`passkeyNachweis('e2ee_reapprove')`). */
   passkey?: Zweitnachweis | null
+  /** Eigene Unterschrift über die Freigabe — belegt nur den eigenen Schlüssel. */
+  signature?: string | null
 }
 
 /**
@@ -312,13 +317,28 @@ export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
 }
 
 /**
+ * Der gestaffelte Nachweis vor dem Entfernen eines Geräts.
+ *
+ * Genau das, was das Konto hergibt: der eingerichtete zweite Faktor (Passkey
+ * oder Code), sonst das Passwort. Ein Konto ohne beides — Social Login ohne
+ * Passwort — braucht nichts, dort ist die Sitzung der Nachweis.
+ */
+export interface EntfernenNachweis {
+  password?: string | null
+  otp_code?: string | null
+  passkey?: Zweitnachweis | null
+}
+
+/**
  * Entfernt ein Gerät und sperrt seine Sitzung sofort. Ein freigegebenes
- * verlangt die Unterschrift eines freigegebenen (`entferneGeraet`).
+ * verlangt die Unterschrift eines freigegebenen (`entferneGeraet`), dazu den
+ * Nachweis aus `EntfernenNachweis`.
  */
 export async function removeEigenesGeraet(
   deviceId: string,
   approverDeviceId?: string,
   signature?: string,
+  nachweis: EntfernenNachweis = {},
 ): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/devices/self/remove', {
     method: 'POST',
@@ -326,6 +346,9 @@ export async function removeEigenesGeraet(
       device_id: deviceId,
       approver_device_id: approverDeviceId ?? '',
       signature: signature ?? '',
+      password: nachweis.password ?? null,
+      otp_code: nachweis.otp_code ?? null,
+      passkey: nachweis.passkey ?? null,
     }),
   })
 }
