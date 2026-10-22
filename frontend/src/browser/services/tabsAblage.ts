@@ -23,6 +23,9 @@ export function istUnterfenster(): boolean {
 export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
   name: 'msb:tabs',
   version: 2,
+  // v1 kannte keine Arbeitsbereiche und kein `pontis://`; `merge` ergänzt und
+  // bereinigt die Felder. Ohne `migrate` verwürfe Zustand den ganzen Stand.
+  migrate: (gespeichert) => gespeichert,
   storage: createJSONStorage(() => ({
     getItem: (name: string) => (unterfensterAktiv ? null : lokalerSpeicher.getItem(name)),
     setItem: (name: string, wert: string) => {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-wetter-anheften"
+description = "Enables the widget_wetter_anheften command without any pre-configured scope."
+commands.allow = ["widget_wetter_anheften"]
+
+[[permission]]
+identifier = "deny-widget-wetter-anheften"
+description = "Denies the widget_wetter_anheften command without any pre-configured scope."
+commands.deny = ["widget_wetter_anheften"]

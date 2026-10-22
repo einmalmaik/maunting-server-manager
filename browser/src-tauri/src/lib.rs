@@ -97,6 +97,14 @@ pub fn run() {
         .manage(tabs::Tabs::default())
         .setup(|app| {
             let handle = app.handle();
+            // Die Velopack-Hooks laufen nicht bei jeder Installation (etwa nach
+            // dem Wechsel vom NSIS-Installer). Dann zeigt die Anmeldung noch auf
+            // den alten Programmpfad, und Windows öffnet Links ins Leere. Der
+            // laufende Pfad ist immer der richtige, deshalb hier erneuern.
+            #[cfg(all(windows, not(debug_assertions)))]
+            std::thread::spawn(|| {
+                let _ = widget::standardbrowser_registrieren();
+            });
             let konfig = konfig::laden(handle);
             #[cfg(windows)]
             if !konfig.hardwarebeschleunigung {

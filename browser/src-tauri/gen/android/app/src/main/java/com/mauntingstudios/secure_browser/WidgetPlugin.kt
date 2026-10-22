@@ -44,7 +44,10 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
 
   override fun load(webView: WebView) {
     oberflaeche = webView
-    linkAufnehmen(activity.intent)
+    // Der Kaltstart kann den Link vor der Oberfläche aufnehmen; der Anstoß
+    // sorgt dafür, dass sie ihn auch dann abholt, wenn ihr erster Abruf schon
+    // vorbei ist.
+    if (linkAufnehmen(activity.intent)) TabsBruecke.widget()
   }
 
   /**

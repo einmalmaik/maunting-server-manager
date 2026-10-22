@@ -95,8 +95,9 @@ pub fn standardbrowser(_: &AppHandle) -> Result<bool, String> {
 
 /// Meldet den Browser bei Windows als `StartMenuInternet`-Client an. Das
 /// gehörte bis 10/2026 in den NSIS-Installer; seit Velopack der einzige
-/// Installer ist, rufen es dessen Hooks (`main.rs`) und der Knopf
-/// „Standardbrowser werden“. Ohne Anmeldung listet Windows den Browser nicht.
+/// Installer ist, rufen es dessen Hooks (`main.rs`), der Start (`lib.rs`) und
+/// der Knopf „Standardbrowser werden“. Ohne Anmeldung listet Windows den
+/// Browser nicht.
 #[cfg(windows)]
 pub fn standardbrowser_registrieren() -> Result<(), String> {
     // Ein Debug-Bau fässt die installierte App nicht an (AGENTS.md, Punkt 67):

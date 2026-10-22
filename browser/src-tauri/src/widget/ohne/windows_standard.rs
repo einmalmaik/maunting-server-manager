@@ -1,7 +1,8 @@
 //! Standardbrowser unter Windows. Die App meldet sich als
 //! `StartMenuInternet`-Client mit der ProgID [`PROGID`] für http und https an
-//! ([`registrieren`], aus den Velopack-Installations-Hooks in `main.rs`);
-//! welche ProgID gilt, entscheidet nur der Nutzer in den Windows-Einstellungen.
+//! ([`registrieren`], beim Start und aus den Velopack-Installations-Hooks in
+//! `main.rs`); welche ProgID gilt, entscheidet nur der Nutzer in den
+//! Windows-Einstellungen.
 //!
 //! Bis 10/2026 schrieb das der NSIS-Installer (`windows/hooks.nsh`). Seit
 //! Velopack der einzige Windows-Installer ist, gibt es keine NSIS-Hooks mehr;
@@ -24,13 +25,20 @@ pub const PROGID: &str = "MSBURL";
 const NAME: &str = "Maunting Pontis";
 /// Der Zweig des `StartMenuInternet`-Clients unter HKCU.
 const CLIENT: &str = r"Software\Clients\StartMenuInternet\MauntingSecureBrowser";
+/// Ein früherer Name desselben Clients. Er bleibt nach einem Wechsel stehen und
+/// zeigt dann auf einen Programmpfad, den es nicht mehr gibt.
+const CLIENT_ALT: &str = r"Software\Clients\StartMenuInternet\MauntingPontis";
 /// Der Zweig der eigenen ProgID unter HKCU.
 const KLASSEN: &str = r"Software\Classes\MSBURL";
 /// Der Zweig, in dem Windows die anmeldenden Anwendungen sammelt.
 const ANGEMELDET: &str = r"Software\RegisteredApplications";
+/// Der Zweig, unter dem Windows Programme für „Öffnen mit“ und die
+/// Standard-Apps führt.
+const ANWENDUNGEN: &str = r"Software\Classes\Applications";
 
-/// Ein Wert, den die Anmeldung schreibt. `Some(leer)` wäre ein Fehler: der
-/// Standardwert eines Schlüssels heißt `None`.
+/// Ein Wert, den die Anmeldung schreibt. Der Standardwert eines Schlüssels
+/// heißt `None`; ein leerer Wert (`Some("")`) ist bei `URL Protocol` und
+/// `SupportedTypes` Absicht.
 struct Wert {
     zweig: String,
     name: Option<&'static str>,
@@ -42,12 +50,14 @@ struct Wert {
 fn anmeldung(exe: &str) -> Vec<Wert> {
     let befehl = format!("\"{exe}\"");
     let symbol = format!("\"{exe}\",0");
+    let datei = exe.rsplit(['\\', '/']).next().unwrap_or(exe);
+    let anwendung = format!(r"{ANWENDUNGEN}\{datei}");
     let eintrag = |zweig: String, name: Option<&'static str>, wert: String| Wert { zweig, name, wert };
 
     vec![
         eintrag(CLIENT.into(), None, NAME.into()),
         eintrag(format!(r"{CLIENT}\DefaultIcon"), None, symbol.clone()),
-        eintrag(format!(r"{CLIENT}\shell\open\command"), None, befehl),
+        eintrag(format!(r"{CLIENT}\shell\open\command"), None, befehl.clone()),
         eintrag(format!(r"{CLIENT}\Capabilities"), Some("ApplicationName"), NAME.into()),
         eintrag(format!(r"{CLIENT}\Capabilities"), Some("ApplicationIcon"), symbol.clone()),
         eintrag(
@@ -65,12 +75,22 @@ fn anmeldung(exe: &str) -> Vec<Wert> {
         eintrag(ANGEMELDET.into(), Some(NAME), format!(r"{CLIENT}\Capabilities")),
         eintrag(KLASSEN.into(), None, format!("{NAME} URL")),
         eintrag(format!(r"{KLASSEN}\FriendlyTypeName"), None, format!("{NAME} URL")),
-        eintrag(format!(r"{KLASSEN}\DefaultIcon"), None, symbol),
+        eintrag(format!(r"{KLASSEN}\URL Protocol"), None, String::new()),
+        eintrag(format!(r"{KLASSEN}\Application"), None, datei.into()),
+        eintrag(format!(r"{KLASSEN}\DefaultIcon"), None, symbol.clone()),
         eintrag(
             format!(r"{KLASSEN}\shell\open\command"),
             None,
-            format!("\"{{exe}}\" \"%1\"").replace("{exe}", exe),
+            format!("\"{exe}\" \"%1\""),
         ),
+        // Auch als Anwendung anmelden: sonst kennt Windows die exe weder für
+        // „Öffnen mit“ noch für die Liste der Standard-Apps.
+        eintrag(anwendung.clone(), None, NAME.into()),
+        eintrag(format!(r"{anwendung}\FriendlyAppName"), None, NAME.into()),
+        eintrag(format!(r"{anwendung}\DefaultIcon"), None, symbol),
+        eintrag(format!(r"{anwendung}\shell\open\command"), None, format!("\"{exe}\" \"%1\"")),
+        eintrag(format!(r"{anwendung}\SupportedTypes"), Some("http"), String::new()),
+        eintrag(format!(r"{anwendung}\SupportedTypes"), Some("https"), String::new()),
     ]
 }
 
@@ -152,20 +172,36 @@ fn registrieren_fuer(exe: &str) -> Result<(), String> {
         };
         ergebnis?;
     }
+    // Der frühere Clientname (vor der Umbenennung) zeigt auf den NSIS-Pfad und
+    // bliebe sonst als toter Eintrag in den Standard-Apps stehen.
+    zweig_entfernen(CLIENT_ALT)?;
     zuordnungen_neu_lesen();
+    Ok(())
+}
+
+/// Löscht einen eigenen Zweig; ein fehlender Zweig gilt als entfernt.
+fn zweig_entfernen(zweig: &str) -> Result<(), String> {
+    let pfad = HSTRING::from(zweig);
+    // SAFETY: nur der Pfad, kein Ausgabewert.
+    let status = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &pfad) };
+    if !status.is_ok() && status != windows::Win32::Foundation::ERROR_FILE_NOT_FOUND {
+        return Err(fehler(zweig, status));
+    }
     Ok(())
 }
 
 /// Nimmt die Anmeldung vollständig zurück (Deinstallation). Fehlende Werte
 /// gelten als entfernt, damit ein zweiter Lauf nicht scheitert.
 pub fn entfernen() -> Result<(), String> {
-    for zweig in [CLIENT, KLASSEN] {
-        let pfad = HSTRING::from(zweig);
-        // SAFETY: nur der Pfad, kein Ausgabewert; fehlender Zweig ist Erfolg.
-        let status = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &pfad) };
-        if !status.is_ok() && status != windows::Win32::Foundation::ERROR_FILE_NOT_FOUND {
-            return Err(fehler(zweig, status));
-        }
+    for zweig in [CLIENT, CLIENT_ALT, KLASSEN] {
+        zweig_entfernen(zweig)?;
+    }
+    // Der Anwendungseintrag trägt den Dateinamen der laufenden exe.
+    if let Some(datei) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.file_name().map(|name| name.to_string_lossy().into_owned()))
+    {
+        zweig_entfernen(&format!(r"{ANWENDUNGEN}\{datei}"))?;
     }
     let pfad = HSTRING::from(ANGEMELDET);
     let mut schluessel = HKEY::default();
@@ -269,6 +305,16 @@ mod tests {
         );
         assert_eq!(wert(&liste, ANGEMELDET, Some(NAME)), Some(r"Software\Clients\StartMenuInternet\MauntingSecureBrowser\Capabilities"));
         assert_eq!(wert(&liste, KLASSEN, None), Some("Maunting Pontis URL"));
+        // Ohne den Anwendungseintrag kennt Windows die exe weder für „Öffnen
+        // mit“ noch als Ziel der Standard-Apps.
+        assert_eq!(
+            wert(&liste, r"Software\Classes\Applications\MauntingPontis.exe", None),
+            Some(NAME)
+        );
+        assert_eq!(
+            wert(&liste, r"Software\Classes\Applications\MauntingPontis.exe\SupportedTypes", Some("https")),
+            Some("")
+        );
     }
 
     /// Die Befehle nennen den Pfad in Anführungszeichen (ein Leerzeichen im
@@ -288,6 +334,12 @@ mod tests {
             wert(&liste, r"Software\Clients\StartMenuInternet\MauntingSecureBrowser\DefaultIcon", None),
             Some(r#""C:\Program Files\Maunting Pontis\MauntingPontis.exe",0"#)
         );
+        assert_eq!(
+            wert(&liste, r"Software\Classes\Applications\MauntingPontis.exe\shell\open\command", None),
+            Some(r#""C:\Program Files\Maunting Pontis\MauntingPontis.exe" "%1""#)
+        );
+        assert_eq!(wert(&liste, r"Software\Classes\MSBURL\URL Protocol", None), Some(""));
+        assert_eq!(wert(&liste, r"Software\Classes\MSBURL\Application", None), Some("MauntingPontis.exe"));
     }
 
     #[test]

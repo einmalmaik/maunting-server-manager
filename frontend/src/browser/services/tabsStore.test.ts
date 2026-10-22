@@ -380,6 +380,52 @@ describe('zurueckGehen und Verlauf', () => {
     delete antworten.fenster_start_info
   })
 
+  it('hochfahren im Hauptfenster öffnet einen Link aus einem anderen Programm', async () => {
+    useTabsStore.setState({
+      tabs: [
+        { ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite.example/' },
+        { ...useTabsStore.getState().tabs[0], id: 'alt-2', url: 'https://alte-seite-2.example/' },
+      ],
+      aktivId: 'alt-1',
+    })
+
+    // Windows startet den Browser mit der Adresse als Argument, wenn ein
+    // anderes Programm einen Link öffnet. Der Link gehört in einen neuen Tab,
+    // die wiederhergestellten Tabs bleiben stehen.
+    antworten.fenster_start_info = {
+      ist_neues_fenster: false,
+      start_url: 'https://anmeldung.example/einloggen?code=abc',
+      privat: false,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    expect(zustand.tabs).toHaveLength(3)
+    expect(zustand.tabs.find((t) => t.id === zustand.aktivId)?.url).toBe('https://anmeldung.example/einloggen?code=abc')
+    expect(zustand.tabs.some((t) => t.url === 'https://alte-seite.example/')).toBe(true)
+
+    delete antworten.fenster_start_info
+  })
+
+  it('hochfahren im Hauptfenster öffnet einen privaten Link in einem privaten Tab', async () => {
+    antworten.fenster_start_info = {
+      ist_neues_fenster: false,
+      start_url: 'https://privat.example/',
+      privat: true,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    const aktiv = zustand.tabs.find((t) => t.id === zustand.aktivId)
+    expect(aktiv?.url).toBe('https://privat.example/')
+    expect(aktiv?.privat).toBe(true)
+    expect(zustand.tabs.filter((t) => t.privat)).toHaveLength(1)
+
+    delete antworten.fenster_start_info
+  })
+
   it('hochfahren in neuem Einzelfenster ohne URL öffnet eine saubere Startseite mit genau einem Tab', async () => {
     useTabsStore.setState({
       tabs: [
