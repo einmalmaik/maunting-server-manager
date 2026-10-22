@@ -16,7 +16,7 @@ Die Kontrolle bleibt bei dir: Wer was darf, welche Werkzeuge die KI benutzen kan
 *Der KI-Assistent: Er schaut sich Status, Logs und freien Platz selbst an und antwortet dir in Klartext.*
 
 <sub>Die Bilder zeigen Demodaten.</sub>
-
+ein
 ---
 
 ## Was ist MSM?
@@ -182,7 +182,7 @@ ssh root@DEINE-SERVER-IP
 Starte dann die Installation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
+curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
 ```
 
 Ersetze `panel.example.com` durch deine eigene Domain.
