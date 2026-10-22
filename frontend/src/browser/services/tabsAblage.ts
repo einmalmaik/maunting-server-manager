@@ -6,6 +6,7 @@
 import { createJSONStorage, type PersistOptions } from 'zustand/middleware'
 
 import { ADRESSE_MAX, kurzerTitel, lokalerSpeicher, passend } from './ablage'
+import { aufPontis } from './intern'
 import { leererTab } from './tab'
 import type { TabsZustand } from './tabsStore'
 
@@ -21,7 +22,7 @@ export function istUnterfenster(): boolean {
 
 export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
   name: 'msb:tabs',
-  version: 1,
+  version: 2,
   storage: createJSONStorage(() => ({
     getItem: (name: string) => (unterfensterAktiv ? null : lokalerSpeicher.getItem(name)),
     setItem: (name: string, wert: string) => {
@@ -60,19 +61,22 @@ export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
     // schreibt, mit dem richtigen Typ; der Rest kommt aus dem leeren Tab.
     const tabs = (Array.isArray(g.tabs) ? g.tabs : [])
       .filter((t): t is { id: string } => typeof t?.id === 'string' && /^tab-[A-Za-z0-9-]{1,40}$/.test(t.id))
-      .map((t) => ({
-        ...leererTab(t.id),
-        ...passend(
-          {
-            url: '',
-            titel: '',
-            favicon: null as string | null,
-            workspaceId: 'standard',
-            elternId: null as string | null,
-          },
-          t
-        ),
-      }))
+      .map((t) => {
+        const geladen = {
+          ...leererTab(t.id),
+          ...passend(
+            {
+              url: '',
+              titel: '',
+              favicon: null as string | null,
+              workspaceId: 'standard',
+              elternId: null as string | null,
+            },
+            t
+          ),
+        }
+        return { ...geladen, url: aufPontis(geladen.url) }
+      })
     const aktivId = tabs.find((t) => t.id === g.aktivId)?.id
     return aktivId ? { ...aktuell, tabs, aktivId } : aktuell
   },

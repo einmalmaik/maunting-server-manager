@@ -63,8 +63,16 @@ export const VORGABE_SCHNELLZUGRIFFE: Schnellzugriff[] = [
 ]
 
 /** Kästen unter den Schnellzugriffen; Termine und Notizen nur gekoppelt. */
-export type Widget = 'uhr' | 'termine' | 'notizen' | 'zuletzt' | 'nachrichten'
-export const WIDGETS: Widget[] = ['uhr', 'termine', 'notizen', 'zuletzt', 'nachrichten']
+export type Widget = 'wetter' | 'uhr' | 'termine' | 'notizen' | 'zuletzt' | 'nachrichten'
+export const WIDGETS: Widget[] = ['wetter', 'uhr', 'termine', 'notizen', 'zuletzt', 'nachrichten']
+
+/** Gewählter Wetterort; die Koordinaten gehen nur an die eigene MSM-Instanz. */
+export interface WetterOrt {
+  name: string
+  land: string
+  lat: number
+  lon: number
+}
 
 /** Themen der Nachrichten; die Suchbegriffe dazu stehen im Backend (`browser_nachrichten_service.THEMEN`). */
 export type NachrichtenThema = 'technik' | 'gaming' | 'politik' | 'wirtschaft' | 'wissenschaft' | 'sport'
@@ -108,6 +116,9 @@ interface EinstellungenZustand {
   widgetOrdnung: Widget[]
   /** „Zuletzt besucht“ ist anfangs aus: die Startseite zeigt sonst den Verlauf jedem, der mitschaut. */
   widgetsAus: Widget[]
+  /** Wetterort und Einheit für Startseite und Homescreen-Widget. */
+  wetterOrt: WetterOrt | null
+  wetterEinheit: 'celsius' | 'fahrenheit'
   /** Welche Themen das Nachrichten-Widget zeigt; gefiltert wird nur hier, der Server liefert allen dasselbe. */
   nachrichtenThemen: NachrichtenThema[]
   /** Schlagworte, durch Komma getrennt; leer heißt alles aus den Themen. */
@@ -127,6 +138,8 @@ interface EinstellungenZustand {
   vertikaleTabsEingeklappt: boolean
   /** Beim Kopieren von URLs Tracking-Parameter automatisch entfernen. */
   cleanCopy: boolean
+  /** Seiten bevorzugt dunkel rendern (Design → Darstellung der Seiten). */
+  seitenDunkel: boolean
 
   setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
   umschalten: (was: Ausblendbar) => void
@@ -171,6 +184,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schnellzugriffe: VORGABE_SCHNELLZUGRIFFE,
       widgetOrdnung: [],
       widgetsAus: ['zuletzt'],
+      wetterOrt: null,
+      wetterEinheit: 'celsius',
       nachrichtenThemen: NACHRICHTEN_THEMEN,
       nachrichtenWorte: '',
       statistikZeigen: true,
@@ -182,6 +197,7 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       tabAusrichtung: 'vertikal',
       vertikaleTabsEingeklappt: false,
       cleanCopy: true,
+      seitenDunkel: false,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>

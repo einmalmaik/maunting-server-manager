@@ -43,11 +43,10 @@ pub fn link_aus(argument: &str) -> Option<String> {
         return None;
     }
     let url = url::Url::parse(argument).ok()?;
-    matches!(url.scheme(), "http" | "https" | "msb").then(|| url.to_string())
+    matches!(url.scheme(), "http" | "https" | "msb" | "pontis").then(|| url.to_string())
 }
 
-pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {
-    Ok(LINK.lock().unwrap().take().map(|info| {
+pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {    Ok(LINK.lock().unwrap().take().map(|info| {
         json!({
             "art": "link",
             "url": info.url,
@@ -65,6 +64,27 @@ pub fn lage(_: &AppHandle) -> Result<String, String> {
 }
 
 pub fn anheften(_: &AppHandle) -> Result<bool, String> {
+    Ok(false)
+}
+
+/// Das Wetter-Widget gibt es nur unter Android.
+pub fn wetter_setzen(
+    _: &AppHandle,
+    _ort: &str,
+    _land: &str,
+    _lat: f64,
+    _lon: f64,
+    _einheit: &str,
+    _token: &str,
+) -> Result<(), String> {
+    Err("Das Wetter-Widget gibt es nur unter Android".into())
+}
+
+pub fn wetter_lage(_: &AppHandle) -> Result<String, String> {
+    Ok("nein".into())
+}
+
+pub fn wetter_anheften(_: &AppHandle) -> Result<bool, String> {
     Ok(false)
 }
 

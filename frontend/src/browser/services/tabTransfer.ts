@@ -143,7 +143,7 @@ export function entpackeTabTransfer(dataTransfer: DataTransfer | null): TabTrans
   if (dataTransfer) {
     try {
       const text = (dataTransfer.getData('text/uri-list') || dataTransfer.getData('text/plain') || '').trim()
-      if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('msb://'))) {
+      if (text && (text.startsWith('http://') || text.startsWith('https://') || text.startsWith('pontis://') || text.startsWith('msb://'))) {
         return {
           ursprungFensterId: 'extern',
           tabId: 'extern',

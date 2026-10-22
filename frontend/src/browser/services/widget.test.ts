@@ -40,10 +40,10 @@ describe('Such-Widget', () => {
     widgetAusfuehren({ art: 'link', url: 'https://example.com/artikel?id=3' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'javascript:alert(1)' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'file:///sdcard/Download/a.html' }, adresszeile)
-    widgetAusfuehren({ art: 'link', url: 'msb://einstellungen' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'pontis://einstellungen' }, adresszeile)
     expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual([
       'https://example.com/artikel?id=3',
-      'msb://einstellungen',
+      'pontis://einstellungen',
     ])
     expect(adresszeile).not.toHaveBeenCalled()
   })

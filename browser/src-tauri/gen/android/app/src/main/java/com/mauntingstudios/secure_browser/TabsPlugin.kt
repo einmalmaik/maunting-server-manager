@@ -34,6 +34,7 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 @InvokeArg class TabArgs { lateinit var id: String }
+@InvokeArg class DunkelArgs { var an = false }
 @InvokeArg class LadenArgs { lateinit var id: String; lateinit var url: String; var privat = false }
 @InvokeArg class VorneArgs { var vorne: String? = null; var sekundaer: String? = null }
 @InvokeArg
@@ -274,6 +275,17 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   fun cookies(invoke: Invoke) {
     aufUi(activity, invoke) {
       tabs.values.forEach { it.cookiesErneuern() }
+      null
+    }
+  }
+
+  /** Einstellungen → Design: Seiten dunkel rendern, auch in neuen Tabs. */
+  @Command
+  fun dunkel(invoke: Invoke) {
+    val args = invoke.parseArgs(DunkelArgs::class.java)
+    aufUi(activity, invoke) {
+      Tab.seitenDunkel = args.an
+      tabs.values.forEach { it.dunkelSetzen(args.an) }
       null
     }
   }

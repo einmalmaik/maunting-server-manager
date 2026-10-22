@@ -122,7 +122,7 @@ describe('Widgets', () => {
   it('folgt der Reihenfolge aus den Einstellungen', () => {
     useEinstellungenStore.setState({ widgetsAus: [], widgetOrdnung: ['zuletzt'] })
     zeigen(<Widgets privat={false} />)
-    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual(['Zuletzt besucht', 'Uhr', 'Nachrichten'])
+    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual(['Zuletzt besucht', 'Wetter', 'Uhr', 'Nachrichten'])
   })
 
   it('liest Termine zuerst aus dem Spiegel und fragt das Panel höchstens alle fünf Minuten', async () => {

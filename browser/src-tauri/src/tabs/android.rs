@@ -116,6 +116,12 @@ pub fn cookies_erneuern(app: &AppHandle) {
     senden(app, "cookies", json!({}));
 }
 
+/// Einstellungen → Design: Seiten in allen Tabs dunkel rendern.
+pub fn seiten_dunkel(app: &AppHandle, an: bool) -> Result<(), String> {
+    senden(app, "dunkel", json!({ "an": an }));
+    Ok(())
+}
+
 /// Zurück, Vor, Neu laden, Anhalten (`tab_aktion`).
 pub fn aktion(app: &AppHandle, id: &str, aktion: &str) -> Result<(), String> {
     senden(app, "aktion", json!({ "id": id, "aktion": aktion }));

@@ -45,7 +45,7 @@ describe('An Singra übergeben', () => {
 
   it.each([
     ['privater Tab', () => tab({ privat: true })],
-    ['eigene Seite', () => tab({ url: 'msb://einstellungen' })],
+    ['eigene Seite', () => tab({ url: 'pontis://einstellungen' })],
     ['leerer Tab', () => tab({ url: '' })],
   ])('gibt es nicht für: %s', (_name, bauen) => {
     expect(benutzen(bauen()).result.current.aktion).toBeNull()

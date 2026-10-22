@@ -1,10 +1,14 @@
 /**
- * Seiten des Browsers selbst (`msb://einstellungen/suche`). Sie haben keine
+ * Seiten des Browsers selbst (`pontis://einstellungen/suche`). Sie haben keine
  * Webview, die Oberfläche zeichnet sie wie die Startseite. Rust lädt nur
  * http(s) (`ziel_pruefen`), eine Seite kommt also nie an sie heran.
+ *
+ * `msb://` war der alte Name. Er wird noch gelesen (bestehende Tabs, Links),
+ * aber nie mehr geschrieben; `msb:*`-Speicherkeys sind davon unberührt.
  */
 
-const PRAEFIX = 'msb://'
+const PRAEFIX = 'pontis://'
+const PRAEFIX_ALT = 'msb://'
 
 export const INTERNE_SEITEN = ['einstellungen', 'suche'] as const
 export type InterneSeite = (typeof INTERNE_SEITEN)[number]
@@ -15,13 +19,19 @@ export function istWebseite(url: string): boolean {
 }
 
 export function istIntern(url: string): boolean {
-  return url.startsWith(PRAEFIX)
+  return url.startsWith(PRAEFIX) || url.startsWith(PRAEFIX_ALT)
+}
+
+/** Alte `msb://`-Adresse auf `pontis://` heben; alles andere bleibt. */
+export function aufPontis(url: string): string {
+  return url.startsWith(PRAEFIX_ALT) ? `${PRAEFIX}${url.slice(PRAEFIX_ALT.length)}` : url
 }
 
 /** Die Seite und ihr Unterpfad, oder `null`, wenn es keine eigene Seite ist. */
 export function interneSeite(url: string): { seite: InterneSeite; teil: string | null } | null {
   if (!istIntern(url)) return null
-  const [seite, teil] = url.slice(PRAEFIX.length).split(/[?#]/)[0].toLowerCase().split('/')
+  const praefix = url.startsWith(PRAEFIX) ? PRAEFIX : PRAEFIX_ALT
+  const [seite, teil] = url.slice(praefix.length).split(/[?#]/)[0].toLowerCase().split('/')
   if (!(INTERNE_SEITEN as readonly string[]).includes(seite)) return null
   return { seite: seite as InterneSeite, teil: teil || null }
 }

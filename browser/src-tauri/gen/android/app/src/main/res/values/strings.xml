@@ -10,5 +10,9 @@
     <string name="widget_kamera">Search with a photo</string>
     <string name="widget_keine_sprache">No speech recognition app found (e.g. FUTO Voice Input or Google required). Type your search instead.</string>
     <string name="widget_keine_kamera">This phone has no camera app.</string>
+    <string name="widget_wetter_name">Weather</string>
+    <string name="widget_wetter_beschreibung">Forecast from your own MSM instance</string>
+    <string name="widget_wetter_nicht_konfiguriert">Choose a location in Pontis</string>
+    <string name="widget_wetter_quelle">Quelle: deine MSM-Instanz</string>
     <string name="vollbild_hinweis">%1$s is now full screen. Go back to exit.</string>
 </resources>

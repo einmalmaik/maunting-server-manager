@@ -462,6 +462,14 @@ pub fn cookies_erneuern(app: &AppHandle) {
     plattform::cookies_erneuern(app);
 }
 
+/// Einstellungen → Design: Seiten bevorzugt dunkel rendern. Windows setzt das
+/// Farbschema des WebView2-Profils, Android erlaubt das algorithmische
+/// Abdunkeln der WebView. Eine Einstellung, beide Plattformen.
+#[tauri::command(async)]
+pub fn tabs_darstellung(app: AppHandle, an: bool) -> Result<(), String> {
+    plattform::seiten_dunkel(&app, an)
+}
+
 #[cfg(windows)]
 use desktop as plattform;
 #[cfg(target_os = "android")]

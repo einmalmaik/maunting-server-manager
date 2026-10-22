@@ -45,8 +45,8 @@ pub fn navigation_erlaubt(url: &url::Url) -> bool {
 /// Browser startet keine Programme von außen) sowie bekannte Angriffswege
 /// unter Windows (Follina über `ms-msdt`, Suchfenster-Phishing über `search-ms`).
 const NIE_EXTERN: &[&str] = &[
-    "http", "https", "about", "blob", "data", "chrome-extension", "msb", "tauri", "ipc", "asset", "javascript",
-    "vbscript", "view-source", "file", "intent", "ms-msdt", "search-ms", "ms-search",
+    "http", "https", "about", "blob", "data", "chrome-extension", "msb", "pontis", "tauri", "ipc", "asset",
+    "javascript", "vbscript", "view-source", "file", "intent", "ms-msdt", "search-ms", "ms-search",
 ];
 
 /// Ein Fremdprotokoll (OAuth-Rücksprung an eine Desktop-App wie `vscode://`,
@@ -304,6 +304,7 @@ mod tests {
             "chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html",
             "tauri://localhost/",
             "msb://einstellungen",
+            "pontis://einstellungen",
             "file:///C:/Windows/win.ini",
             "javascript:alert(1)",
             "vbscript:msgbox(1)",

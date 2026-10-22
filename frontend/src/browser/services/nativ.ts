@@ -231,6 +231,8 @@ export const nativ = {
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */
   tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
     rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
+  /** Bevorzugt dunkle Seiten in allen Tabs (Windows: WebView2, Android: WebView). */
+  tabsDarstellung: (an: boolean) => rufen('tabs_darstellung', { an }),
   fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen' | 'neustarten') => rufen('fenster_aktion', { aktion }),
   neustarten: () => rufen('fenster_aktion', { aktion: 'neustarten' }),
   /** Startinformationen dieses Browserfenster-Prozesses (z. B. ausgelagertes Einzelfenster). */
@@ -270,6 +272,11 @@ export const nativ = {
   widgetLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_lage'),
   /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
   widgetAnheften: () => rufen<boolean>('widget_anheften'),
+  /** Konfiguriert das Wetter-Widget; MSM-Adresse und Token bleiben nativ. */
+  widgetWetterSetzen: (daten: { ort: string; land: string; lat: number; lon: number; einheit: string; token: string }) =>
+    rufen('widget_wetter_setzen', daten),
+  widgetWetterLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_wetter_lage'),
+  widgetWetterAnheften: () => rufen<boolean>('widget_wetter_anheften'),
   tastaturZeigen: () => rufen('tastatur_zeigen'),
   /** Ist der Browser der Standardbrowser? Android und Windows, sonst `false`. */
   standardbrowser: () => rufen<boolean>('standardbrowser'),

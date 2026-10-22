@@ -16,6 +16,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -61,6 +62,10 @@ thread_local! {
     static NATIV: RefCell<HashMap<String, Nativ>> = RefCell::new(HashMap::new());
     static HELFER: RefCell<Option<ICoreWebView2Controller>> = const { RefCell::new(None) };
 }
+
+/// Einstellungen → Design: Seiten dunkel rendern. Gilt für das WebView2-Profil
+/// aller Tabs, auch für Tabs, die erst nach der Einstellung entstehen.
+static SEITEN_DUNKEL: AtomicBool = AtomicBool::new(false);
 
 /// Wie in wry: ohne Mini-Menü bei Markierungen und ohne SmartScreen, das jede
 /// Adresse an Microsoft schickt.
@@ -187,6 +192,38 @@ pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, p
     Ok(controller)
 }
 
+/// Setzt das bevorzugte Farbschema des WebView2-Profils. Wirkt live auf alle
+/// Tabs dieses Profils, ohne Neustart. Ältere Runtimes ohne die Schnittstelle
+/// bleiben unverändert; der Aufrufer protokolliert das nur.
+fn farbschema_setzen(core: &ICoreWebView2) -> Result<(), String> {
+    unsafe {
+        let profil = core.cast::<ICoreWebView2_13>().map_err(fehler)?.Profile().map_err(fehler)?;
+        let p3 = profil.cast::<ICoreWebView2Profile3>().map_err(fehler)?;
+        let schema = if SEITEN_DUNKEL.load(Ordering::Relaxed) {
+            COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK
+        } else {
+            COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT
+        };
+        p3.SetPreferredColorScheme(schema).map_err(fehler)
+    }
+}
+
+/// Setzt das Farbschema für alle laufenden Tabs. Neue Tabs lesen den Wert beim
+/// Aufbau in `anlegen`; private Tabs haben ein eigenes Profil und werden dort
+/// ebenfalls gesetzt.
+pub fn seiten_dunkel(app: &AppHandle, an: bool) -> Result<(), String> {
+    SEITEN_DUNKEL.store(an, Ordering::Relaxed);
+    app.run_on_main_thread(move || {
+        let cores = NATIV.with(|n| n.borrow().values().map(|t| t.core.clone()).collect::<Vec<_>>());
+        for core in cores {
+            if let Err(e) = farbschema_setzen(&core) {
+                eprintln!("[MSB] Farbschema nicht gesetzt: {e}");
+            }
+        }
+    })
+    .map_err(|e| e.to_string())
+}
+
 pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: bool, workspace: Option<&str>) -> Result<(), String> {
     let (app2, id2) = (app.clone(), id.to_string());
     let ws = workspace.map(|s| s.to_string());
@@ -215,6 +252,9 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> 
     let umgebung = umgebung(app)?;
     let controller = controller(app, &umgebung, privat, workspace)?;
     let core = unsafe { controller.CoreWebView2().map_err(fehler)? };
+    if let Err(e) = farbschema_setzen(&core) {
+        eprintln!("[MSB] Farbschema nicht gesetzt: {e}");
+    }
     unsafe {
         let einstellungen = core.Settings().map_err(fehler)?;
         // Web-Nachrichten nur für `seite.js`: es fängt `chrome.webview` ein,

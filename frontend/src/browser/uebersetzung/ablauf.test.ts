@@ -117,7 +117,7 @@ describe('Ablauf einer Übersetzung', () => {
   })
 
   it('übersetzt keine eigenen Seiten', async () => {
-    await zustand().oeffnen({ id: TAB.id, url: 'msb://einstellungen' }, 'de')
+    await zustand().oeffnen({ id: TAB.id, url: 'pontis://einstellungen' }, 'de')
     expect(nativ.tabUebersetzen).not.toHaveBeenCalled()
     expect(zustand().eintraege[TAB.id]).toBeUndefined()
   })

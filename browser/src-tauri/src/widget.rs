@@ -50,6 +50,31 @@ pub fn widget_anheften(app: AppHandle) -> Result<bool, String> {
     plattform::anheften(&app)
 }
 
+/// Konfiguriert das Wetter-Widget: Ort, Einheit und das eng begrenzte
+/// Widget-Token. Die MSM-Adresse kommt aus der Kopplung, nicht aus der Seite.
+#[tauri::command(async)]
+pub fn widget_wetter_setzen(
+    app: AppHandle,
+    ort: String,
+    land: String,
+    lat: f64,
+    lon: f64,
+    einheit: String,
+    token: String,
+) -> Result<(), String> {
+    plattform::wetter_setzen(&app, &ort, &land, lat, lon, &einheit, &token)
+}
+
+#[tauri::command(async)]
+pub fn widget_wetter_lage(app: AppHandle) -> Result<String, String> {
+    plattform::wetter_lage(&app)
+}
+
+#[tauri::command(async)]
+pub fn widget_wetter_anheften(app: AppHandle) -> Result<bool, String> {
+    plattform::wetter_anheften(&app)
+}
+
 /// Nach der Suche aus dem Widget: die Tastatur für die Adresszeile, die
 /// die Oberfläche fokussiert hat (ein `focus()` aus Skript zeigt sie nicht).
 #[tauri::command(async)]

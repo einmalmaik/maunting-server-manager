@@ -5,7 +5,7 @@
  * privater Tab zeigt nur die Uhr.
  */
 import type { ReactNode } from 'react'
-import { Calendar, Clock, History, Newspaper, StickyNote, type LucideIcon } from 'lucide-react'
+import { Calendar, Clock, CloudSun, History, Newspaper, StickyNote, type LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 
@@ -14,12 +14,13 @@ import { Button } from '@/Singra/UI'
 import { WIDGETS, useEinstellungenStore, type Widget } from '../../services/einstellungenStore'
 import { seitenHost } from '../../services/geraetKonfig'
 import { istGekoppelt, useSitzung } from '../../services/sitzung'
-import { seiteOeffnen } from '../../services/tabsStore'
+import { seiteOeffnen, useTabsStore } from '../../services/tabsStore'
 import { useVerlaufStore } from '../../services/verlaufStore'
 import { auswahl, useNachrichten } from './nachrichtenDaten'
+import { useWetter } from './wetterDaten'
 import { ANZAHL, useJetzt, useNotizen, useTermine, type Termin } from './widgetDaten'
 
-export const WIDGET_SYMBOLE: Record<Widget, LucideIcon> = { uhr: Clock, termine: Calendar, notizen: StickyNote, zuletzt: History, nachrichten: Newspaper }
+export const WIDGET_SYMBOLE: Record<Widget, LucideIcon> = { wetter: CloudSun, uhr: Clock, termine: Calendar, notizen: StickyNote, zuletzt: History, nachrichten: Newspaper }
 
 /** Die Widgets in der Reihenfolge des Nutzers; was die Ordnung nicht nennt, folgt in der Grundordnung. */
 export function widgetsGeordnet(ordnung: Widget[]): Widget[] {
@@ -220,8 +221,75 @@ function Nachrichten({ jetzt }: { jetzt: number }) {
   )
 }
 
-export function Widgets({ privat }: { privat: boolean }) {
-  const ordnung = useEinstellungenStore((s) => s.widgetOrdnung)
+function Wetter() {
+  const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
+  const einstellungen = useTabsStore((s) => s.einstellungen)
+  const ort = useEinstellungenStore((s) => s.wetterOrt)
+  const einheit = useEinstellungenStore((s) => s.wetterEinheit)
+  const gekoppelt = istGekoppelt(useSitzung((s) => s.stand))
+  const { stand, fehler } = useWetter()
+  const grad = (celsius: number) =>
+    einheit === 'fahrenheit' ? `${Math.round(celsius * 1.8 + 32)}°F` : `${Math.round(celsius)}°C`
+  return (
+    <Karte titel={t('browser.start.widget.wetter')} symbol={CloudSun} breit>
+      {!gekoppelt && !stand && (
+        <div className="flex flex-col items-start gap-2 px-2">
+          <p className="text-body-sm text-on-surface-variant">{t('browser.start.wetter.ungekoppelt')}</p>
+          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/kopplung')}>
+            {t('browser.start.wetter.koppeln')}
+          </Button>
+        </div>
+      )}
+      {gekoppelt && !ort && (
+        <div className="flex flex-col items-start gap-2 px-2">
+          <p className="text-body-sm text-on-surface-variant">{t('browser.start.wetter.nichtKonfiguriert')}</p>
+          <Button type="button" size="sm" variant="secondary" onClick={() => einstellungen('design')}>
+            {t('browser.start.wetter.ortWaehlen')}
+          </Button>
+        </div>
+      )}
+      {gekoppelt && ort && !stand && (
+        <Leer text={t(fehler === 'nichtEingerichtet' ? 'browser.start.wetter.nichtEingerichtet' : 'browser.start.wetter.fehler')} />
+      )}
+      {stand && (
+        <>
+          <div className="flex items-end gap-3 px-2">
+            <p className="font-headline text-display-sm tabular-nums text-on-surface">{grad(stand.jetzt.temp)}</p>
+            <div className="pb-1">
+              <p className="text-body-sm text-on-surface">{t(`browser.start.wetter.lage.${stand.jetzt.lage}`)}</p>
+              <p className="text-label-sm text-on-surface-variant">{ort?.name ?? ''}</p>
+            </div>
+          </div>
+          <ul className="flex min-w-0 gap-2 px-2">
+            {stand.stunden.slice(0, 3).map((stunde) => (
+              <li
+                key={stunde.zeit}
+                className="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg bg-surface-container-high/50 py-2 text-label-sm text-on-surface-variant"
+              >
+                <span>{new Date(stunde.zeit).toLocaleTimeString(i18n.language, { hour: '2-digit' })}</span>
+                <CloudSun className="h-4 w-4" aria-hidden="true" />
+                <span className="tabular-nums text-on-surface">{grad(stunde.temp)}</span>
+              </li>
+            ))}
+          </ul>
+          {stand.warnungen && stand.warnungen.length > 0 && (
+            <div className="mx-2 rounded-lg border border-status-warning/30 bg-status-warning/10 p-2">
+              <p className="text-label-sm font-semibold text-status-warning">{stand.warnungen[0].titel}</p>
+              <p className="mt-1 text-label-sm leading-relaxed text-on-surface-variant">{stand.warnungen[0].text}</p>
+              <p className="mt-1 text-label-sm text-on-surface-variant/70">
+                {t('browser.start.wetter.warnquelle')}
+              </p>
+            </div>
+          )}
+          <p className="px-2 text-label-sm text-on-surface-variant">{t('browser.start.wetter.quelle')}</p>
+        </>
+      )}
+    </Karte>
+  )
+}
+
+export function Widgets({ privat }: { privat: boolean }) {  const ordnung = useEinstellungenStore((s) => s.widgetOrdnung)
   const aus = useEinstellungenStore((s) => s.widgetsAus)
   const gekoppelt = istGekoppelt(useSitzung((s) => s.stand))
   const module = useSichtbareModule()
@@ -240,7 +308,9 @@ export function Widgets({ privat }: { privat: boolean }) {
   return (
     <div className="grid min-w-0 w-full gap-3 sm:grid-cols-2">
       {gezeigt.map((w) =>
-        w === 'uhr' ? (
+        w === 'wetter' ? (
+          <Wetter key={w} />
+        ) : w === 'uhr' ? (
           <Uhr key={w} jetzt={jetzt} />
         ) : w === 'termine' ? (
           <Termine key={w} jetzt={jetzt} />

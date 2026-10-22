@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Das Wetter-Widget (WetterWidget.kt): eine ruhige Karte in den Farben der
+     Oberfläche. Die Werte schreibt WetterWorker.kt; ohne Ort steht dort ein
+     Hinweis statt eines leeren Kastens. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/wetter_flaeche"
+    android:layout_width="match_parent"
+    android:layout_height="140dp"
+    android:background="@drawable/widget_hintergrund"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/wetter_ort"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_wetter_name"
+            android:textColor="#A9BDC3"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/wetter_quelle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="@string/widget_wetter_quelle"
+            android:textColor="#5B737A"
+            android:textSize="9sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/wetter_temp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:fontFamily="sans-serif-medium"
+        android:maxLines="1"
+        android:text="–"
+        android:textColor="#E7F4F7"
+        android:textSize="34sp" />
+
+    <TextView
+        android:id="@+id/wetter_lage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:text="@string/widget_wetter_nicht_konfiguriert"
+        android:textColor="#A9BDC3"
+        android:textSize="12sp" />
+</LinearLayout>

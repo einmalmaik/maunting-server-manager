@@ -43,7 +43,7 @@ describe('Einstellungsseite', () => {
     const liste = screen.getByRole('navigation', { name: 'Einstellungen' })
     expect(within(liste).getByRole('button', { name: 'Allgemein' })).toHaveAttribute('aria-current', 'page')
     fireEvent.click(within(liste).getByRole('button', { name: 'Verlauf und Daten' }))
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/verlauf')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/verlauf')
     expect(screen.getByText('Verlauf automatisch löschen')).toBeInTheDocument()
   })
 
@@ -81,11 +81,11 @@ describe('Einstellungsseite', () => {
     useTabsStore.getState().einstellungen('ueber')
     zeigen()
     fireEvent.click(screen.getByRole('button', { name: 'Öffnen' }))
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/datenschutzerklaerung')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/datenschutzerklaerung')
     const zurueck = await screen.findByRole('link', { name: /Zurück/ })
     await act(async () => {
       fireEvent.click(zurueck)
     })
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/ueber')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/ueber')
   })
 })

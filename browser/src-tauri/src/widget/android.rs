@@ -57,6 +57,49 @@ pub fn anheften(app: &AppHandle) -> Result<bool, String> {
     rufen::<Ok>(app, "anheften", json!({})).map(|o| o.ok)
 }
 
+/// Konfiguriert das Wetter-Widget. Die MSM-Adresse kommt aus der Kopplung und
+/// wird hier erneut auf TLS/Loopback geprüft; die Oberfläche schickt sie nicht.
+pub fn wetter_setzen(app: &AppHandle, ort: &str, land: &str, lat: f64, lon: f64, einheit: &str, token: &str) -> Result<(), String> {
+    let basis = app
+        .try_state::<crate::konfig::KonfigZustand>()
+        .and_then(|z| z.0.lock().ok().map(|k| k.backend_url.clone()))
+        .flatten()
+        .ok_or("Nicht mit MSM gekoppelt")?;
+    if let Some(grund) = crate::konfig::backend_url_verboten(&basis) {
+        return Err(format!("MSM-Adresse ungültig: {grund}"));
+    }
+    rufen::<Leer>(
+        app,
+        "wetterSetzen",
+        json!({
+            "ort": ort,
+            "land": land,
+            "lat": lat,
+            "lon": lon,
+            "einheit": einheit,
+            "basis": basis,
+            "token": token,
+        }),
+    )
+    .map(|_| ())
+}
+
+pub fn wetter_lage(app: &AppHandle) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct Lage {
+        lage: String,
+    }
+    rufen::<Lage>(app, "wetterLage", json!({})).map(|l| l.lage)
+}
+
+pub fn wetter_anheften(app: &AppHandle) -> Result<bool, String> {
+    #[derive(serde::Deserialize)]
+    struct Ok {
+        ok: bool,
+    }
+    rufen::<Ok>(app, "wetterAnheften", json!({})).map(|o| o.ok)
+}
+
 #[derive(serde::Deserialize)]
 struct Standard {
     standard: bool,

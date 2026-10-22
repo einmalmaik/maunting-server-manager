@@ -1,0 +1,27 @@
+services:
+  wetter:
+    build: .
+    container_name: msm-wetter-sidecar
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8890:8080"
+    env_file:
+      - .env
+    environment:
+      TZ: UTC
+      MSM_WETTER_DATEN: /daten
+    volumes:
+      - ./daten:/daten
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 2m
+        max-file: "1"

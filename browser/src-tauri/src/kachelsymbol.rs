@@ -336,7 +336,7 @@ mod tests {
         assert_eq!(h("https://de.wikipedia.org/wiki/Hauptseite?x=1").as_deref(), Some("https://de.wikipedia.org/"));
         assert_eq!(h("http://github.com/").as_deref(), Some("https://github.com/"));
         assert_eq!(h("http://192.168.1.10:8080/a").as_deref(), Some("http://192.168.1.10:8080/"));
-        for schlecht in ["javascript:alert(1)", "file:///C:/a.png", "data:text/html,x", "msb://einstellungen", ""] {
+        for schlecht in ["javascript:alert(1)", "file:///C:/a.png", "data:text/html,x", "msb://einstellungen", "pontis://einstellungen", ""] {
             assert_eq!(h(schlecht), None, "{schlecht}");
         }
         assert_eq!(schluessel(&herkunft("https://Example.org:8443/x").unwrap()), "https___example.org_8443");
