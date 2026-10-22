@@ -156,10 +156,10 @@ MSM braucht Linux mit systemd und Docker.
 | **Ubuntu 22.04 LTS** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
 | **Debian 12 (Bookworm)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
 | **Debian 11 (Bullseye)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **AlmaLinux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Rocky Linux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Fedora Server (40+)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Arch Linux** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **AlmaLinux 9** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Rocky Linux 9** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Fedora Server (40+)** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Arch Linux** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
 | **Alpine Linux** | 🔴 **Geht nicht** | Kein Standard-systemd, andere glibc |
 | **Windows / Windows Server** | 🔴 **Geht nicht** | Braucht einen Linux-Kernel und systemd |
 
