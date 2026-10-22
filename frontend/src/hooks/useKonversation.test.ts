@@ -374,6 +374,177 @@ describe('useKonversation', () => {
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
     })
 
+    it('holt beim nächsten Abruf nur, was nach dem letzten kam', async () => {
+      // Der offene Chat fragt alle fünf Sekunden. Bis 10/2026 holte jeder Abruf
+      // den ganzen Verlauf: am laufenden System 510 Abrufe und rund 66 MB
+      // Chiffrat in 23 Minuten für **ein** Gespräch, und derselbe Klartext wurde
+      // immer wieder entschlüsselt. `since_id` kann der Server längst.
+      umschlaege = [umschlag(5, 'dr-1'), umschlag(12, 'dr-2')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-2', { art: 'klartext', text: 'Hallo zurück', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      // Der erste Abruf eines Tabs holt den Verlauf von vorn.
+      let gelesen: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        gelesen = await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+      // Ohne Übernahme bleibt der Stand stehen — der Aufrufer hat die Lesung
+      // noch nicht angezeigt.
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+
+      await act(async () => {
+        result.current.uebernimmLesestand(gelesen!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      // Danach nur noch, was nach der höchsten gelesenen Kennung liegt.
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 12])
+    })
+
+    it('holt eine verworfene Lesung noch einmal, statt sie mitzunehmen', async () => {
+      // Der Fall vom 22.10.2026: während der eine Durchlauf las, startete ein
+      // zweiter (Takt, Sync-Ereignis). Der erste wurde verworfen
+      // (`currentLoadSeqRef`), hatte den Stand aber schon vorgeschoben — und
+      // der zweite fand nichts mehr. Nachrichten der Gegenseite fehlten
+      // dauerhaft, bis die Seite neu lud.
+      umschlaege = [umschlag(5, 'dr-1'), umschlag(12, 'dr-2')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-2', { art: 'klartext', text: 'Hallo zurück', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      // Erster Durchlauf — sein Ergebnis wird verworfen, also nicht übernommen.
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      // Zweiter Durchlauf desselben Gesprächs: er muss dieselben Umschläge
+      // wieder bekommen.
+      const zweite = await result.current.liesUmschlaege()
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+      expect(zweite!.map((l) => l.art)).toEqual(['klartext', 'klartext'])
+
+      // Und erst wenn dieser zweite wirklich ankommt, rückt der Stand vor.
+      await act(async () => {
+        result.current.uebernimmLesestand(zweite!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 12])
+    })
+
+    it('holt einen Umschlag wieder, dem nur die Sitzung fehlt', async () => {
+      // Ein Cursor über alles hinweg wäre bequem und falsch: dieser Umschlag
+      // ist nicht kaputt, ihm fehlt nur der Aufbau. Der Ratchet-Schlüssel ist
+      // nach dem ersten Versuch verbraucht — was der Cursor überspringt, ist
+      // endgültig weg.
+      umschlaege = [umschlag(20, 'dr-1'), umschlag(30, 'dr-ohne-sitzung')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-ohne-sitzung', { art: 'keine-sitzung' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      let erste: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        erste = await result.current.liesUmschlaege()
+      })
+      await act(async () => {
+        result.current.uebernimmLesestand(erste!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      // „Alles nach 29" heißt: der Umschlag 30 kommt wieder mit.
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 29])
+    })
+
+    it('holt eine Gruppennachricht wieder, deren Schlüssel noch unterwegs ist', async () => {
+      // Dieselbe Regel für die Gruppe: ohne Schlüssel ist die Nachricht nicht
+      // verloren, sie wartet nur. Die Nachforderung ist schon raus.
+      proMailbox.set('gruppe-7', [
+        { ...umschlag(40, 'sv-e2ee-group-v1:x'), blind_mailbox_id: 'gruppe-7' },
+      ])
+      gruppenLesungen.set('sv-e2ee-group-v1:x', { art: 'kein-schluessel', keyId: 'k1' })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      let erste: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        erste = await result.current.liesUmschlaege()
+      })
+      await act(async () => {
+        result.current.uebernimmLesestand(erste!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      // Nachgefordert wird in jedem Durchlauf; gedrosselt wird im Dienst.
+      expect(gerufen.fordereGruppenSchluessel).toContain('k1')
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['gruppe-7', 39])
+    })
+
+    it('rückt den Lesestand nicht vor, wenn das Gespräch mitten im Abruf wechselt', async () => {
+      // Dann wird `gelesen` verworfen (`return null`). Ein Stand, der trotzdem
+      // vorrückt, überspringt beim nächsten Öffnen genau diese Umschläge — sie
+      // sind nie auf dem Bildschirm angekommen.
+      umschlaege = [umschlag(50, 'dr-1')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result, rerender } = renderHook(
+        (props: { peerId: number }) =>
+          useKonversation({
+            ziel: { art: 'direkt', peerId: props.peerId },
+            eigeneId: ICH,
+            identitaetRef,
+            meldeSitzungsbruch: vi.fn(),
+            meldeAufbauAbgelehnt: vi.fn(),
+          }),
+        { initialProps: { peerId: DU } },
+      )
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+      let loslassen!: () => void
+      const bremse = new Promise<void>((aufloesen) => {
+        loslassen = aufloesen
+      })
+      vi.mocked(fetchAlleE2eeEnvelopes).mockImplementationOnce(async () => {
+        await bremse
+        return umschlaege as any
+      })
+
+      const lauf = result.current.liesUmschlaege()
+      await new Promise((r) => setTimeout(r, 0))
+      rerender({ peerId: 3 })
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-3'))
+      loslassen()
+      expect(await lauf).toBeNull()
+
+      rerender({ peerId: DU })
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      const rufe = vi
+        .mocked(fetchAlleE2eeEnvelopes)
+        .mock.calls.filter((aufruf) => aufruf[0] === 'dm-1-2')
+      expect(rufe.at(-1)![1]).toBe(0)
+    })
+
     it('zeigt Altbestand als unlesbar, statt ihn zu entschlüsseln', async () => {
       // Der Weg zu den ableitbaren Kanalschlüsseln ist geschlossen, auch lesend.
       umschlaege = [umschlag(1, 'sv-e2ee-v1:altbestand')]

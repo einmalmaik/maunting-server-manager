@@ -172,6 +172,20 @@ export interface Konversation {
    * gehört dann nicht mehr auf den Bildschirm.
    */
   liesUmschlaege: () => Promise<Lesung[] | null>
+  /**
+   * Den Lesestand einer Lesung übernehmen — und zwar **erst**, wenn der
+   * Aufrufer sie wirklich angezeigt und abgelegt hat.
+   *
+   * Warum das nicht der Leselauf selbst tut: der Lauf endet, bevor jemand
+   * weiss, ob sein Ergebnis noch gebraucht wird. `loadMessages` verwirft eine
+   * Lesung, wenn inzwischen ein neuer Durchlauf gestartet ist
+   * (`currentLoadSeqRef`) — richtig so, sonst überschreibt ein alter Stand den
+   * neuen. Mit dem Cursor im Lauf wanderte der Stand trotzdem vor, und die
+   * verworfenen Umschläge kamen nie wieder: am 22.10.2026 fehlten dadurch
+   * Nachrichten der Gegenseite im Verlauf, obwohl sie entschlüsselt in der
+   * Klartextablage lagen.
+   */
+  uebernimmLesestand: (lesung: Lesung[]) => void
   /** Die Umschläge für eine Nachricht, in Zustellreihenfolge. */
   baueVersand: (payload: string, clientUuid: string) => Promise<Versandauftrag[]>
   /** Dasselbe für ein Steuerpaket (Quittung, Bearbeiten, Löschen). */
@@ -334,6 +348,37 @@ export function useKonversation({
   /** Woran ein laufender Abruf merkt, dass er zu spät kommt. */
   const aktuelleMailbox = useRef('')
   aktuelleMailbox.current = blindMailboxId
+
+  /**
+   * Bis wohin dieses Gerät jede Mailbox gelesen hat, je Kennung.
+   *
+   * Der offene Chat ruft hier alle fünf Sekunden herein. Ohne diesen Stand holte
+   * jeder Abruf den ganzen Verlauf erneut: am laufenden System waren das 510
+   * Abrufe und rund 66 MB Chiffrat in 23 Minuten für **ein** offenes Gespräch,
+   * und der Browser entschlüsselte dieselben Pakete immer wieder. `since_id`
+   * kann der Server längst (`fetchAlleE2eeEnvelopes`); jetzt nennt der Client
+   * ihn auch.
+   *
+   * Je Mailbox und nicht je Gespräch: ein Direktchat liest während des Umzugs
+   * zwei Kennungen, und ein Gespräch, das man wieder öffnet, soll dort
+   * weiterlesen, wo es aufgehört hat.
+   *
+   * Der Stand lebt nur im Speicher. Ein frischer Tab beginnt bei 0 und holt
+   * einmal alles — genau das, was er braucht, um den Verlauf aufzubauen.
+   */
+  const lesestand = useRef(new Map<string, number>())
+
+  /**
+   * Die Stände abgeschlossener Läufe, die noch nicht übernommen wurden.
+   *
+   * Nach der Lesung selbst geschlüsselt: derselbe Lauf kann mehrfach bestellt
+   * werden (`liesUmschlaege` gibt bei gleichzeitigen Aufrufen dieselbe Antwort
+   * zurück), und nur wer sie behält, darf den Stand fortschreiben. Was niemand
+   * übernimmt, fällt mit der Lesung aus der `WeakMap` — und genau das ist
+   * gewollt: dann bleibt der Stand stehen und der nächste Abruf holt die
+   * Umschläge noch einmal.
+   */
+  const standsOffen = useRef(new WeakMap<Lesung[], Map<string, number>>())
 
   // Dem Echtzeitstrom sagen, dass diese Mailbox uns angeht. Ein offenes
   // Gespräch ist der Fall, in dem eine verspätete Nachricht am meisten
@@ -510,7 +555,7 @@ export function useKonversation({
     const umschlaege = (
       await Promise.all(
         lesen.map((kennung) =>
-          fetchAlleE2eeEnvelopes(kennung).catch(
+          fetchAlleE2eeEnvelopes(kennung, lesestand.current.get(kennung) ?? 0).catch(
             () => [] as Awaited<ReturnType<typeof fetchAlleE2eeEnvelopes>>,
           ),
         ),
@@ -559,6 +604,29 @@ export function useKonversation({
      * Ladevorgang neue Umschläge.
      */
     const fehlenderSchluessel = { envId: 0, keyId: '' }
+
+    /**
+     * Umschläge, die dieser Durchlauf **nicht** abschließend behandeln konnte.
+     *
+     * Sie müssen beim nächsten Abruf wieder mitkommen, und deshalb darf der
+     * Lesestand nicht über sie hinwegwandern. Das ist keine Vorsicht, sondern
+     * die Bedingung dafür, dass ein Cursor überhaupt erlaubt ist:
+     *
+     * * `keine-sitzung` / `zurueckgestellt` — der Sitzungsaufbau liegt vor
+     *   ihnen in derselben oder der nächsten Runde; ohne ihn ist der
+     *   Ratchet-Schlüssel nicht zu finden.
+     * * `kein-schluessel` (Gruppe) — die Zustellung ist angefordert und kommt
+     *   als Umschlag zurück.
+     * * `fehler` — die lokale Ablage streikte; „einmal nicht geklappt" ist
+     *   kein „nie mehr lesen".
+     *
+     * Endgültig bleibt dagegen, was aus einem anderen Grund nicht aufgeht: eine
+     * Kopie für ein fremdes Gerät, ein Umschlag aus einer geschlossenen
+     * Schlüsselgeneration, eine abgewiesene Fälschung. Diese erneut zu lesen
+     * änderte nichts — sie hielten den Stand sonst für immer fest, und jeder
+     * Abruf läse wieder den ganzen Verlauf.
+     */
+    const nochEinmal = new Set<number>()
 
     const einUmschlag = async (env: BlindEnvelopeItem): Promise<Lesung> => {
       const gespeichert = bekannt.get(env.id)
@@ -616,9 +684,12 @@ export function useKonversation({
             envelopePlaintextCache.set(env.id, { plain: lesung.text, ok: true })
             return { art: 'klartext', env, text: lesung.text }
           }
-          if (lesung.art === 'kein-schluessel' && env.id > fehlenderSchluessel.envId) {
-            fehlenderSchluessel.envId = env.id
-            fehlenderSchluessel.keyId = lesung.keyId
+          if (lesung.art === 'kein-schluessel') {
+            nochEinmal.add(env.id)
+            if (env.id > fehlenderSchluessel.envId) {
+              fehlenderSchluessel.envId = env.id
+              fehlenderSchluessel.keyId = lesung.keyId
+            }
           }
           // 'unbekannt' — Altbestand aus der Zeit, als sich der Gruppenschlüssel
           // aus der Gruppenkennung ableiten ließ. Der Weg dorthin ist
@@ -701,8 +772,10 @@ export function useKonversation({
             /*
              * Noch nicht aufgebaut — kein Bruch, keine Marke, keine verlorene
              * Nachricht. Sie bleibt ungeöffnet und kommt im nächsten Durchlauf
-             * wieder, dann mit dem Aufbau davor.
+             * wieder, dann mit dem Aufbau davor. Deshalb bleibt der Lesestand
+             * hinter ihr (`nochEinmal`), sonst wäre sie mit dem Cursor weg.
              */
+            nochEinmal.add(env.id)
             return { art: 'still', env }
           }
           if (
@@ -715,6 +788,9 @@ export function useKonversation({
             // bleibt unangetastet, der nächste Durchlauf versucht es erneut.
             // 'beurteilt' — schon einmal als Bruch gewertet; sichtbar bleibt er,
             // aber ein zweites Mal kostet er keine Sitzung mehr.
+            // `fehler` ist die Ausnahme: die lokale Ablage hat gestreikt, und
+            // der nächste Durchlauf kann es schaffen.
+            if (lesung.art === 'fehler') nochEinmal.add(env.id)
             return { art: 'unlesbar', env }
           }
           // 'eigen' — der Absender kann seine eigene Ratchet-Nachricht nicht
@@ -724,6 +800,7 @@ export function useKonversation({
           // offen; ungeöffnet und nicht zwischengespeichert, kommt der Umschlag
           // im nächsten Durchlauf wieder. 'abgewiesen' — die Nachricht hinter
           // einem gefälschten Aufbau; gemeldet ist der Aufbau schon.
+          if (lesung.art === 'zurueckgestellt') nochEinmal.add(env.id)
           return { art: 'still', env }
         }
 
@@ -846,6 +923,43 @@ export function useKonversation({
       meldeSitzungsbruch(bruch.vonGeraet)
     }
 
+    /**
+     * Den Lesestand fortschreiben — nur bis vor den ältesten offenen Umschlag.
+     *
+     * Ohne offene bleibt es die höchste gelesene Kennung. Umschlagkennungen
+     * sind der Primärschlüssel und wachsen mit der Zeit, deshalb kann ein
+     * späterer Umschlag nie unter einem einmal gesehenen Stand liegen — ein
+     * Sprung über etwas hinweg ist ausgeschlossen.
+     *
+     * Nur wenn das Gespräch dasselbe geblieben ist: sonst wurde `gelesen`
+     * verworfen (`return null`), und derselbe Stand würde beim nächsten Öffnen
+     * Umschläge überspringen, die nie auf dem Bildschirm angekommen sind.
+     * Ebenso ohne Kontext — steht die Mitgliederliste einer Gruppe noch aus,
+     * ist jeder Umschlag oben „unlesbar" geworden, und das sagt nichts über
+     * ihn aus.
+     */
+    if (gruppenKontext || drKontext) {
+      const hoechste = new Map<string, number>()
+      const offen = new Map<string, number>()
+      for (const env of umschlaege) {
+        const kennung = env.blind_mailbox_id
+        if (!kennung) continue
+        hoechste.set(kennung, Math.max(hoechste.get(kennung) ?? 0, env.id))
+        if (nochEinmal.has(env.id)) {
+          offen.set(kennung, Math.min(offen.get(kennung) ?? env.id, env.id))
+        }
+      }
+      const stand = new Map<string, number>()
+      for (const [kennung, bis] of hoechste) {
+        const warten = offen.get(kennung)
+        stand.set(kennung, warten === undefined ? bis : warten - 1)
+      }
+      // **Nicht** schreiben. Erst wer diese Lesung übernimmt, rückt den Stand
+      // vor (`uebernimmLesestand`) — ein verworfener Durchlauf darf keine
+      // Umschläge mitnehmen.
+      standsOffen.current.set(gelesen, stand)
+    }
+
     return gelesen
   }, [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef, meldeSitzungsbruch, meldeAufbauAbgelehnt])
 
@@ -887,6 +1001,24 @@ export function useKonversation({
     )
     return naechster
   }, [einDurchlauf])
+
+  /**
+   * Den Stand einer Lesung übernehmen — nur nach oben.
+   *
+   * Gleichzeitige Läufe können in beliebiger Reihenfolge zurückkommen; jeder
+   * Stand liegt über dem, was beim Start galt, ein kleinerer kann einen schon
+   * übernommenen also nur wiederholen, nie zurückdrehen.
+   */
+  const uebernimmLesestand = useCallback((lesung: Lesung[]) => {
+    const stand = standsOffen.current.get(lesung)
+    if (!stand) return
+    standsOffen.current.delete(lesung)
+    for (const [kennung, bis] of stand) {
+      if (bis > (lesestand.current.get(kennung) ?? 0)) {
+        lesestand.current.set(kennung, bis)
+      }
+    }
+  }, [])
 
   const baueVersand = useCallback(
     (payload: string, clientUuid: string): Promise<Versandauftrag[]> =>
@@ -991,6 +1123,7 @@ export function useKonversation({
     leseMailboxen,
     gruppenKontext,
     liesUmschlaege,
+    uebernimmLesestand,
     baueVersand,
     baueSteuerversand,
   }

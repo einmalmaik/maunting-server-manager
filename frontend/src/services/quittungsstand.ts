@@ -30,6 +30,16 @@
  */
 
 const SCHLUESSEL = 'msm:chat_quittungsstand'
+/**
+ * Derselbe Stand für die **Gegenseite** — bis wohin der Partner gelesen und
+ * zugestellt hat.
+ *
+ * Ein eigener Schlüssel, weil es eine andere Aussage über andere Kennungen
+ * ist: hier stehen die Umschlagkennungen **meiner** Nachrichten, dort die der
+ * fremden. Ein gemeinsamer Eintrag würde beim Lesen die eine Zahl für die
+ * andere halten.
+ */
+const SCHLUESSEL_PARTNER = 'msm:chat_partnerstand'
 
 /** Bis zu welcher fremden Umschlagkennung schon quittiert wurde. */
 export interface Quittungsstand {
@@ -41,13 +51,43 @@ export interface Quittungsstand {
 
 const LEER: Quittungsstand = { zugestellt: 0, gelesen: 0 }
 
-function lies(): Record<string, Quittungsstand> {
+function lies(schluessel: string = SCHLUESSEL): Record<string, Quittungsstand> {
   try {
-    const roh = localStorage.getItem(SCHLUESSEL)
+    const roh = localStorage.getItem(schluessel)
     const gelesen = roh ? JSON.parse(roh) : {}
     return gelesen && typeof gelesen === 'object' ? gelesen : {}
   } catch {
     return {}
+  }
+}
+
+function standAus(schluessel: string, blindMailboxId: string): Quittungsstand {
+  if (!blindMailboxId) return { ...LEER }
+  const eintrag = lies(schluessel)[blindMailboxId]
+  if (!eintrag || typeof eintrag !== 'object') return { ...LEER }
+  return { zugestellt: zahl(eintrag.zugestellt), gelesen: zahl(eintrag.gelesen) }
+}
+
+function merke(
+  schluessel: string,
+  blindMailboxId: string,
+  art: keyof Quittungsstand,
+  bisId: number,
+): void {
+  if (!blindMailboxId || zahl(bisId) === 0) return
+  const alle = lies(schluessel)
+  const bisher = alle[blindMailboxId]
+  const stand: Quittungsstand = {
+    zugestellt: zahl(bisher?.zugestellt),
+    gelesen: zahl(bisher?.gelesen),
+  }
+  if (bisId <= stand[art]) return
+  stand[art] = bisId
+  alle[blindMailboxId] = stand
+  try {
+    localStorage.setItem(schluessel, JSON.stringify(alle))
+  } catch {
+    // Ohne localStorage gilt der Stand eben nur für diese Sitzung.
   }
 }
 
@@ -67,10 +107,7 @@ function zahl(wert: unknown): number {
 }
 
 export function quittungsstand(blindMailboxId: string): Quittungsstand {
-  if (!blindMailboxId) return { ...LEER }
-  const eintrag = lies()[blindMailboxId]
-  if (!eintrag || typeof eintrag !== 'object') return { ...LEER }
-  return { zugestellt: zahl(eintrag.zugestellt), gelesen: zahl(eintrag.gelesen) }
+  return standAus(SCHLUESSEL, blindMailboxId)
 }
 
 /**
@@ -85,19 +122,32 @@ export function merkeQuittung(
   art: keyof Quittungsstand,
   bisId: number,
 ): void {
-  if (!blindMailboxId || zahl(bisId) === 0) return
-  const alle = lies()
-  const bisher = alle[blindMailboxId]
-  const stand: Quittungsstand = {
-    zugestellt: zahl(bisher?.zugestellt),
-    gelesen: zahl(bisher?.gelesen),
-  }
-  if (bisId <= stand[art]) return
-  stand[art] = bisId
-  alle[blindMailboxId] = stand
-  try {
-    localStorage.setItem(SCHLUESSEL, JSON.stringify(alle))
-  } catch {
-    // Ohne localStorage gilt der Stand eben nur für diese Sitzung.
-  }
+  merke(SCHLUESSEL, blindMailboxId, art, bisId)
+}
+
+/**
+ * Bis wohin der **Gesprächspartner** gelesen und zugestellt hat.
+ *
+ * Bis 22.10.2026 stand dieser Stand nur in zwei `useRef` im Messenger und wurde
+ * bei jedem Chatwechsel auf 0 gesetzt. Aufgefüllt wurde er aus den
+ * Quittungsumschlägen der Mailbox — und weil jeder Abruf die **ganze** Mailbox
+ * las, fand er sie dort jedes Mal wieder. Mit dem Cursor (Punkt 180) liegen
+ * sie nach dem ersten Lesen hinter dem Stand, und die Häkchen fielen auf
+ * „gesendet" zurück, obwohl der Partner längst gelesen hatte.
+ *
+ * Derselbe Merker wie für die eigene Seite: kumulativ, nur nach oben. Ein
+ * Gerät, das seinen Stand verliert, holt ihn beim nächsten Lesen nach; ein
+ * neuer Stand fällt nie unter einen alten.
+ */
+export function partnerstand(blindMailboxId: string): Quittungsstand {
+  return standAus(SCHLUESSEL_PARTNER, blindMailboxId)
+}
+
+/** Was der Partner gelesen bzw. zugestellt hat, festhalten. */
+export function merkePartnerQuittung(
+  blindMailboxId: string,
+  art: keyof Quittungsstand,
+  bisId: number,
+): void {
+  merke(SCHLUESSEL_PARTNER, blindMailboxId, art, bisId)
 }

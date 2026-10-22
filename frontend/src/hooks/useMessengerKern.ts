@@ -21,7 +21,7 @@ import { merkeWirkungAusKlartext } from '@/services/eigeneWirkungen'
 import { holeGeraeteSteuerung } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
-import { quittungsstand } from '@/services/quittungsstand'
+import { partnerstand, quittungsstand } from '@/services/quittungsstand'
 import { verfallsfrist } from '@/services/nachrichtVerfall'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { useFunkenStore } from '@/stores/funkenStore'
@@ -372,8 +372,18 @@ export function useMessengerKern({
     const stand = quittungsstand(blindMailboxId)
     highestIncomingIdAcknowledgedRef.current = stand.gelesen
     highestIncomingIdDeliveredRef.current = stand.zugestellt
-    maxPartnerReadIdRef.current = 0
-    maxPartnerDeliveredIdRef.current = 0
+    /*
+     * Der Stand des **Partners** kommt aus der Ablage, nicht aus der Mailbox.
+     *
+     * Die Quittungen dafür liegen in der Mailbox, aber der Abruf liest seit
+     * dem Cursor (Punkt 180) nur noch Neues — die alten Quittungen kommen nie
+     * wieder vorbei. Bis 22.10.2026 standen hier zwei Nullen, und die Häkchen
+     * an den eigenen Nachrichten fielen bei jedem Chatwechsel auf „gesendet"
+     * zurück, obwohl der Partner gelesen hatte.
+     */
+    const partner = partnerstand(blindMailboxId)
+    maxPartnerReadIdRef.current = partner.gelesen
+    maxPartnerDeliveredIdRef.current = partner.zugestellt
     useMessengerNotificationStore.getState().setActiveMailboxId(blindMailboxId || null)
 
     /**

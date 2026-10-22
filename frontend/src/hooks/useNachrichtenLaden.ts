@@ -38,7 +38,8 @@ import {
 import { tilgeInhalt, tilgeNachrichtLokal } from '@/services/nachrichtLoeschen'
 import { wendeReaktionenAn } from '@/services/reaktionen'
 import { anheftung } from '@/services/nachrichtAnheftung'
-import { merkeQuittung } from '@/services/quittungsstand'
+import { hakenFuer } from '@/services/auswertung/quittung'
+import { merkePartnerQuittung, merkeQuittung } from '@/services/quittungsstand'
 import { werteUmschlaegeAus } from '@/services/umschlagAuswertung'
 import { useFunkenStore } from '@/stores/funkenStore'
 
@@ -152,9 +153,13 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         t,
         quittiertGelesen: (bis) => {
           maxPartnerReadIdRef.current = Math.max(maxPartnerReadIdRef.current, bis)
+          // Was der Partner gelesen hat, überlebt das Schließen des Chats: die
+          // Quittung selbst wird nicht wieder gelesen (Punkt 180).
+          merkePartnerQuittung(currentMid, 'gelesen', bis)
         },
         quittiertZugestellt: (bis) => {
           maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, bis)
+          merkePartnerQuittung(currentMid, 'zugestellt', bis)
         },
         markAsRead,
         setVerfallSekunden,
@@ -249,18 +254,13 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
           originalText = undefined
         }
 
-        // Dynamisches Häkchen-System (WhatsApp-Style):
-        // 1. Gelesen: Gesprächspartner hat die Nachricht quittiert (maxPartnerReadId >= msg.id)
-        // 2. Zugestellt: Gesprächspartner hat die Nachricht empfangen (maxPartnerDeliveredId >= msg.id oder bereits gelesen)
-        const isRead = msg.isSelf && maxPartnerReadId >= msg.id
-        const isDelivered = msg.isSelf && (isRead || maxPartnerDeliveredId >= msg.id)
-        const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead
-          ? 'read'
-          : isDelivered
-            ? 'delivered'
-            : msg.id > 0
-              ? 'sent'
-              : 'queued'
+        // Dynamisches Häkchen-System (WhatsApp-Style), eine Stelle für beide
+        // Wege: gelesen (read_receipt) vor zugestellt (delivery_receipt), und
+        // der gespeicherte Stand ist die Untergrenze — siehe `hakenFuer`.
+        const { isRead, isDelivered, status } = hakenFuer(msg, {
+          maxPartnerReadId,
+          maxPartnerDeliveredId,
+        })
 
         const fertig = {
           ...msg,
@@ -369,13 +369,9 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
             // diese Fassung eine Reaktion oder Bearbeitung weniger mit und
             // würde die berechnete beim Mischen wieder verdrängen.
             const zeile = wendeWirkungenAn(m)
-            const isRead = zeile.isSelf && maxPartnerReadId >= zeile.id
-            const isDelivered = zeile.isSelf && (isRead || maxPartnerDeliveredId >= zeile.id)
             return {
               ...zeile,
-              isRead,
-              isDelivered,
-              status: isRead ? ('read' as const) : isDelivered ? ('delivered' as const) : zeile.status || ('queued' as const),
+              ...hakenFuer(zeile, { maxPartnerReadId, maxPartnerDeliveredId }),
             }
           })
         const systemzeilen = prev.filter((m) => m.isSystem)
@@ -388,6 +384,22 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         void saveLocalMessages(currentMid, combined.slice(-200), verlaufsArt)
         return combined
       })
+
+      /*
+       * Erst jetzt den Lesestand übernehmen.
+       *
+       * Jeder vorzeitige `return` oben (fremder Chat, neuerer Durchlauf,
+       * Schreibfehler) hat diese Lesung verworfen — dann bleibt der Stand
+       * stehen und der nächste Abruf holt dieselben Umschläge noch einmal. Der
+       * Klartext liegt dann schon in der Ablage, ein Ratchet-Schlüssel wird
+       * also nicht ein zweites Mal verbraucht.
+       *
+       * Bis 22.10.2026 rückte der Stand schon im Leselauf vor. Startete
+       * währenddessen ein zweiter Durchlauf (Takt, Sync-Ereignis), verwarf
+       * dieser hier das Ergebnis des ersten — und der zweite fand nichts mehr:
+       * Nachrichten der Gegenseite fehlten dauerhaft, bis die Seite neu lud.
+       */
+      konversation.uebernimmLesestand(gelesen)
 
       /**
        * Angewendet heißt erledigt — aber erst **hier**.

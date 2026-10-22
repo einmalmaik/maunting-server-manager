@@ -75,6 +75,9 @@ function GruppenWache({ gruppe, eigeneId, identitaetRef, onErwaehnung }: WachePr
       if (siegelAktiv() && !istOffen()) return
       const gelesen = await konversation.liesUmschlaege().catch(() => null)
       if (!lebt || !gelesen) return
+      // Die Wache liest nur mit und verwirft nichts; ihr Stand ist ihr eigener.
+      // Vor der Schleife, weil ein Treffer sie früh zurückkehren lässt.
+      konversation.uebernimmLesestand(gelesen)
 
       for (const lesung of gelesen) {
         if (lesung.art !== 'klartext' || !lesung.text) continue

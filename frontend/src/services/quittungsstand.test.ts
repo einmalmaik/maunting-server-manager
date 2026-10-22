@@ -10,7 +10,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { merkeQuittung, quittungsstand } from './quittungsstand'
+import { merkePartnerQuittung, merkeQuittung, partnerstand, quittungsstand } from './quittungsstand'
 
 const MID = 'mb-1'
 const ANDERE = 'mb-2'
@@ -77,6 +77,35 @@ describe('Quittungsstand', () => {
     expect(quittungsstand(MID)).toEqual({ zugestellt: 0, gelesen: 0 })
     merkeQuittung(MID, 'gelesen', 5)
     expect(quittungsstand(MID).gelesen).toBe(5)
+  })
+
+  it('merkt sich, was der Partner gelesen hat', () => {
+    // Seit der Abruf nur noch Neues liest, liegen die Quittungen nach dem
+    // ersten Lesen hinter dem Stand. Ohne diesen Merker fielen die Häkchen an
+    // den eigenen Nachrichten bei jedem Chatwechsel auf „gesendet" zurück,
+    // obwohl der Partner gelesen hatte.
+    expect(partnerstand(MID)).toEqual({ zugestellt: 0, gelesen: 0 })
+    merkePartnerQuittung(MID, 'zugestellt', 358)
+    merkePartnerQuittung(MID, 'gelesen', 358)
+    expect(partnerstand(MID)).toEqual({ zugestellt: 358, gelesen: 358 })
+    // Ein anderes Gespräch bleibt davon unberührt.
+    expect(partnerstand(ANDERE)).toEqual({ zugestellt: 0, gelesen: 0 })
+  })
+
+  it('hält den Partnerstand vom eigenen getrennt', () => {
+    // Beide nennen Kennungen, aber aus verschiedenen Richtungen: die eigenen
+    // sind die fremden nicht. Ein gemeinsamer Eintrag hielte eine Zahl für die
+    // andere.
+    merkeQuittung(MID, 'gelesen', 12)
+    merkePartnerQuittung(MID, 'gelesen', 400)
+    expect(quittungsstand(MID).gelesen).toBe(12)
+    expect(partnerstand(MID).gelesen).toBe(400)
+  })
+
+  it('lässt auch den Partnerstand nicht zurückfallen', () => {
+    merkePartnerQuittung(MID, 'gelesen', 400)
+    merkePartnerQuittung(MID, 'gelesen', 120)
+    expect(partnerstand(MID).gelesen).toBe(400)
   })
 
   it('bleibt stehen, wenn die Ablage nicht schreibt', () => {
