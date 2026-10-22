@@ -231,7 +231,7 @@ class TestRunContainer:
         with patch.object(docker_service, "_client_or_error", return_value=(client, None)):
             result = docker_service.run_container(
                 name="msm-srv-105",
-                image="ghcr.io/einmalmaik/msm-asa-runtime:test",
+                image="ghcr.io/mauntingstudios/msm-asa-runtime:test",
                 allow_unprivileged_user_namespaces=True,
             )
 

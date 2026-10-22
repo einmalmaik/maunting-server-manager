@@ -14,8 +14,8 @@ export function BrowserInstallationSektion() {
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
   const downloadUrl = isAndroid
-    ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
-    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
+    ? 'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSecureBrowser.apk'
+    : 'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingPontis-Setup.exe'
 
   return (
     <div className="border-t border-outline-variant/40 pt-4">

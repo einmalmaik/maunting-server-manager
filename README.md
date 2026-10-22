@@ -182,7 +182,7 @@ ssh root@DEINE-SERVER-IP
 Starte dann die Installation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
+curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com
 ```
 
 Ersetze `panel.example.com` durch deine eigene Domain.
@@ -303,7 +303,7 @@ sudo systemctl start msm-update.timer
 ## Hilfe und Doku
 
 - **Anleitungen**: in [`docs/self-hosting.md`](docs/self-hosting.md) und im Panel unter **Dokumentation**.
-- **Fehler melden**: [GitHub Issues](https://github.com/einmalmaik/maunting-server-manager/issues)
+- **Fehler melden**: [GitHub Issues](https://github.com/mauntingstudios/maunting-service-manager/issues)
 
 ---
 

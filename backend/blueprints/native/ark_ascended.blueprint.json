@@ -8,7 +8,7 @@
     "description": "ARK: Survival Ascended Dedicated Server (App-ID 2430930) via SteamCMD. Windows-Binary wird über GE-Proton in einem virtuellen Display (Xvfb) gestartet. Maps: TheIsland_WP, ScorchedEarth_WP, TheCenter_WP, Aberration_WP, Extinction_WP, Ragnarok_WP, Valguero_WP, Astraeos_WP, LostColony_WP, Fjordur_WP, ClubArk_WP."
   },
   "runtime": {
-    "image": "ghcr.io/einmalmaik/msm-asa-runtime:ge-proton10-34-umu1.4.0",
+    "image": "ghcr.io/mauntingstudios/msm-asa-runtime:ge-proton10-34-umu1.4.0",
     "workdir": "/home/container",
     "user": "1000:1000",
     "env": {

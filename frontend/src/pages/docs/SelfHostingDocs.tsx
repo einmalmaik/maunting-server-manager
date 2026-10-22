@@ -6,7 +6,7 @@ import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
 
 import { buttonClasses } from '@/Singra/UI'
-export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \\
+export const PANEL_BOOTSTRAP_COMMAND = `curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh \\
   | sudo bash -s -- --domain panel.example.com`
 export const COMPONENT_MIGRATION_COMMAND = 'sudo /opt/msm/helper-scripts/migrate-panel-components.sh'
 

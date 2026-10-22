@@ -5,7 +5,7 @@ FROM ghcr.io/ptero-eggs/steamcmd:proton@sha256:c219f672cf6fedd11e811b7a41dc4ddab
 ARG UMU_VERSION=1.4.0
 ARG UMU_SHA256=138ce4b8843608a257d4bee88191ca78a989778bcefd8abb3c1d1aaac3ac6fb8
 
-LABEL org.opencontainers.image.source="https://github.com/einmalmaik/maunting-server-manager" \
+LABEL org.opencontainers.image.source="https://github.com/mauntingstudios/maunting-service-manager" \
       org.opencontainers.image.description="Pinned UMU + GE-Proton runtime for ARK: Survival Ascended" \
       org.opencontainers.image.licenses="GPL-3.0-or-later"
 

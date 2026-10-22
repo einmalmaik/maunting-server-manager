@@ -52,7 +52,7 @@ if [[ -f /opt/msm/backend/.env ]]; then
     updater=$(mktemp /tmp/msm-bootstrap-update.XXXXXX.sh)
     trap 'rm -f "$updater"' EXIT
     curl -fsSL \
-        https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/update.sh \
+        https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/update.sh \
         -o "$updater"
     chmod 700 "$updater"
     bash -n "$updater"
@@ -61,7 +61,7 @@ fi
 
 if [[ -z "$DOMAIN" ]]; then
     echo "Domain fehlt. Beispiel:" >&2
-    echo "curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com" >&2
+    echo "curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh | sudo bash -s -- --domain panel.example.com" >&2
     exit 2
 fi
 
@@ -71,7 +71,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 # Prefer the tested control-plane artifact. Git remains a compatibility
 # fallback for repositories that do not have a normal v* release yet.
 release_json=$(curl -fsSL \
-    https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest \
+    https://api.github.com/repos/mauntingstudios/maunting-service-manager/releases/latest \
     2>/dev/null || true)
 release_tag=""
 panel_url=""
@@ -110,7 +110,7 @@ if [[ "$release_tag" =~ ^v[A-Za-z0-9._-]+$ && -n "$panel_url" && -n "$checksum_u
 else
     echo "[MSM] Noch kein Panel-Release vorhanden; verwende flachen Git-Checkout..."
     repo_dir="$tmp_dir/repo"
-    git clone --depth 1 https://github.com/einmalmaik/maunting-server-manager.git "$repo_dir" >/dev/null
+    git clone --depth 1 https://github.com/mauntingstudios/maunting-service-manager.git "$repo_dir" >/dev/null
 fi
 
 exec bash "$repo_dir/install.sh" --simple --domain "$DOMAIN"

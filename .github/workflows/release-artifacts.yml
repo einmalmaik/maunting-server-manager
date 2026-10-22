@@ -260,7 +260,7 @@ jobs:
                 --jq '.assets[] | select(.name == "releases.mss.json.sig") | .url')"
               [[ -n "$feed_sig_asset" ]] || { echo "Vorhandene MSS-Feed-Signatur fehlt." >&2; exit 1; }
               gh api "$feed_sig_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json.sig
-              vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss" --release "$feed_version"
+              vpk download github --repoUrl "https://github.com/mauntingstudios/maunting-service-manager" --outputDir "smart-system-velopack" --channel "mss" --release "$feed_version"
             else
               echo "Der MSS-Feed im Release ist bereits diese Version; das Paket wird ohne Delta gebaut."
             fi

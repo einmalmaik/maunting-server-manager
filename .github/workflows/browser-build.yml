@@ -116,7 +116,7 @@ jobs:
           if [[ -n "$previous_version" && "$previous_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
             # Derselbe Release, mit dem verglichen wurde — nicht der gerade
             # neueste des Feeds.
-            vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "browser-velopack" --channel "pontis" --release "$previous_version"
+            vpk download github --repoUrl "https://github.com/mauntingstudios/maunting-service-manager" --outputDir "browser-velopack" --channel "pontis" --release "$previous_version"
           else
             # Entweder gibt es noch keinen Feed oder der neueste ist dieser
             # Tag (zweiter Lauf). Beides baut ein Vollpaket, ohne Download.

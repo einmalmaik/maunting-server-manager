@@ -280,7 +280,7 @@ def test_native_ark_ascended_uses_pinned_umu_runtime_and_all_declared_ports() ->
     with patch("games.blueprint_plugin.active_mod_ids", return_value=[]):
         argv = plugin.build_container_command(server)
 
-    assert blueprint.runtime.image == "ghcr.io/einmalmaik/msm-asa-runtime:ge-proton10-34-umu1.4.0"
+    assert blueprint.runtime.image == "ghcr.io/mauntingstudios/msm-asa-runtime:ge-proton10-34-umu1.4.0"
     assert argv[:4] == [
         "xvfb-run",
         "-a",

@@ -12,9 +12,9 @@ pub struct UpdateConfig {
     pub asset_json_name: &'static str,
     /// Name der APK-Datei im Release (z. B. "MauntingSecureBrowser.apk" oder "MauntingSmartSystem.apk")
     pub apk_file_name: &'static str,
-    /// Fallback-GitHub-API URL (strikte Vorgabe: https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest)
+    /// Fallback-GitHub-API URL (strikte Vorgabe: https://api.github.com/repos/mauntingstudios/maunting-service-manager/releases/latest)
     pub fallback_api_url: &'static str,
-    /// Basis-URL für statische Assets (z. B. https://github.com/einmalmaik/maunting-server-manager/releases/latest/download)
+    /// Basis-URL für statische Assets (z. B. https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download)
     pub release_download_base: &'static str,
     /// Velopack channel feed hosted as a signed asset in GitHub Releases.
     pub velopack_feed_url: &'static str,
@@ -34,12 +34,12 @@ impl UpdateConfig {
             asset_json_name: "latest-msb.json",
             apk_file_name: "MauntingSecureBrowser.apk",
             fallback_api_url:
-                "https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest",
+                "https://api.github.com/repos/mauntingstudios/maunting-service-manager/releases/latest",
             release_download_base:
-                "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download",
+                "https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download",
             velopack_feed_url:
-                "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download",
-            velopack_repo_url: "https://github.com/einmalmaik/maunting-server-manager",
+                "https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download",
+            velopack_repo_url: "https://github.com/mauntingstudios/maunting-service-manager",
             velopack_channel: "pontis",
             user_agent: "MauntingSecureBrowser",
         }
@@ -52,12 +52,12 @@ impl UpdateConfig {
             asset_json_name: "latest.json",
             apk_file_name: "MauntingSmartSystem.apk",
             fallback_api_url:
-                "https://api.github.com/repos/einmalmaik/maunting-server-manager/releases/latest",
+                "https://api.github.com/repos/mauntingstudios/maunting-service-manager/releases/latest",
             release_download_base:
-                "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download",
+                "https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download",
             velopack_feed_url:
-                "https://github.com/einmalmaik/maunting-server-manager/releases/latest/download",
-            velopack_repo_url: "https://github.com/einmalmaik/maunting-server-manager",
+                "https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download",
+            velopack_repo_url: "https://github.com/mauntingstudios/maunting-service-manager",
             velopack_channel: "mss",
             user_agent: "MauntingSmartSystem",
         }

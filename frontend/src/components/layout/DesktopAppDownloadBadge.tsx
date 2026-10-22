@@ -29,8 +29,8 @@ export function DesktopAppDownloadBadge() {
   const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent)
 
   const downloadUrl = isAndroid
-    ? 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem.apk'
-    : 'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem-Setup.exe'
+    ? 'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSmartSystem.apk'
+    : 'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSmartSystem-Setup.exe'
 
   const titleText = isAndroid ? 'MSS Mobile App' : 'MSS Desktop'
   const subtext = isAndroid

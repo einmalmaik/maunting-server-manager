@@ -27,7 +27,7 @@ describe('BrowserDownloadBadge', () => {
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingPontis-Setup.exe'
+      'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingPontis-Setup.exe'
     )
   })
 
@@ -45,7 +45,7 @@ describe('BrowserDownloadBadge', () => {
       const link = screen.getByRole('link')
       expect(link).toHaveAttribute(
         'href',
-        'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSecureBrowser.apk'
+        'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSecureBrowser.apk'
       )
     } finally {
       Object.defineProperty(navigator, 'userAgent', {

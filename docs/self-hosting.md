@@ -24,7 +24,7 @@ Eine frische Produktionsinstallation benötigt eine HTTPS-Domain, deren DNS
 bereits auf den Panel-Server zeigt:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh \
   | sudo bash -s -- --domain panel.example.com
 ```
 
@@ -92,7 +92,7 @@ Für ein getrenntes Frontend wird nur das Frontend-Archiv benötigt:
 
 ```bash
 VERSION=v1.8.0
-curl -fLO "https://github.com/einmalmaik/maunting-server-manager/releases/download/${VERSION}/msm-frontend-${VERSION}.tar.gz"
+curl -fLO "https://github.com/mauntingstudios/maunting-service-manager/releases/download/${VERSION}/msm-frontend-${VERSION}.tar.gz"
 tar -xzf "msm-frontend-${VERSION}.tar.gz"
 ```
 

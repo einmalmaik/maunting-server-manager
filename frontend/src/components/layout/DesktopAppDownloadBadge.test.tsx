@@ -21,7 +21,7 @@ describe('DesktopAppDownloadBadge', () => {
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem-Setup.exe'
+      'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSmartSystem-Setup.exe'
     )
   })
 
@@ -39,7 +39,7 @@ describe('DesktopAppDownloadBadge', () => {
     const link = screen.getByRole('link')
     expect(link).toHaveAttribute(
       'href',
-      'https://github.com/einmalmaik/maunting-server-manager/releases/latest/download/MauntingSmartSystem.apk'
+      'https://github.com/mauntingstudios/maunting-service-manager/releases/latest/download/MauntingSmartSystem.apk'
     )
 
     Object.defineProperty(navigator, 'userAgent', {

@@ -22,7 +22,7 @@ import shutil
 import sys
 from pathlib import Path
 
-REPO = "einmalmaik/maunting-server-manager"
+REPO = "mauntingstudios/maunting-service-manager"
 INSTALLER = "MauntingSmartSystem-Setup.exe"
 desktop_dir = Path("desktop-release")
 desktop_dir.mkdir(parents=True, exist_ok=True)
