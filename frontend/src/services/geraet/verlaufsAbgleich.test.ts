@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import i18n from '@/i18n'
+
 const relay = vi.fn()
 const encrypt = vi.fn(async (text: string) => `sv-e2ee-hybrid-v1:${btoa(text)}`)
 const signiere = vi.fn(async (_mid: string, konto: number, roh: Record<string, unknown>) => ({
@@ -52,6 +54,10 @@ vi.mock('./geraeteVerzeichnis', () => ({
     { device_id: 'sender-1', public_key: '{"kty":"RSA"}' },
     { device_id: 'ziel-1', public_key: '{"kty":"RSA"}' },
   ],
+  verzeichnisVon: async () => [
+    { device_id: 'sender-1', public_key: '{"kty":"RSA"}' },
+    { device_id: 'ziel-1', public_key: '{"kty":"RSA"}' },
+  ],
 }))
 vi.mock('../nutzlastSignatur', () => ({
   signiereNutzlast: (mid: string, konto: number, roh: Record<string, unknown>) => signiere(mid, konto, roh),
@@ -71,6 +77,7 @@ vi.mock('../messengerLocalStore', async (original) => {
 
 import {
   VERLAUF_SYNC_TYP,
+  merkeVerlaufGesendet,
   sendeVerlaufAnGeraet,
   verarbeiteVerlaufsAbgleich,
 } from './verlaufsAbgleich'
@@ -146,6 +153,84 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     expect(paket.nachrichten.some((m: any) => m.id === 4)).toBe(false)
   })
 
+  it('packt weder Platzhalter noch dieselbe Nachricht zweimal ins Paket', async () => {
+    speicher.set('chat-a', [
+      nachricht(1, 'echt'),
+      nachricht(2, i18n.t('messenger.encryptedMessage'), { isSelf: false, senderId: 4 }),
+      // Dieselbe logische Kennung zweimal — etwa die Kopie des Gegenübers.
+      nachricht(3, 'doppelt'),
+      nachricht(3, 'doppelt'),
+    ])
+
+    await sendeVerlaufAnGeraet(ziel)
+
+    const aussen = encrypt.mock.calls.map(([text]) => JSON.parse(text))
+    const paket = JSON.parse(
+      atob(aussen.find((p) => p.type === VERLAUF_SYNC_TYP)!.paket.replace('sv-e2ee-hybrid-v1:', '')),
+    )
+    expect(paket.nachrichten.map((m: any) => m.text)).toEqual(['echt', 'doppelt'])
+    expect(paket.art).toBe('direkt')
+  })
+
+  it('misst die äußere Hülle und halbiert, statt das Paket zu verlieren', async () => {
+    // Das Relais nimmt 1 MiB an. Bis 10/2026 wurde nur der **innere** Umschlag
+    // geprüft; Signatur und Hybridverschlüsselung legten ihre eigene Hülle
+    // darum, und das Paket kam als Ganzes nicht an — der Verlauf riss an genau
+    // dieser Stelle ab, ohne Meldung.
+    speicher.set(
+      'chat-a',
+      Array.from({ length: 120 }, (_, i) => nachricht(i + 1, `Nachricht ${i + 1}`)),
+    )
+    const original = encrypt.getMockImplementation()!
+    encrypt.mockImplementation(async (text: string) => {
+      const b64 = `sv-e2ee-hybrid-v1:${btoa(text)}`
+      // Die äußere Hülle (der signierte Umschlag mit `paket`) ist zu groß,
+      // solange sie mehr als sechzig Nachrichten trägt.
+      if (text.includes('"paket"')) {
+        const innen = atob(JSON.parse(text).paket.replace('sv-e2ee-hybrid-v1:', ''))
+        const anzahl = (innen.match(/"createdAt"/g) ?? []).length
+        return anzahl > 60 ? 'x'.repeat(1_000_001) : b64
+      }
+      return b64
+    })
+    try {
+      await sendeVerlaufAnGeraet(ziel)
+    } finally {
+      encrypt.mockImplementation(original)
+    }
+
+    expect(relay).toHaveBeenCalled()
+    // Was wirklich hinausging, nicht was der erste Versuch war: die erste
+    // Hülle war zu groß und wurde verworfen.
+    const gesendet = relay.mock.calls[0][0].ciphertext_envelope
+    const aussen = JSON.parse(atob(gesendet.replace('sv-e2ee-hybrid-v1:', '')))
+    const paket = JSON.parse(atob(aussen.paket.replace('sv-e2ee-hybrid-v1:', '')))
+    expect(paket.nachrichten.length).toBe(60)
+  })
+
+  it('merkt eine vollständige Übergabe und lässt einen Teilfehler offen', async () => {
+    window.localStorage.clear()
+    speicher.set('chat-a', [nachricht(1, 'Hallo')])
+
+    merkeVerlaufGesendet('ziel-1')
+    expect(window.localStorage.getItem('msm:history_sent:3:ziel-1')).toBeTruthy()
+
+    // Ein Teilfehler darf nicht als erledigt gelten: sonst bliebe die Lücke
+    // für immer, weil der nächste Start den Merker sieht.
+    window.localStorage.clear()
+    const teilfehler = vi.fn()
+    const original = speicher.get.bind(speicher)
+    speicher.get = (() => {
+      throw new Error('Ablage kaputt')
+    }) as typeof speicher.get
+    try {
+      expect(await sendeVerlaufAnGeraet(ziel, { beiTeilfehler: teilfehler })).toBe(0)
+    } finally {
+      speicher.get = original
+    }
+    expect(teilfehler).toHaveBeenCalled()
+  })
+
   it('teilt einen langen Verlauf in mehrere Pakete, statt bei 200 abzubrechen', async () => {
     speicher.set(
       'chat-a',
@@ -181,6 +266,31 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     expect(angenommen).toBe(2)
     expect(speicher.get('chat-a')?.map((m) => m.text)).toEqual(['lokal', 'vom anderen Gerät'])
     expect(dmMock.nimm.mock.calls[0]?.slice(0, 2)).toEqual([4, 'chat-geheimnis'])
+  })
+
+  it('führt ein Gruppenpaket mit Absender zusammen', async () => {
+    speicher.set('chat-a', [])
+    const paket = {
+      v: 1,
+      mailbox: 'chat-a',
+      art: 'gruppe',
+      nachrichten: [
+        { ...nachricht(1, 'von A'), senderId: 1, clientUuid: 'gleiche-uuid' },
+        { ...nachricht(2, 'von B'), senderId: 2, clientUuid: 'gleiche-uuid' },
+      ],
+    }
+    const roh = {
+      type: VERLAUF_SYNC_TYP,
+      ziel: 'sender-1',
+      geraet: 'ziel-1',
+      von_konto: 3,
+      von_geraet: 'ziel-1',
+      sig: 'beleg',
+      paket: 'sv-e2ee-hybrid-v1:egal',
+    }
+
+    expect(await verarbeiteVerlaufsAbgleich(roh, 3, async () => JSON.stringify(paket))).toBe(2)
+    expect(speicher.get('chat-a')?.map((m) => m.text)).toEqual(['von A', 'von B'])
   })
 
   it('verwirft ein Paket für ein anderes Gerät', async () => {

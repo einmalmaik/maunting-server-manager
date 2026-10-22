@@ -67,6 +67,16 @@ export type DrLesung =
   /** Kein Umschlag dieses Verfahrens. */
   | { art: 'unbekannt' }
   /**
+   * Für dieses Gerät gibt es (noch) keine Sitzung.
+   *
+   * Kein Bruch: die Nachricht kam vor ihrem Sitzungsaufbau an — umgekehrte
+   * Zeitfolge, zwei Geräte, ein Fenster voller Umschläge. Bis 10/2026 wurde
+   * daraus ein Bruch mit Marke, und die Nachricht war dauerhaft verloren. Jetzt
+   * bleibt sie liegen und wird im nächsten Durchlauf geöffnet, wenn der Aufbau
+   * verarbeitet ist.
+   */
+  | { art: 'keine-sitzung' }
+  /**
    * Die Sitzung trägt nicht mehr: die Gegenstelle hat neu installiert, oder
    * jemand hat am Umschlag gedreht. Die Sitzung gehört weg und der Mensch soll
    * es sehen.

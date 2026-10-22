@@ -17,6 +17,7 @@ import {
   onSchluesselWarnung,
 } from '@/services/e2eeGeraet'
 import { sendeVerlaufAnNeueGeraete } from '@/services/geraet/verlaufsAbgleich'
+import { merkeWirkungAusKlartext } from '@/services/eigeneWirkungen'
 import { holeGeraeteSteuerung } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
@@ -172,11 +173,11 @@ export function useMessengerKern({
     setMessages((prev) => haengeSystemzeileAn(prev, zeile))
   }, [haengeSystemzeileAn, merkeSystemzeile, t])
 
-  const zeigeSystemzeile = useCallback((text: string) => {
+  const zeigeSystemzeile = useCallback((text: string, kennung?: string) => {
     const jetzt = Date.now()
     const zeile: ChatMessage = {
       id: jetzt,
-      clientUuid: `sys-${jetzt}`,
+      clientUuid: kennung ? `sys-${kennung}` : `sys-${jetzt}`,
       senderId: 0,
       text,
       createdAt: new Date().toISOString(),
@@ -216,6 +217,12 @@ export function useMessengerKern({
     void holeGeraeteSteuerung(
       currentUserId,
       (umschlag) => decryptE2eeHybridWithKeyring(umschlag, identity.decryptionKeys),
+      // **Auch ohne offenes Gespräch ablegen.** Eine Bearbeitung oder Löschung
+      // aus einem Zweitgerät kam beim Start bisher nicht an: der Cursor wanderte
+      // weiter, und die Wirkung war weg, bevor der Chat je geöffnet wurde.
+      (klartext, env) => {
+        void merkeWirkungAusKlartext(klartext, env)
+      },
     ).catch(() => {})
     void sendeVerlaufAnNeueGeraete().catch(() => {})
   }, [currentUserId, identity, messengerGesperrt])
@@ -264,13 +271,15 @@ export function useMessengerKern({
 
   useEffect(() => {
     const abbestellen = onSchluesselWarnung((ev) => {
+      const kennung = `warn-${ev.typ}-${ev.userId}-${ev.geraete.join('-')}`
       if (currentUserId === ev.userId) {
         const text = {
           neues_geraet: t('messenger.ownNewDevice'),
           unbestaetigt: t('messenger.ownUnverifiedDeviceWarning'),
+          freigabe_unbestaetigt: t('messenger.ownBridgedDeviceWarning'),
           konto_neustart: t('messenger.ownAccountResetWarning'),
         }[ev.typ]
-        zeigeSystemzeile(text)
+        zeigeSystemzeile(text, kennung)
         return
       }
       let name = ''
@@ -284,9 +293,10 @@ export function useMessengerKern({
       const text = {
         neues_geraet: t('messenger.newDeviceDetected', { name }),
         unbestaetigt: t('messenger.unverifiedDeviceWarning', { name }),
+        freigabe_unbestaetigt: t('messenger.bridgedDeviceWarning', { name }),
         konto_neustart: t('messenger.accountResetWarning', { name }),
       }[ev.typ]
-      zeigeSystemzeile(text)
+      zeigeSystemzeile(text, kennung)
     })
     return abbestellen
   }, [activeContact, activeGroup, currentUserId, t, zeigeSystemzeile])

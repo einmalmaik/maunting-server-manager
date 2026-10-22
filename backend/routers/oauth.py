@@ -30,7 +30,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from config import settings, get_effective_cookie_domain
-from cookies import _set_auth_cookies
+from cookies import _set_auth_cookies, lies_zugangstoken
 from database import get_db
 from dependencies import get_current_user, require_global, verify_csrf
 from middleware.rate_limit import auth_rate_limit
@@ -623,7 +623,7 @@ def _resolve_link_user(
     """
     if not oauth_service.is_linking_allowed():
         return _redirect_profile_error("linking_disabled")
-    token = request.cookies.get("__Secure-access_token")
+    token = lies_zugangstoken(request.cookies)
     if not token:
         return _redirect_profile_error("auth_required")
     try:

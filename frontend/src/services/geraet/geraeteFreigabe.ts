@@ -23,7 +23,7 @@ import { STANDARD_BEZEICHNUNG, geraeteBezeichnung } from '../geraeteBezeichnung'
 import { eigenesGeraet, meinKonto, type EigenesGeraet } from './geraeteAblage'
 import { entfernenDaten, freigabeDaten, setzeEigeneFreigabe } from './geraeteVertrauen'
 import { vergessenGeraete } from './geraeteVerzeichnis'
-import { sendeVerlaufAnGeraet } from './verlaufsAbgleich'
+import { merkeVerlaufGesendet, sendeVerlaufAnGeraet } from './verlaufsAbgleich'
 
 let veroeffentlichtAls: string | null = null
 
@@ -141,7 +141,18 @@ export async function gebeGeraetFrei(geraet: E2eeGeraetItem): Promise<void> {
    * nächste Versand erreicht das Gerät trotzdem.
    */
   try {
-    await sendeVerlaufAnGeraet(geraet)
+    // Übergabe und Merker gehören zusammen. `msm:history_sent` wurde bis
+    // 10/2026 nur beim nächsten Start gesetzt — das frische Gerät bekam den
+    // Verlauf beim Öffnen des Messengers also ein zweites Mal. Bei einem
+    // Teilfehler wird bewusst **nicht** gemerkt: dann holt der nächste Start
+    // den Rest nach, statt die Lücke für erledigt zu erklären.
+    let teilfehler = false
+    await sendeVerlaufAnGeraet(geraet, {
+      beiTeilfehler: () => {
+        teilfehler = true
+      },
+    })
+    if (!teilfehler) merkeVerlaufGesendet(geraet.device_id)
   } catch {
     // Der Verlauf ist ein Zusatz, kein Teil der Freigabe.
   }

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -27,8 +25,6 @@ from services.social_service import SocialService
 from services.sync_event_service import MAX_MAILBOXES
 from services import webpush_service
 from routers.social.basis import _check_social_enabled, mailbox_token
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -289,6 +285,11 @@ def fetch_blind_mailbox_envelopes(
         limit=limit,
         oldest_first=oldest_first,
     )
+    # Hier bewusst **keine** Log-Zeile: der offene Chat ruft diese Route alle
+    # fünf Sekunden mit derselben Mailbox und bekommt jedes Mal dieselben
+    # Umschläge — eine Zeile je Abruf wäre Rauschen statt Spur. Das Einliefern
+    # steht in `relay_blind_envelope`, das Abholen im Zugriffslog
+    # (`docker logs -t`: `GET /api/social/e2ee/mailbox/… 200`).
     return [
         {
             "id": env.id,

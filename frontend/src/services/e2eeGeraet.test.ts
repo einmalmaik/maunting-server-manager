@@ -182,6 +182,7 @@ const {
   signaturSchluesselVon,
 } = await import('./e2eeGeraet')
 const { erzeugeSignaturPaar, signiere } = await import('./absenderSignatur')
+const { leereVertraute } = await import('./geraet/geraeteVertrauen')
 
 describe('e2eeGeraet', () => {
   beforeEach(() => {
@@ -697,6 +698,140 @@ describe('e2eeGeraet', () => {
         geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'alt', approval_signature: sig }),
       ])
       expect(ergebnis.map((g) => g.device_id)).toEqual(['pc', 'neu'])
+    })
+
+    it('überbrückt eine signierte Freigabe eines serverseitig freigegebenen Geräts und warnt', async () => {
+      // Der gemeldete Fall: Pontis (B2) wurde auf dem Zweitgerät B1 freigegeben,
+      // nicht selbst. Client A kannte B1 nicht — die Kette riss, und A sendete
+      // still gar nichts an B2, während B2 den A wegen seines frischen
+      // Vertrauensstands erreichte. Die Unterschrift von B1 deckt Kennung und
+      // beide Schlüssel; fehlt nur die lokale Verankerung, wird B2 als Ziel
+      // aufgenommen **und sichtbar gewarnt**.
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4007, [geraet('alt', 'pk-alt')])
+      const sig = await signiere(
+        await freigabeDaten(4007, 'neu', 'pk-neu', neu.publicKeyJwk),
+        freigeber.privateKeyJwk,
+      )
+      const liste = [
+        geraet('alt', 'pk-alt'),
+        geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+          is_approved: true,
+          approved_by: 'freigeber',
+        }),
+        geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+          approved_by: 'freigeber',
+          approval_signature: sig,
+        }),
+      ]
+
+      await mitWarnungen(async (warnungen) => {
+        const ergebnis = await vertrauteGeraete(4007, liste)
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt', 'neu'])
+        expect(warnungen).toContainEqual({
+          userId: 4007,
+          typ: 'freigabe_unbestaetigt',
+          geraete: ['neu'],
+        })
+      })
+
+      // Nicht in die Vertrauensliste geschrieben: beim nächsten Abruf wird erneut
+      // geprüft und erneut gewarnt, bis ein verankertes Gerät die Kette
+      // fortsetzt oder der Mensch die Sicherheitsnummer verglichen hat.
+      await mitWarnungen(async (warnungen) => {
+        expect((await vertrauteGeraete(4007, liste)).map((g) => g.device_id)).toEqual([
+          'alt',
+          'neu',
+        ])
+        expect(warnungen).toContainEqual({
+          userId: 4007,
+          typ: 'freigabe_unbestaetigt',
+          geraete: ['neu'],
+        })
+      })
+    })
+
+    it('gibt einem selbst freigegebenen Gerät weiterhin nichts', async () => {
+      const selbst = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4008, [geraet('alt', 'pk-alt')])
+      const sig = await signiere(
+        await freigabeDaten(4008, 'selbst', 'pk-selbst', selbst.publicKeyJwk),
+        selbst.privateKeyJwk,
+      )
+      await mitWarnungen(async (warnungen) => {
+        const ergebnis = await vertrauteGeraete(4008, [
+          geraet('alt', 'pk-alt'),
+          geraet('selbst', 'pk-selbst', selbst.publicKeyJwk, {
+            is_approved: true,
+            approved_by: 'selbst',
+            approval_signature: sig,
+          }),
+        ])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt'])
+        expect(warnungen).toContainEqual({ userId: 4008, typ: 'unbestaetigt', geraete: ['selbst'] })
+      })
+    })
+
+    it('überbrückt keine Freigabe ohne oder mit falscher Unterschrift', async () => {
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4011, [geraet('alt', 'pk-alt')])
+      const freigabe = geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+        is_approved: true,
+        approved_by: 'freigeber',
+      })
+      const ohneSig = geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'freigeber' })
+      const falscheSig = geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+        approved_by: 'freigeber',
+        approval_signature: await signiere('etwas anderes', freigeber.privateKeyJwk),
+      })
+
+      expect(
+        (await vertrauteGeraete(4011, [geraet('alt', 'pk-alt'), freigabe, ohneSig])).map(
+          (g) => g.device_id,
+        ),
+      ).toEqual(['alt'])
+      expect(
+        (await vertrauteGeraete(4011, [geraet('alt', 'pk-alt'), freigabe, falscheSig])).map(
+          (g) => g.device_id,
+        ),
+      ).toEqual(['alt'])
+    })
+
+    it('überbrückt auf dem eigenen Konto nicht', async () => {
+      // Dort bleibt die Kette strikt: der eigene Sendepfad verschlüsselt für
+      // jedes angenommene Zielgerät mit, und ein Brücken-Gerät hätte damit den
+      // ganzen Eigenanteil mitgelesen.
+      const EIGEN = 4012
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      setzeAngemeldetesKonto(EIGEN)
+      try {
+        await leereVertraute()
+        await vertrauteGeraete(EIGEN, [geraet('alt', 'pk-alt')])
+        const sig = await signiere(
+          await freigabeDaten(EIGEN, 'neu', 'pk-neu', neu.publicKeyJwk),
+          freigeber.privateKeyJwk,
+        )
+        const ergebnis = await vertrauteGeraete(EIGEN, [
+          geraet('alt', 'pk-alt'),
+          geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+            is_approved: true,
+            approved_by: 'freigeber',
+          }),
+          geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+            approved_by: 'freigeber',
+            approval_signature: sig,
+          }),
+        ])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt'])
+      } finally {
+        setzeAngemeldetesKonto(10)
+      }
     })
 
     it('beginnt mit Warnung neu, wenn keines der bekannten Geräte mehr da ist', async () => {

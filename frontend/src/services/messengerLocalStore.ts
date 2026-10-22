@@ -37,6 +37,7 @@
  * auf eine gemeinsame auszuweichen.
  */
 
+import i18n from '@/i18n'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
@@ -309,6 +310,116 @@ export function parseMessageTimestamp(isoString: string | undefined | null): num
 /**
  * Checks if a message is an unconfirmed / optimistic local message.
  */
+/**
+ * Wie ein Gespräch seine Zeilen zusammenführt.
+ *
+ * - `direkt`: die logische Kennung allein. In dieser Mailbox sitzen zwei
+ *   Menschen; die Kopie des Gegenübers und die eigene Kopie derselben Nachricht
+ *   tragen denselben `clientUuid`, aber einen anderen Absender. Schlüsselten sie
+ *   über den Absender, blieben beide stehen — genau die Doppelung, die ein
+ *   Platzhalter neben der echten Zeile erzeugte.
+ * - `gruppe`: mit Absender, weil dort jede Nachricht ihren eigenen `clientUuid`
+ *   hat und zwei Menschen nie dieselbe logische Kennung tragen dürfen.
+ */
+export type VerlaufsArt = 'direkt' | 'gruppe'
+
+/**
+ * Der Schlüssel, unter dem zwei Zeilen dieselbe Nachricht sind.
+ *
+ * Ohne logische Kennung bleibt nur die Umschlagkennung (`#<id>`): mehr weiß
+ * dieser Stand über die Zeile dann nicht.
+ */
+export function verlaufsSchluessel(
+  m: { clientUuid?: string; senderId?: number; id?: number },
+  art: VerlaufsArt = 'direkt',
+): string {
+  if (m.clientUuid) {
+    return art === 'gruppe' ? `${m.senderId ?? 0}:u:${m.clientUuid}` : `u:${m.clientUuid}`
+  }
+  return `#${m.id}`
+}
+
+/**
+ * Der Text, den ein früherer Stand für „konnte ich nicht öffnen" schrieb.
+ *
+ * Er ist ein Satz, keine Nachricht: keine Anhänge, nicht von mir, nicht
+ * bearbeitet, nicht gelöscht. Eine echte Nachricht mit genau diesem Wortlaut
+ * bleibt damit erhalten — deshalb wird ein Platzhalter auch nur dann gelöscht,
+ * wenn die echte Zeile mit derselben logischen Kennung daneben liegt.
+ */
+function platzhalterTexte(): Set<string> {
+  const texte = new Set<string>()
+  const merke = (schluessel: string) => {
+    try {
+      const wert = i18n.t(schluessel)
+      if (typeof wert === 'string' && wert && wert !== schluessel) texte.add(wert)
+    } catch {
+      // Ohne Übersetzung bleibt die Liste, die sie hat.
+    }
+  }
+  merke('messenger.encryptedMessage')
+  for (const sprache of ['de', 'en']) {
+    try {
+      const fest = i18n.getFixedT(sprache)
+      const wert = fest('messenger.encryptedMessage')
+      if (typeof wert === 'string' && wert) texte.add(wert)
+    } catch {
+      // Sprache nicht geladen.
+    }
+  }
+  return texte
+}
+
+/** Erkennt eine Zeile, die nur „Verschlüsselte Nachricht" sagt. */
+export function istVerschluesselterPlatzhalter(m: {
+  text?: string
+  isSelf?: boolean
+  isEdited?: boolean
+  isDeleted?: boolean
+  noteAttachment?: unknown
+  calendarAttachment?: unknown
+  imageAttachment?: unknown
+  audioAttachment?: unknown
+  fileAttachment?: unknown
+  stickerAttachment?: unknown
+  storyReply?: unknown
+  videoNoteAttachment?: unknown
+}): boolean {
+  if (!m || typeof m.text !== 'string') return false
+  if (m.isSelf || m.isEdited || m.isDeleted) return false
+  for (const feld of [
+    'noteAttachment',
+    'calendarAttachment',
+    'imageAttachment',
+    'audioAttachment',
+    'fileAttachment',
+    'stickerAttachment',
+    'storyReply',
+    'videoNoteAttachment',
+  ] as const) {
+    if (m[feld]) return false
+  }
+  return platzhalterTexte().has(m.text)
+}
+
+/**
+ * Wer von zwei Zeilen derselben Nachricht gewinnt.
+ *
+ * Die echte, entschlüsselte Zeile schlägt den Platzhalter — sonst bliebe die
+ * Aussage „konnte ich nicht lesen" stehen, obwohl der Text daneben liegt. Unter
+ * Gleichen gewinnt die bestätigte Fassung, sonst die frischere. Was nur der
+ * Verlierer kennt (etwa ein Anhang), wird beim Zusammenführen übernommen.
+ */
+function gewinnt(
+  neu: LocalStoredMessage,
+  alt: LocalStoredMessage,
+): boolean {
+  const neuPlatzhalter = istVerschluesselterPlatzhalter(neu)
+  const altPlatzhalter = istVerschluesselterPlatzhalter(alt)
+  if (neuPlatzhalter !== altPlatzhalter) return !neuPlatzhalter
+  return !isOptimisticMessage(neu) || isOptimisticMessage(alt)
+}
+
 export function isOptimisticMessage(m: { id?: number; status?: string }): boolean {
   // `failed` gehört dazu: der Server hat die Nachricht nie bestätigt, sie hat
   // also keine echte Kennung und keinen Platz zwischen den bestätigten Zeilen.
@@ -615,27 +726,34 @@ export async function ladeUmschlagKlartexte(
  * Server bestätigter schlägt einen optimistischen, sonst der zuletzt gelesene.
  * Felder, die nur die alte Fassung kennt — etwa ein Anhang, den dieser Durchlauf
  * nicht mitgelesen hat —, bleiben erhalten.
+ *
+ * **Seit 10/2026 ohne Absender im Schlüssel, wenn es ein Direktchat ist.** Die
+ * Kopie des Gegenübers und die eigene Kopie derselben Nachricht tragen denselben
+ * `clientUuid`, aber einen anderen `senderId`; mit dem Absender im Schlüssel
+ * blieben beide stehen. Genau so überlebte der Platzhalter (Absender =
+ * Gegenüber oder 0) neben der echten Zeile (Absender = Ich).
  */
 export function mischeVerlauf(
   lokal: readonly LocalStoredMessage[],
-  frisch: readonly LocalStoredMessage[]
+  frisch: readonly LocalStoredMessage[],
+  art: VerlaufsArt = 'direkt',
 ): LocalStoredMessage[] {
-  const schluessel = (m: LocalStoredMessage) =>
-    m.clientUuid ? `${m.senderId ?? 0}:${m.clientUuid}` : `#${m.id}`
   const zusammen = new Map<string, LocalStoredMessage>()
 
-  for (const m of lokal) zusammen.set(schluessel(m), m)
+  for (const m of lokal) zusammen.set(verlaufsSchluessel(m, art), m)
 
   for (const m of frisch) {
-    const k = schluessel(m)
+    const k = verlaufsSchluessel(m, art)
     const alt = zusammen.get(k)
     if (!alt) {
       zusammen.set(k, m)
       continue
     }
-    // Ein bestätigter Eintrag verdrängt einen optimistischen, nie umgekehrt.
-    const nimmNeu = !isOptimisticMessage(m) || isOptimisticMessage(alt)
-    zusammen.set(k, nimmNeu ? { ...alt, ...m } : { ...m, ...alt })
+    // Die echte Zeile schlägt den Platzhalter, die bestätigte die optimistische.
+    // Der Verlierer liefert nur, was der Gewinner nicht kennt.
+    const sieger = gewinnt(m, alt) ? m : alt
+    const verlierer = sieger === m ? alt : m
+    zusammen.set(k, { ...verlierer, ...sieger })
   }
 
   return sortMessagesChronologically([...zusammen.values()])
@@ -699,6 +817,11 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       // Dasselbe für ein Steuerpaket, das keinen Zweig fand und als Nachricht
       // abgelegt wurde: der rohe JSON-Text bliebe sonst für immer stehen.
       if (istSteuerzeile(m.text)) return false
+      // Der Platzhalter eines früheren Standes wird nicht mehr angezeigt. Er
+      // bleibt liegen, solange es keine echte Zeile dazu gibt (siehe
+      // `entfernePlatzhalterUndDubletten`) — gelöscht wird nur, was belegt
+      // ersetzt ist.
+      if (istVerschluesselterPlatzhalter(m)) return false
       if (
         m.clientUuid &&
         isOptimisticMessage(m) &&
@@ -742,23 +865,51 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
  */
 export async function saveLocalMessages(
   blindMailboxId: string,
-  messages: LocalStoredMessage[]
+  messages: LocalStoredMessage[],
+  art: VerlaufsArt = 'direkt',
 ): Promise<void> {
   if (!blindMailboxId || !messages || messages.length === 0) return
   try {
     const db = await openLocalDatabase()
 
+    /*
+     * Eine Zeile je Nachricht — schon hier.
+     *
+     * Kam die echte Zeile und ihr Platzhalter in derselben Liste an (etwa nach
+     * einer Übergabe von einem anderen Gerät), wurden bis 10/2026 beide
+     * geschrieben: die Anzeige mischte sie zusammen, die Ablage behielt beide,
+     * und der nächste Ladevorgang holte sie wieder herauf. Jetzt gewinnt die
+     * echte Zeile, und was nur der Verlierer kennt, kommt mit.
+     */
+    const gewaehlt = new Map<string, LocalStoredMessage>()
+    const ohneSchluessel: LocalStoredMessage[] = []
+    for (const m of messages) {
+      if (m.isSystem) continue
+      if (!m.clientUuid) {
+        ohneSchluessel.push(m)
+        continue
+      }
+      const k = verlaufsSchluessel(m, art)
+      const alt = gewaehlt.get(k)
+      if (!alt) {
+        gewaehlt.set(k, m)
+      } else {
+        const sieger = gewinnt(m, alt) ? m : alt
+        const verlierer = sieger === m ? alt : m
+        gewaehlt.set(k, { ...verlierer, ...sieger })
+      }
+    }
+    const auswahl = [...gewaehlt.values(), ...ohneSchluessel]
+    /** Je Schlüssel: die Kennung, die jetzt geschrieben wird. */
+    const gewinnerId = new Map<string, number>()
+    for (const [k, m] of gewaehlt) gewinnerId.set(k, m.id)
+
     // Versiegeln passiert vollständig vor der Transaktion. Siehe Dateikopf.
     let maxEnvelopeId = 0
     const zeilen: Record<string, unknown>[] = []
-    /** Logische Kennungen, für die eine bestätigte Fassung hereinkommt. */
-    const bestaetigt = new Set<string>()
-    /** Optimistische Zeilen aus dieser Liste, je logischer Kennung. */
-    const optimistischHier = new Map<string, number[]>()
-    for (const m of messages) {
+    for (const m of auswahl) {
       // Siehe `isSystem`: eine Meldung über die Sitzung dieses Geräts ist
       // kein Gesprächsinhalt und hat in der Ablage nichts verloren.
-      if (m.isSystem) continue
       zeilen.push(
         await versiegleZeile(
           { ...m, blindMailboxId },
@@ -766,18 +917,6 @@ export async function saveLocalMessages(
           nachrichtAad(blindMailboxId, m.id),
         ),
       )
-      if (m.clientUuid) {
-        const key = `${m.senderId ?? 0}:${m.clientUuid}`
-        if (isOptimisticMessage(m)) {
-          // Beide Fassungen können in derselben Liste stehen — der Verlauf im
-          // Arbeitsspeicher trägt die optimistische Zeile noch eine Runde mit.
-          const bisher = optimistischHier.get(key)
-          if (bisher) bisher.push(m.id)
-          else optimistischHier.set(key, [m.id])
-        } else {
-          bestaetigt.add(key)
-        }
-      }
       // Only real server envelope IDs (< 1e11) advance lastSyncedEnvelopeId
       if (typeof m.id === 'number' && m.id > maxEnvelopeId && m.id < 1e11) {
         maxEnvelopeId = m.id
@@ -794,10 +933,7 @@ export async function saveLocalMessages(
      * mehrfach, und der Index gäbe davon nur eine heraus.
      */
     const zuLoeschen: number[] = []
-    for (const [key, ids] of optimistischHier) {
-      if (bestaetigt.has(key)) zuLoeschen.push(...ids)
-    }
-    if (bestaetigt.size > 0) {
+    if (gewaehlt.size > 0) {
       const rohzeilen = await new Promise<Record<string, any>[]>((resolve) => {
         const tx = db.transaction(STORE_MESSAGES, 'readonly')
         const req = tx
@@ -813,9 +949,11 @@ export async function saveLocalMessages(
       )
       for (const m of vorhanden) {
         if (m.blindMailboxId !== blindMailboxId) continue
-        const key = `${m.senderId ?? 0}:${m.clientUuid}`
-        if (!m.clientUuid || !bestaetigt.has(key)) continue
-        if (!isOptimisticMessage(m)) continue
+        if (!m.clientUuid) continue
+        const siegerId = gewinnerId.get(verlaufsSchluessel(m, art))
+        if (siegerId === undefined || m.id === siegerId) continue
+        // Dieselbe Nachricht, andere Zeile — gleich ob Platzhalter,
+        // optimistisch oder eine zweite bestätigte Fassung: eine bleibt.
         zuLoeschen.push(m.id)
       }
     }
@@ -846,6 +984,105 @@ export async function saveLocalMessages(
   } catch {
     // Non-fatal if IndexedDB write fails
   }
+}
+
+/** Ein Bereinigungslauf je Mailbox zur Zeit. */
+const bereinigungsKetten = new Map<string, Promise<unknown>>()
+
+function seriell<T>(mailbox: string, arbeit: () => Promise<T>): Promise<T> {
+  const vorgaenger = bereinigungsKetten.get(mailbox) ?? Promise.resolve()
+  const lauf = vorgaenger.then(arbeit, arbeit)
+  const kette = lauf.then(
+    () => undefined,
+    () => undefined,
+  )
+  bereinigungsKetten.set(mailbox, kette)
+  void kette.then(() => {
+    if (bereinigungsKetten.get(mailbox) === kette) bereinigungsKetten.delete(mailbox)
+  })
+  return lauf
+}
+
+/**
+ * Räumt die Altlasten eines Verlaufs: Platzhalter und Doppelungen.
+ *
+ * **Konservativ.** Ein Platzhalter fällt nur, wenn die echte Zeile mit
+ * derselben logischen Kennung daneben liegt. Ein alleinstehender bleibt in der
+ * Ablage — er ist der einzige Hinweis darauf, dass dort einmal etwas war — und
+ * wird nur nicht mehr angezeigt. Eine echte Nachricht mit dem Wortlaut
+ * „Verschlüsselte Nachricht" bleibt unangetastet, weil sie kein Platzhalter ist
+ * (sie ist von jemandem, hat vielleicht einen Anhang und ist bearbeitbar).
+ *
+ * Doppelungen derselben Nachricht werden auf eine Zeile zusammengelegt; der
+ * Gewinner bestimmt `gewinnt` (echt vor Platzhalter, bestätigt vor
+ * optimistisch). Gelöscht wird nur die Zeile, nicht ihr Inhalt: was der
+ * Gewinner nicht kennt, war schon vorher verloren.
+ */
+export function entfernePlatzhalterUndDubletten(
+  blindMailboxId: string,
+  art: VerlaufsArt,
+  istPlatzhalter: (m: LocalStoredMessage) => boolean = istVerschluesselterPlatzhalter,
+): Promise<{ platzhalter: number; dubletten: number }> {
+  const leer = { platzhalter: 0, dubletten: 0 }
+  if (!blindMailboxId) return Promise.resolve(leer)
+  return seriell(blindMailboxId, async () => {
+    try {
+      const db = await openLocalDatabase()
+      const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readonly')
+        const req = tx
+          .objectStore(STORE_MESSAGES)
+          .index('by_mailbox')
+          .getAll(IDBKeyRange.only(blindMailboxId))
+        req.onsuccess = () => resolve((req.result || []) as Record<string, any>[])
+        req.onerror = () => reject(req.error)
+      })
+      const vorhanden = await entsiegleZeilen<LocalStoredMessage>(
+        rohzeilen,
+        (z) => nachrichtAad(blindMailboxId, z.id),
+      )
+
+      const gruppen = new Map<string, LocalStoredMessage[]>()
+      for (const m of vorhanden) {
+        if (!m || m.blindMailboxId !== blindMailboxId) continue
+        if (typeof m.id !== 'number' || typeof m.text !== 'string') continue
+        const k = verlaufsSchluessel(m, art)
+        const bisher = gruppen.get(k)
+        if (bisher) bisher.push(m)
+        else gruppen.set(k, [m])
+      }
+
+      const zuLoeschen: number[] = []
+      let platzhalter = 0
+      let dubletten = 0
+      for (const zeilen of gruppen.values()) {
+        if (zeilen.length < 2) continue
+        const echte = zeilen.filter((m) => !istPlatzhalter(m))
+        // Nur Platzhalter: ausblenden ja, löschen nein.
+        if (echte.length === 0) continue
+        let sieger = echte[0]
+        for (const m of echte.slice(1)) if (gewinnt(m, sieger)) sieger = m
+        for (const m of zeilen) {
+          if (m.id === sieger.id) continue
+          if (istPlatzhalter(m)) platzhalter += 1
+          else dubletten += 1
+          zuLoeschen.push(m.id)
+        }
+      }
+      if (zuLoeschen.length === 0) return { platzhalter, dubletten }
+
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(STORE_MESSAGES, 'readwrite')
+        const store = tx.objectStore(STORE_MESSAGES)
+        for (const id of zuLoeschen) store.delete([blindMailboxId, id])
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      })
+      return { platzhalter, dubletten }
+    } catch {
+      return leer
+    }
+  })
 }
 
 /**

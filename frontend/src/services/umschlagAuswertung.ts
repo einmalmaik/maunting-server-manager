@@ -66,6 +66,14 @@ export interface Auswertung {
   maxPartnerReadId: number
   maxPartnerDeliveredId: number
   maxIncomingId: number
+  /**
+   * Wie viele unlesbare Umschläge keine Nachricht mehr ergeben haben.
+   *
+   * Kein Fehler und keine Zeile im Verlauf: es sind die Altlasten, die früher
+   * als „Verschlüsselte Nachricht" gespeichert wurden. Der Aufrufer zeigt
+   * dafür **eine** Systemzeile je Gespräch.
+   */
+  unlesbar: number
 }
 
 export async function werteUmschlaegeAus(
@@ -98,6 +106,7 @@ export async function werteUmschlaegeAus(
   const reaktionen = neueSammeltafel<RohReaktion>()
   const quittungszustand = { maxPartnerReadId: 0, maxPartnerDeliveredId: 0 }
   let maxIncomingId = 0
+  let unlesbar = 0
 
   for (const lesung of gelesen) {
     const env = lesung.env
@@ -128,26 +137,20 @@ export async function werteUmschlaegeAus(
         continue
       }
 
-      const senderId = activeContact ? activeContact.userId : 0
-      const clientUuid = logischeUuid(env.client_uuid)
-      const dedupKey = `${senderId}:${clientUuid}`
-      if (clientUuid && seenClientUuids.has(dedupKey)) {
-        continue
-      }
-      if (clientUuid) {
-        seenClientUuids.add(dedupKey)
-      }
-      decryptedList.push({
-        id: env.id,
-        clientUuid,
-        senderId,
-        text: t('messenger.encryptedMessage'),
-        createdAt: env.created_at,
-        isSelf: false,
-      })
-      if (env.id > maxIncomingId) {
-        maxIncomingId = env.id
-      }
+      /*
+       * Kein Platzhalter mehr.
+       *
+       * Bis 10/2026 wurde jeder unlesbare Umschlag zu einer Zeile
+       * „Verschlüsselte Nachricht". Sie trug je nach Gespräch den Absender des
+       * Gegenübers oder 0, bekam damit einen anderen Misch-Schlüssel als die
+       * echte Zeile — und beide blieben stehen. Bei jedem Laden wurde der
+       * Platzhalter erneut gespeichert und über die Verlaufsübergabe an andere
+       * Geräte weitergereicht. Ein Satz „Verschlüsselte Nachricht" sagt nichts
+       * über den Inhalt; er sagt nur, dass dieser Stand den Umschlag nicht
+       * öffnen konnte. Gezählt wird er, damit der Aufrufer **eine**
+       * Systemzeile zeigen kann.
+       */
+      unlesbar += 1
       continue
     }
 
@@ -574,5 +577,6 @@ export async function werteUmschlaegeAus(
     maxPartnerReadId: quittungszustand.maxPartnerReadId,
     maxPartnerDeliveredId: quittungszustand.maxPartnerDeliveredId,
     maxIncomingId,
+    unlesbar,
   }
 }

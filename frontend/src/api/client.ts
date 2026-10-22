@@ -178,7 +178,9 @@ let isCurrentlyOffline = false
 
 export function getCsrfToken(): string | null {
   if (csrfTokenMemory) return csrfTokenMemory
-  const match = document.cookie.match(new RegExp('(^| )__Secure-csrf_token=([^;]+)'))
+  // Zwei Namen: im lokalen Dev-Stack über http heißt das Cookie ohne
+  // `__Secure-` (der Browser verwirft das Präfix-Cookie sonst).
+  const match = document.cookie.match(new RegExp('(^| )(?:__Secure-csrf_token|msm_dev_csrf_token)=([^;]+)'))
   return match ? decodeURIComponent(match[2]) : null
 }
 

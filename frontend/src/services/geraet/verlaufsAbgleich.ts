@@ -34,14 +34,17 @@ import { ladeGespraeche } from '../gespraechsListe'
 import { ablage } from '../gruppen/gruppenAblage'
 import { uebernimmDmGeheimnis } from '../gruppen/dmGeheimnis'
 import { eigenesGeraet } from './geraeteAblage'
-import { geraeteVon } from './geraeteVerzeichnis'
+import { geraeteVon, verzeichnisVon } from './geraeteVerzeichnis'
 import {
+  istVerschluesselterPlatzhalter,
   listeLokaleMailboxen,
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
   sortMessagesChronologically,
+  verlaufsSchluessel,
   type LocalStoredMessage,
+  type VerlaufsArt,
 } from '../messengerLocalStore'
 import { pruefeNutzlast, signiereNutzlast } from '../nutzlastSignatur'
 
@@ -76,6 +79,22 @@ function merkeGesendet(konto: number, geraet: string): void {
 }
 
 /**
+ * Hält fest, dass ein Gerät seinen Verlauf vollständig bekommen hat.
+ *
+ * Der Merker sitzt seit 10/2026 am **Freigeben** (`gebeGeraetFrei`) und nicht
+ * nur am Start: sonst lief die Übergabe beim nächsten Öffnen des Messengers
+ * noch einmal, obwohl das Gerät eben erst versorgt wurde — und das neue Gerät
+ * bekam denselben Verlauf doppelt, was es nur mühsam wieder zusammenführen
+ * musste. Bei einem Teilfehler wird **nicht** gemerkt; dann holt der nächste
+ * Start den Rest nach.
+ */
+export function merkeVerlaufGesendet(geraet: string): void {
+  const konto = angemeldetesKonto()
+  if (!konto || !geraet) return
+  merkeGesendet(konto, geraet)
+}
+
+/**
  * Wie viel Klartext ein Paket höchstens tragen darf.
  *
  * Der Umschlag fasst 1 MiB Zeichen; Base64, AES-GCM und die äußere Hülle
@@ -94,6 +113,17 @@ const CHUNK = 200
  * kostet nur Relais-Zeit.
  */
 const MAX_TEILE = 25
+
+/**
+ * Die Grenze des **äußeren** Umschlags, in Zeichen.
+ *
+ * Das Relais nimmt 1 MiB an. Gemessen wird deshalb nicht nur der innere
+ * Klartext: Signatur und Hybridverschlüsselung legen ihre eigene Hülle darum,
+ * und ein Paket, das hier zu groß hinausgeht, kommt als Ganzes nicht an — der
+ * Verlauf risse an genau dieser Stelle ab, ohne Meldung. Bis 10/2026 wurde nur
+ * der innere Umschlag auf 900 000 Zeichen geprüft.
+ */
+const MAX_UMSCHLAG_ZEICHEN = 1_000_000
 
 /** Eine einzelne Nachricht über dieser Grenze ist ein Anhang, kein Verlauf. */
 const MAX_NACHRICHT_BYTES = 40_000
@@ -126,6 +156,11 @@ function kompakt(nachricht: LocalStoredMessage): LocalStoredMessage | null {
   // Was nie hinausging, gehört auch nicht in den Verlauf eines anderen
   // Geräts: es stünde dort für immer auf „wird gesendet“.
   if (nachricht.status === 'queued' || nachricht.status === 'failed') return null
+
+  // Der Platzhalter eines früheren Standes ist keine Nachricht, sondern die
+  // Aussage „konnte ich nicht lesen". Er darf nicht im Verlauf eines anderen
+  // Geräts landen — dort stünde er für immer neben dem echten Text.
+  if (istVerschluesselterPlatzhalter(nachricht)) return null
 
   const kopie: LocalStoredMessage = { ...nachricht }
   delete kopie.isSystem
@@ -167,6 +202,7 @@ async function packeAuswahl(
   auswahl: readonly LocalStoredMessage[],
   zielSchluessel: string,
   dmGeheimnis?: { peerId: number; geheimnis: string; beleg?: Record<string, unknown> },
+  art: VerlaufsArt = 'direkt',
 ): Promise<{ umschlag: string; anzahl: number } | null> {
   let n = auswahl.length
   while (n >= 1) {
@@ -174,6 +210,7 @@ async function packeAuswahl(
     const klartext = JSON.stringify({
       v: 1,
       mailbox: mid,
+      art,
       nachrichten: teil,
       ...(dmGeheimnis ? { dmGeheimnis } : {}),
     })
@@ -193,7 +230,10 @@ async function packeAuswahl(
  * einzelnen Paket: eine zu große oder kaputte Mailbox hält die übrigen nicht
  * auf. Der Aufrufer entscheidet, ob er das Ergebnis meldet.
  */
-export async function sendeVerlaufAnGeraet(ziel: E2eeGeraetItem): Promise<number> {
+export async function sendeVerlaufAnGeraet(
+  ziel: E2eeGeraetItem,
+  optionen: { beiTeilfehler?: () => void } = {},
+): Promise<number> {
   const konto = angemeldetesKonto()
   if (!konto || !ziel?.device_id || !ziel.public_key) return 0
   const meins = await eigenesGeraet()
@@ -247,42 +287,80 @@ export async function sendeVerlaufAnGeraet(ziel: E2eeGeraetItem): Promise<number
           // Ohne Geheimnis geht der Verlauf trotzdem.
         }
       }
+      /**
+       * `art` entscheidet, woran zwei Zeilen dieselbe Nachricht sind.
+       *
+       * Ein Direktchat hat eine Gegenseite; dann gehören die eigene Kopie und
+       * die Kopie des Gegenübers zusammen. In einer Gruppe trägt jede Nachricht
+       * ihre eigene logische Kennung, und der Absender gehört in den Schlüssel.
+       */
+      const art: VerlaufsArt = peerId ? 'direkt' : 'gruppe'
       const brauchbar = sortMessagesChronologically([...nachrichten])
         .map(kompakt)
         .filter((m): m is LocalStoredMessage => m !== null)
-      if (brauchbar.length === 0) continue
+      // Vor dem Packen zusammenlegen: derselbe Umschlag zweimal im Paket
+      // erzeugte beim Empfänger zwei Zeilen, und der Platzhalter reiste mit.
+      const jeSchluessel = new Map<string, LocalStoredMessage>()
+      for (const m of brauchbar) {
+        const k = verlaufsSchluessel(m, art)
+        if (!jeSchluessel.has(k)) jeSchluessel.set(k, m)
+      }
+      const eindeutig = [...jeSchluessel.values()]
+      if (eindeutig.length === 0) continue
 
       // In Teilen, nicht nur die letzten 200: der gemeldete Verlauf riss
       // genau dort ab, wo das eine Paket aufhörte. Jeder Teil trägt das
       // Chatgeheimnis nur beim ersten Mal.
-      let rest = brauchbar
+      let rest = eindeutig
       let teil = 0
       while (rest.length > 0 && teil < MAX_TEILE) {
-        const auswahl = rest.slice(-CHUNK)
-        const gepackt = await packeAuswahl(
-          mid,
-          auswahl,
-          ziel.public_key,
-          teil === 0 ? dmGeheimnis : undefined,
-        )
+        let auswahl = rest.slice(-CHUNK)
+        let gepackt: { umschlag: string; anzahl: number } | null = null
+        let umschlag = ''
+
+        /*
+         * Die **äußere** Hülle messen, nicht nur den inneren Klartext.
+         *
+         * Ein Paket, das nach Signatur und Hybridverschlüsselung über 1 MiB
+         * liegt, weist das Relais ab — und zwar als Ganzes, ohne Meldung. Bis
+         * 10/2026 wurde nur innen auf 900 000 Zeichen geprüft; die Nachricht
+         * über den großen Anhängen verschwand so still. Ist die Hülle zu groß,
+         * halbiert sich die Zahl der Nachrichten, bis sie passt.
+         */
+        while (auswahl.length > 0) {
+          const versuch = await packeAuswahl(
+            mid,
+            auswahl,
+            ziel.public_key,
+            teil === 0 ? dmGeheimnis : undefined,
+            art,
+          )
+          if (!versuch) break
+          const inhalt = await signiereNutzlast(geraeteMailbox, konto, {
+            type: VERLAUF_SYNC_TYP,
+            v: 1,
+            ziel: ziel.device_id,
+            geraet: meins.kennung,
+            paket: versuch.umschlag,
+          })
+          const huelle = await encryptE2eeHybrid(
+            JSON.stringify(inhalt),
+            ziel.public_key,
+            meins.paar.publicKeyJwk,
+          )
+          if (huelle.length <= MAX_UMSCHLAG_ZEICHEN) {
+            gepackt = versuch
+            umschlag = huelle
+            break
+          }
+          if (auswahl.length === 1) break
+          auswahl = auswahl.slice(-Math.max(1, Math.floor(auswahl.length / 2)))
+        }
         if (!gepackt) {
           // Eine einzelne, zu große Nachricht fällt weg; der Rest geht mit.
           rest = rest.slice(0, rest.length - 1)
           continue
         }
-
-        const aussen = await signiereNutzlast(geraeteMailbox, konto, {
-          type: VERLAUF_SYNC_TYP,
-          v: 1,
-          ziel: ziel.device_id,
-          geraet: meins.kennung,
-          paket: gepackt.umschlag,
-        })
-        const umschlag = await encryptE2eeHybrid(
-          JSON.stringify(aussen),
-          ziel.public_key,
-          meins.paar.publicKeyJwk,
-        )
         await relayE2eeEnvelope({
           blind_mailbox_id: geraeteMailbox,
           ciphertext_envelope: umschlag,
@@ -296,7 +374,9 @@ export async function sendeVerlaufAnGeraet(ziel: E2eeGeraetItem): Promise<number
       }
     } catch {
       // Naechste Mailbox. Ein Paket ist ein Zusatz, kein Grund, die Freigabe
-      // rueckgaengig zu machen.
+      // rueckgaengig zu machen — aber der Aufrufer soll wissen, dass die
+      // Übergabe nicht vollständig war und nicht als erledigt gilt.
+      optionen.beiTeilfehler?.()
     }
   }
   return gesendet
@@ -323,14 +403,23 @@ export async function sendeVerlaufAnNeueGeraete(): Promise<number> {
   } catch {
     return 0
   }
-  const geschwister = await geraeteVon(konto)
+  // **Frisch gefragt.** `geraeteVon` darf zehn Minuten aus dem
+  // Zwischenspeicher antworten; ein gerade freigegebenes Gerät fehlt darin
+  // genau in dem Augenblick, in dem es gebraucht wird — und bekommt seinen
+  // Verlauf erst beim übernächsten Start.
+  const geschwister = await verzeichnisVon(konto, { frisch: true }).catch(() => geraeteVon(konto))
   let gesendet = 0
   for (const geraet of geschwister) {
     if (geraet.device_id === meins.kennung) continue
     if (gesendetAn(konto, geraet.device_id)) continue
     try {
-      const pakete = await sendeVerlaufAnGeraet(geraet)
-      if (pakete > 0) {
+      let teilfehler = false
+      const pakete = await sendeVerlaufAnGeraet(geraet, {
+        beiTeilfehler: () => {
+          teilfehler = true
+        },
+      })
+      if (pakete > 0 && !teilfehler) {
         merkeGesendet(konto, geraet.device_id)
         gesendet += 1
       }
@@ -376,7 +465,7 @@ export async function verarbeiteVerlaufsAbgleich(
   if (!geschwister.some((g) => g.device_id === vonGeraet)) return 0
 
   const paketText = await entsiegle(String(roh.paket || ''))
-  let paket: { mailbox?: unknown; nachrichten?: unknown; dmGeheimnis?: unknown }
+  let paket: { mailbox?: unknown; nachrichten?: unknown; dmGeheimnis?: unknown; art?: unknown }
   try {
     paket = JSON.parse(paketText)
   } catch {
@@ -404,9 +493,13 @@ export async function verarbeiteVerlaufsAbgleich(
     .slice(-500)
   if (nachrichten.length === 0) return 0
 
+  // Die Art reist im Paket: der Absender weiss, ob die Mailbox zu einer
+  // Gegenseite gehörte. Ohne sie legte der Empfänger Gruppenzeilen nach dem
+  // Direktschlüssel zusammen — und damit verschiedene Absender auf eine Zeile.
+  const art: VerlaufsArt = paket.art === 'gruppe' ? 'gruppe' : 'direkt'
   const vorhanden = await loadLocalMessages(mid)
-  const zusammen = mischeVerlauf(vorhanden, nachrichten)
-  await saveLocalMessages(mid, zusammen)
+  const zusammen = mischeVerlauf(vorhanden, nachrichten, art)
+  await saveLocalMessages(mid, zusammen, art)
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('msm:messages-updated', { detail: { blind_mailbox_id: mid } }),

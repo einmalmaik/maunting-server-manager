@@ -87,11 +87,19 @@ export function leereVertraute(): void {
  * - `neues_geraet`: ein Gerät kam dazu, von einem vertrauten freigegeben.
  * - `unbestaetigt`: der Server nennt ein Gerät, das keine gültige Freigabe
  *   trägt — neu oder mit neuem Schlüssel. Es bekommt nichts.
+ * - `freigabe_unbestaetigt`: ein Gerät trägt eine gültige Freigabe eines
+ *   anderen, serverseitig freigegebenen Geräts, das dieser Client noch nicht
+ *   verankert hat. Es bekommt Nachrichten, aber die Sicherheitsnummer ist
+ *   noch nicht verglichen.
  * - `konto_neustart`: keines der bekannten Geräte ist mehr da. Das ist der
  *   Neustart nach Verlust aller Geräte — oder ein Server, der Geräte
  *   austauscht. Unterscheiden kann das nur der Mensch: Sicherheitsnummer.
  */
-export type SchluesselWarnungTyp = 'neues_geraet' | 'unbestaetigt' | 'konto_neustart'
+export type SchluesselWarnungTyp =
+  | 'neues_geraet'
+  | 'unbestaetigt'
+  | 'freigabe_unbestaetigt'
+  | 'konto_neustart'
 
 export interface SchluesselWarnungEvent {
   userId: number
@@ -233,7 +241,46 @@ export async function vertrauteGeraete(
     }
   }
 
-  if (vertraut.size === 0 && sicht.length > 0) {
+  /**
+   * Die Brücke für fremde Konten.
+   *
+   * Ein Gerät, das ein anderes, serverseitig freigegebenes Gerät signiert hat,
+   * ist nicht bloß ein Wort des Servers: Die Unterschrift deckt Kennung und
+   * beide Schlüssel. Fehlt nur die lokale Verankerung des Freigebers, wird das
+   * Gerät trotzdem als Ziel aufgenommen und sichtbar gewarnt. Ohne diese
+   * Brücke fiel ein auf dem Zweitgerät freigegebenes Pontis still aus jeder
+   * Auffächerung — der Browser sendete nie dorthin, während Pontis den Browser
+   * wegen seines frischen Vertrauensstands erreichte.
+   *
+   * Nicht überbrückt werden: das eigene Konto (dort bleibt die Kette strikt),
+   * eine Selbstfreigabe (`approved_by === device_id`), eine fehlende oder
+   * falsche Unterschrift und ein Freigeber, der selbst nicht freigegeben ist.
+   * Brücken-Geräte werden nicht in `bekannt` geschrieben; die Warnung kommt
+   * bei jedem Abruf erneut, bis der Mensch die Sicherheitsnummer verglichen
+   * oder ein verankertes Gerät die Kette fortgesetzt hat.
+   */
+  const bruecke = new Set<string>()
+  if (eigenesKonto !== null && userId !== eigenesKonto) {
+    for (let n = 0; n < offen.length; n += 1) {
+      const g = sicht[offen[n]]
+      const von = g.approved_by
+      if (!von || von === g.device_id || !g.approval_signature) continue
+      const freigeber = sicht.find(
+        (kandidat) => kandidat.device_id === von && kandidat.is_approved !== false,
+      )
+      if (!freigeber?.signing_public_key) continue
+      const daten = await freigabeDaten(userId, g.device_id, g.public_key, g.signing_public_key)
+      if (!(await pruefe(daten, g.approval_signature, freigeber.signing_public_key))) continue
+      bruecke.add(g.device_id)
+      offen.splice(n, 1)
+      n -= 1
+    }
+  }
+  if (bruecke.size > 0) {
+    melde({ userId, typ: 'freigabe_unbestaetigt', geraete: [...bruecke] })
+  }
+
+  if (vertraut.size === 0 && bruecke.size === 0 && sicht.length > 0) {
     const neu: VertrauteListe = {}
     sicht.forEach((g, i) => {
       neu[g.device_id] = fingerabdruck(i)
@@ -244,13 +291,14 @@ export async function vertrauteGeraete(
   }
 
   // Entfernte Geräte bleiben in der Liste: ihr Signaturschlüssel beglaubigt
-  // weiter, was sie freigegeben haben, bevor sie gingen.
+  // weiter, was sie freigegeben haben, bevor sie gingen. Brücken-Geräte
+  // bleiben bewusst draußen, damit die Warnung nicht still verschwindet.
   schreibeVertraute(userId, { ...bekannt, ...Object.fromEntries(vertraut) })
   if (neuFreigegeben.length > 0) melde({ userId, typ: 'neues_geraet', geraete: neuFreigegeben })
   if (offen.length > 0) {
     melde({ userId, typ: 'unbestaetigt', geraete: offen.map((i) => sicht[i].device_id) })
   }
-  return sicht.filter((g) => vertraut.has(g.device_id))
+  return sicht.filter((g) => vertraut.has(g.device_id) || bruecke.has(g.device_id))
 }
 
 /**

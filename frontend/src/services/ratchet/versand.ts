@@ -1,6 +1,7 @@
 /** Versand-Auffächerung des Double Ratchet an alle Zielgeräte. */
 
 import { bytesToBase64, utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
 import {
   destroyRatchetState,
   encryptMessage,
@@ -15,7 +16,7 @@ import {
   verlangeGeraeteVon,
   verzeichnisVon,
 } from '../e2eeGeraet'
-import { schritt, sitzungsId } from '../ratchetSpeicher'
+import { leseBindung, schritt, sitzungsId } from '../ratchetSpeicher'
 import { beginneSitzung } from './aufbau'
 import {
   DrGeraetNichtEingetragenError,
@@ -50,12 +51,40 @@ export async function baueZustellungen(
     const zielGeraet = ziel.geraet.device_id
     const id = sitzungsId(meins.kennung, ziel.konto, zielGeraet)
     try {
+      /*
+       * Gehört die Sitzung noch zu diesem Schlüssel?
+       *
+       * Der Abdruck entsteht beim Aufbau (aus dem Verzeichnis) und hier. Hat
+       * die Gegenstelle ihren Schlüssel unter derselben Geräte-ID gewechselt —
+       * Neuinstallation, neuer Browser, zurückgesetzte Ablage —, läuft die alte
+       * Ratchet-Sitzung sonst weiter, und zwar dauerhaft stumm: die Gegenstelle
+       * hat ihr Gegenstück nicht mehr, sendet aber unter derselben Kennung. Bis
+       * 10/2026 wurde das nie erkannt.
+       */
+      const bindung = await sha256Hex(utf8ToBytes(ziel.geraet.public_key))
       const gebaut = await schritt<{ bootstrap: string | null; nachricht: string }>(
         id,
         async (zustand) => {
           let arbeitszustand = zustand
           let bootstrap: string | null = null
           let selbstErzeugt = false
+
+          const gemerkt = await leseBindung(id)
+          if (arbeitszustand && gemerkt !== null && gemerkt !== bindung) {
+            // Alte Sitzung verwerfen — unter demselben Schloss, in dem gleich
+            // der neue Zustand geschrieben wird. Ein `await` danach gilt nicht
+            // mehr: was hier gelesen wurde, ist die Grundlage dieser Runde.
+            destroyRatchetState(arbeitszustand)
+            arbeitszustand = null
+          }
+          /*
+           * `gemerkt === null` heisst: die Sitzung stammt aus der Zeit vor
+           * dieser Bindung. Sie wird **nicht** weggeworfen — sonst zeigte jedes
+           * Bestandsgespräch nach dem Update einmal „Sitzung neu aufgebaut",
+           * und zwar beim Gegenüber. Stattdessen bekommt sie den aktuellen
+           * Abdruck; war der Schlüssel wirklich schon gewechselt, merkt es die
+           * Gegenseite beim Entschlüsseln und baut von sich aus neu auf.
+           */
 
           // `sendingChainKey === null` heisst: dieser Zustand hat noch nie
           // etwas entschlüsselt und kann deshalb nicht senden — so kommt jeder
@@ -88,6 +117,8 @@ export async function baueZustellungen(
 
           return {
             naechster: nextState,
+            // Die Bindung gehört zum Zustand, in derselben Transaktion.
+            bindung,
             ergebnis: {
               bootstrap,
               nachricht: baueUmschlag({

@@ -1,6 +1,67 @@
+from urllib.parse import urlsplit
+
 from fastapi import Response
 
 from config import get_effective_cookie_domain, settings
+
+
+# ── Entwicklungsbetrieb ueber einfaches HTTP auf Loopback ────────────────
+#
+# Ein `__Secure-`-Cookie nimmt ein Browser nur ueber HTTPS an. Ueber
+# `http://localhost` verwirft Chromium es samt `Secure`-Flag — auch das
+# CSRF-Cookie, obwohl es lesbar waere. Der Login antwortete deshalb 200, und
+# `/api/auth/me` danach 401, weil gar kein Cookie ankam: die lokale
+# Entwicklung (Vite auf :3000, Backend auf :8000, beides http) konnte sich
+# nicht anmelden.
+#
+# Die Ausnahme ist ausdruecklich einzuschalten (`MSM_DEV_HTTP_COOKIES=true`)
+# und gilt nur zusammen mit `MSM_DEBUG` und einer Loopback-Adresse. Sie nimmt
+# das Praefix aus dem Namen und laesst `Secure` weg; alles andere bleibt, wie
+# es ist. In Produktion ist der Schalter wirkungslos.
+_DEV_NAMEN = {
+    "__Secure-access_token": "msm_dev_access_token",
+    "__Secure-refresh_token": "msm_dev_refresh_token",
+    "__Secure-csrf_token": "msm_dev_csrf_token",
+}
+
+
+def _ist_loopback(url: str) -> bool:
+    try:
+        host = (urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1") or host.endswith(".localhost")
+
+
+def dev_http_cookies() -> bool:
+    """Laeuft dieses Panel als lokale Entwicklung ueber einfaches HTTP?"""
+    if not settings.dev_http_cookies or not settings.debug:
+        return False
+    return _ist_loopback(settings.panel_url) or _ist_loopback(settings.api_url)
+
+
+def cookie_name(key: str) -> str:
+    """Der Name, unter dem das Cookie im Browser liegen soll."""
+    return _DEV_NAMEN[key] if dev_http_cookies() else key
+
+
+def lies_zugangstoken(cookies) -> str | None:
+    return cookies.get(cookie_name("__Secure-access_token"))
+
+
+def lies_refresh_token(cookies) -> str | None:
+    return cookies.get(cookie_name("__Secure-refresh_token"))
+
+
+def csrf_cookienamen() -> tuple[str, ...]:
+    """Alle Namen, unter denen das CSRF-Cookie liegen kann.
+
+    Im Entwicklungsmodus wird auch der alte Name gelesen: ein Browser kann aus
+    einer frueheren Sitzung noch eines unter `__Secure-csrf_token` haben.
+    """
+    if dev_http_cookies():
+        return (_DEV_NAMEN["__Secure-csrf_token"], "__Secure-csrf_token")
+    return ("__Secure-csrf_token",)
 
 
 # Default SameSite pro Cookie im Single-Host-Modus (cookie_cross_site=False).
@@ -44,7 +105,10 @@ def _cookie_cfg(key: str) -> dict:
     base = _COOKIE_DEFAULTS[key]
     return {
         "httponly": base["httponly"],
-        "secure": base["secure"],  # immer True (__Secure- Prefix + SameSite=None)
+        # Immer True (__Secure- Prefix + SameSite=None) — ausser im lokalen
+        # Entwicklungsbetrieb ueber http, wo der Browser ein Secure-Cookie
+        # verwirft.
+        "secure": base["secure"] and not dev_http_cookies(),
         "samesite": _samesite_for(key),
         "path": base["path"],
     }
@@ -76,7 +140,7 @@ def _set_cookie(response: Response, key: str, value: str, max_age: int | None = 
     # verhindern subtile Mismatch-Bugs beim IdP-Callback-Roundtrip.
     cookie_domain = get_effective_cookie_domain() or None
     response.set_cookie(
-        key=key,
+        key=cookie_name(key),
         value=value,
         httponly=cfg["httponly"],
         secure=cfg["secure"],
@@ -102,13 +166,14 @@ def _clear_legacy_csrf_cookies(response: Response) -> None:
     cfg = _cookie_cfg("__Secure-csrf_token")
     cookie_domain = get_effective_cookie_domain() or None
     for legacy_path in _LEGACY_CSRF_PATHS:
-        response.delete_cookie(
-            key="__Secure-csrf_token",
-            path=legacy_path,
-            secure=cfg["secure"],
-            samesite=cfg["samesite"],
-            domain=cookie_domain,
-        )
+        for name in csrf_cookienamen():
+            response.delete_cookie(
+                key=name,
+                path=legacy_path,
+                secure=cfg["secure"],
+                samesite=cfg["samesite"],
+                domain=cookie_domain,
+            )
 
 
 def _clear_auth_cookies(response: Response) -> None:
@@ -119,13 +184,16 @@ def _clear_auth_cookies(response: Response) -> None:
     cookie_domain = get_effective_cookie_domain() or None
     for key in ("__Secure-access_token", "__Secure-refresh_token", "__Secure-csrf_token"):
         cfg = _cookie_cfg(key)
-        response.delete_cookie(
-            key=key,
-            path=cfg["path"],
-            secure=cfg["secure"],
-            samesite=cfg["samesite"],
-            domain=cookie_domain,
-        )
+        # Beide Namen: der aktive und das Praefix-Cookie aus einer frueheren
+        # Sitzung. Ein Delete auf ein nicht vorhandenes Cookie ist folgenlos.
+        for name in {cookie_name(key), key}:
+            response.delete_cookie(
+                key=name,
+                path=cfg["path"],
+                secure=cfg["secure"],
+                samesite=cfg["samesite"],
+                domain=cookie_domain,
+            )
     _clear_legacy_csrf_cookies(response)
 
 

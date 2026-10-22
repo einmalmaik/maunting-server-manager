@@ -1284,6 +1284,7 @@ function MessengerSeite() {
   // Echtzeitstrom: Anrufe, eintreffende Nachrichten, Tippen.
   useMessengerSync({
     blindMailboxId,
+    leseMailboxen: kern.konversation.leseMailboxen,
     currentUserId,
     geraeteMeldungen: user?.device_notifications,
     loadMessages,

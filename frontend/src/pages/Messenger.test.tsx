@@ -1985,11 +1985,14 @@ describe('Messenger (Allround Chat)', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /charlie_e2ee/i }))
 
-    // Cross-platform messages must be decoded and readable, and unmatched legacy hybrid safely shows encrypted notice
+    // Cross-platform messages must be decoded and readable. Der unlesbare
+    // Altumschlag erzeugt **keine** Blase mehr, sondern eine Systemzeile — und
+    // nur eine, auch wenn der Abruf mehrfach läuft.
     await waitFor(() => {
       expect(screen.getByText('Nachricht aus Tauri auf Web lesbar')).toBeInTheDocument()
       expect(screen.getByText('Nachricht aus Web auf Tauri lesbar')).toBeInTheDocument()
-      expect(screen.getByText(i18n.t('messenger.encryptedMessage'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('messenger.unreadableOlderMessages'))).toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('messenger.encryptedMessage'))).toBeNull()
     })
   })
 

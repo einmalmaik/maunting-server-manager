@@ -41,10 +41,15 @@ function speicherAblage() {
     async lies(id) {
       return daten.get(id) ?? null
     },
-    async schreibe(id, zustand, marke) {
+    async schreibe(id, zustand, marke, begleiter) {
       daten.set(id, zustand)
       schreibfolge.push(id)
-      if (marke) daten.set(marke, '1')
+      const marken = marke === undefined ? [] : Array.isArray(marke) ? marke : [marke]
+      for (const eine of marken) daten.set(eine, '1')
+      for (const [platz, wert] of Object.entries(begleiter ?? {})) {
+        if (wert === null) daten.delete(platz)
+        else daten.set(platz, wert)
+      }
     },
     async loesche(id) {
       daten.delete(id)

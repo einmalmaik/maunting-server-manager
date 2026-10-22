@@ -30,4 +30,10 @@ EXPOSE 8000
 RUN mkdir -p /opt/msm/backups /opt/msm/servers /opt/msm/vault-blobs /opt/msm/blueprints/community /data/servers /data/vault-blobs \
     && chmod -R 777 /opt/msm /data
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# `--timeout-graceful-shutdown`: Ohne Frist wartet uvicorn beim Reload
+# unbegrenzt auf offene Streams (SSE `/api/events`, WebSockets). Der Browser
+# hält sie offen, der alte Prozess beendet sich nie, der neue startet nie —
+# jede Anfrage läuft in den Timeout, und der Vite-Proxy antwortet 502. Genau
+# das sah im lokalen Stack wie „Seiten laden ewig" und „Failed to fetch" aus.
+# Drei Sekunden reichen: im Dev-Modus darf ein Reload die Leitung kappen.
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--timeout-graceful-shutdown", "3"]

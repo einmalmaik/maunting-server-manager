@@ -38,8 +38,8 @@ import {
 import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
 import {
   eigeneWirkungenFuer,
-  merkeEigeneWirkung,
   merkeEigeneWirkungen,
+  merkeWirkungAusKlartext,
 } from '@/services/eigeneWirkungen'
 import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
@@ -156,6 +156,13 @@ export interface KonversationOptionen {
 export interface Konversation {
   /** Leer, solange keine Mailbox feststeht. */
   blindMailboxId: string
+  /**
+   * Alle Mailboxen, aus denen dieses Gespräch liest — die Kennung aus dem
+   * Chatgeheimnis und die alte, abgeleitete. Die Liste steht hier, weil der
+   * Echtzeitstrom sie braucht: ein Umschlag in der neuen Mailbox ist kein
+   * fremder Chat, auch wenn er nicht die Kennung des Gesprächs trägt.
+   */
+  leseMailboxen: string[]
   /** Der Gruppenkontext, oder `null` im Direktchat und bei unvollständiger Mitgliederliste. */
   gruppenKontext: GruppenKontext | null
   /**
@@ -314,6 +321,16 @@ export function useKonversation({
 }: KonversationOptionen): Konversation {
   const blindMailboxId = useMailboxId(ziel, eigeneId)
 
+  /**
+   * Was dieser Durchlauf liest, für den Echtzeitstrom.
+   *
+   * Vergleich über die zusammengesetzte Zeichenkette, nicht über die Liste:
+   * `lesen` ensteht bei jedem Durchlauf neu, und eine neue Referenz mit
+   * gleichem Inhalt würde den `useEffect` des Stroms bei jedem Takt neu binden.
+   */
+  const [leseMailboxen, setLeseMailboxen] = useState<string[]>([])
+  const leseStand = useRef('')
+
   /** Woran ein laufender Abruf merkt, dass er zu spät kommt. */
   const aktuelleMailbox = useRef('')
   aktuelleMailbox.current = blindMailboxId
@@ -419,17 +436,12 @@ export function useKonversation({
         // geöffnetes Gespräch wird sie aufbewahrt, statt mit dem Cursor
         // verloren zu gehen.
         if (roh.mailbox !== mid) {
-          if (typeof roh.mailbox === 'string') {
-            // Der Schreibweg ist asynchron (das Siegel rechnet) und darf den
-            // Leseumlauf nicht aufhalten. Was nicht geschrieben werden kann —
-            // etwa im verschlossenen Zustand — bleibt liegen, statt den
-            // Durchlauf zu kippen.
-            void merkeEigeneWirkung({
-              mailbox: roh.mailbox,
-              payload: klartext,
-              zeitpunkt: env.created_at,
-            }).catch(() => {})
-          }
+          // Derselbe Helfer wie beim Start des Messengers: was zu einem anderen
+          // Gespräch gehört, wird für dessen Öffnen aufbewahrt. Der Schreibweg
+          // ist asynchron (das Siegel rechnet) und darf den Leseumlauf nicht
+          // aufhalten; scheitert er — etwa im verschlossenen Zustand —, bleibt
+          // die Zeile liegen, statt den Durchlauf zu kippen.
+          void merkeWirkungAusKlartext(klartext, env)
           return
         }
         eigeneSteuerung.push({
@@ -481,6 +493,14 @@ export function useKonversation({
       }
     } else {
       lesen = [mid]
+    }
+    {
+      const kennungen = [...new Set([mid, ...lesen])].sort()
+      const stand = kennungen.join('|')
+      if (leseStand.current !== stand) {
+        leseStand.current = stand
+        setLeseMailboxen(kennungen)
+      }
     }
     if (aktuelleMailbox.current !== mid) {
       behalteEigeneSteuerung()
@@ -567,6 +587,10 @@ export function useKonversation({
           vonGeraet: zwischen.vonGeraet,
         }
       }
+
+      if (vorabAufbau.has(env.id)) return { art: 'still', env }
+      const vorab = vorabKlartext.get(env.id)
+      if (vorab !== undefined) return { art: 'klartext', env, text: vorab }
 
       try {
         if (gruppenKontext) {
@@ -673,6 +697,14 @@ export function useKonversation({
             gebrochene.push({ vonKonto: lesung.vonKonto, vonGeraet: lesung.vonGeraet })
             return { art: 'still', env }
           }
+          if (lesung.art === 'keine-sitzung') {
+            /*
+             * Noch nicht aufgebaut — kein Bruch, keine Marke, keine verlorene
+             * Nachricht. Sie bleibt ungeöffnet und kommt im nächsten Durchlauf
+             * wieder, dann mit dem Aufbau davor.
+             */
+            return { art: 'still', env }
+          }
           if (
             lesung.art === 'unbekannt' ||
             lesung.art === 'fehler' ||
@@ -699,6 +731,67 @@ export function useKonversation({
       } catch {
         return { art: 'unlesbar', env }
       }
+    }
+
+    /**
+     * Erst **alle** Sitzungsaufbauten, dann alles andere.
+     *
+     * Bis 10/2026 lief beides in einer Schleife nach Zeit und Kennung. Kam die
+     * Nachricht vor ihrem Aufbau — umgekehrte Zeitfolge, zwei Geräte, ein
+     * Fenster voller Umschläge —, lief sie gegen eine Sitzung, die es noch nicht
+     * gab: sie wurde zum Bruch mit Marke und war dauerhaft verloren, obwohl der
+     * Aufbau im selben Fenster lag. Beim ersten Kontakt meldete der Verlauf
+     * zusätzlich „Die Sicherheitssitzung wurde neu aufgebaut", ohne dass je
+     * eine bestand.
+     *
+     * Der Vorlauf entschlüsselt die Hybridumschläge einmal, verarbeitet die
+     * Aufbauten und merkt sich den Klartext der Nachrichten. Die Hauptschleife
+     * findet beides vor und entschlüsselt nicht ein zweites Mal — ein
+     * Ratchet-Nachrichtenschlüssel wäre beim zweiten Versuch verbraucht.
+     */
+    const vorabKlartext = new Map<number, string>()
+    const vorabAufbau = new Set<number>()
+    if (drKontext) {
+      for (const env of umschlaege) {
+        if (!env.ciphertext_envelope.startsWith(HYBRID_PREFIX)) continue
+        const gespeichert = bekannt.get(env.id)
+        if (gespeichert !== undefined) {
+          vorabKlartext.set(env.id, gespeichert)
+          continue
+        }
+        const frueher = envelopePlaintextCache.get(env.id)
+        if (frueher?.ok) {
+          vorabKlartext.set(env.id, frueher.plain)
+          continue
+        }
+        let klartext: string
+        try {
+          klartext = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, schluessel)
+        } catch {
+          // Für ein anderes Gerät dieses Kontos. Die Hauptschleife entscheidet
+          // wie bisher, ob das still bleibt oder angezeigt gehört.
+          continue
+        }
+        const aufbau = await verarbeiteBootstrap(drKontext, klartext)
+        if (aufbau.istAufbau) {
+          if (aufbau.offen && aufbau.vonKonto && aufbau.vonGeraet) {
+            aufbauOffen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
+          }
+          if (aufbau.abgewiesen && aufbau.vonKonto && aufbau.vonGeraet) {
+            aufbauAbgewiesen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
+          }
+          if (aufbau.abgelehnt && aufbau.vonGeraet) meldeAufbauAbgelehnt(aufbau.vonGeraet)
+          if (aufbau.ersetzt && aufbau.vonGeraet) meldeSitzungsbruch(aufbau.vonGeraet)
+          vorabAufbau.add(env.id)
+          continue
+        }
+        envelopePlaintextCache.set(env.id, { plain: klartext, ok: true })
+        vorabKlartext.set(env.id, klartext)
+      }
+    }
+    if (aktuelleMailbox.current !== mid) {
+      behalteEigeneSteuerung()
+      return null
     }
 
     /**
@@ -893,5 +986,12 @@ export function useKonversation({
     [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef],
   )
 
-  return { blindMailboxId, gruppenKontext, liesUmschlaege, baueVersand, baueSteuerversand }
+  return {
+    blindMailboxId,
+    leseMailboxen,
+    gruppenKontext,
+    liesUmschlaege,
+    baueVersand,
+    baueSteuerversand,
+  }
 }

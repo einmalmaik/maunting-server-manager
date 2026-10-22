@@ -89,9 +89,20 @@ export interface RatchetAblage {
   lies(id: string): Promise<string | null>
   /**
    * Legt `zustand` unter `id` ab. Ist `marke` gesetzt, liegt sie danach
-   * ebenfalls da, in derselben Transaktion: beide oder keines.
+   * ebenfalls da, in derselben Transaktion: alles oder keines.
+   *
+   * `begleiter` sind zusätzliche Zeilen derselben Transaktion. Sie tragen die
+   * Schlüsselbindung einer Sitzung (`bindung:<id>`): der Abdruck des
+   * öffentlichen Schlüssels, zu dem diese Sitzung gehört. Wechselt die
+   * Gegenstelle ihren Schlüssel unter derselben Geräte-ID, ist die alte
+   * Sitzung wertlos — und darf nicht weiterverwendet werden.
    */
-  schreibe(id: string, zustand: string, marke?: string): Promise<void>
+  schreibe(
+    id: string,
+    zustand: string,
+    marke?: string | string[],
+    begleiter?: Record<string, string | null>,
+  ): Promise<void>
   loesche(id: string): Promise<void>
   /** Alle abgelegten Kennungen. Nur die einmalige Umbenennung braucht das. */
   alleIds(): Promise<string[]>
@@ -131,7 +142,7 @@ const indexedDbAblage: RatchetAblage = {
     const zeile = await entsiegleZeile<{ zustand?: unknown }>(roh, ratchetAad(id))
     return typeof zeile?.zustand === 'string' ? zeile.zustand : null
   },
-  async schreibe(id, zustand, marke) {
+  async schreibe(id, zustand, marke, begleiter) {
     const db = await oeffneDatenbank()
     const jetzt = new Date().toISOString()
     // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
@@ -142,7 +153,13 @@ const indexedDbAblage: RatchetAblage = {
         ratchetAad(platz),
       )
     const zeilen = [await versiegle(id, zustand)]
-    if (marke) zeilen.push(await versiegle(marke, MARKE_WERT))
+    const marken = marke === undefined ? [] : Array.isArray(marke) ? marke : [marke]
+    for (const eine of marken) zeilen.push(await versiegle(eine, MARKE_WERT))
+    const zuLoeschen: string[] = []
+    for (const [platz, wert] of Object.entries(begleiter ?? {})) {
+      if (wert === null) zuLoeschen.push(platz)
+      else zeilen.push(await versiegle(platz, wert))
+    }
     // Fertig erst mit `oncomplete`: bis dahin kann die Transaktion noch
     // abbrechen (Kontingent), und dann liegt keine der Zeilen da. Ein
     // gescheitertes `put` bricht sie ebenfalls ab und landet in `onabort`.
@@ -150,6 +167,7 @@ const indexedDbAblage: RatchetAblage = {
       const tx = db.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
       for (const zeile of zeilen) store.put(zeile)
+      for (const platz of zuLoeschen) store.delete(platz)
       tx.oncomplete = () => resolve()
       tx.onabort = () => reject(tx.error ?? new Error('Transaktion abgebrochen'))
     })
@@ -267,6 +285,20 @@ export interface SchrittErgebnis<T> {
    * Arbeit noch offen. Ohne `naechster` wird sie nicht geschrieben.
    */
   marke?: { bereich: Markenbereich; kennung: string }
+  /**
+   * Weitere Marken derselben Transaktion. Ein angewandter Sitzungsaufbau setzt
+   * `aufbau` (der Umschlag selbst ist erledigt) — mehr als eine Marke war bis
+   * 10/2026 nicht vorgesehen, und zwei getrennte Schreibvorgänge rissen bei
+   * einem Abbruch dazwischen auseinander.
+   */
+  marken?: { bereich: Markenbereich; kennung: string }[]
+  /**
+   * Der Abdruck des Gegenstellen-Schlüssels, zu dem dieser Zustand gehört.
+   * Wird als `bindung:<id>` in derselben Transaktion geschrieben; `null`
+   * löscht die alte Bindung, wenn der Aufbau keinen Schlüssel zum Vergleichen
+   * hatte.
+   */
+  bindung?: string | null
   ergebnis: T
 }
 
@@ -301,8 +333,15 @@ export async function schritt<T>(
 
     if (ausgang.naechster) {
       try {
-        const marke = ausgang.marke && `${ausgang.marke.bereich}:${ausgang.marke.kennung}`
-        await ablage.schreibe(id, serializeRatchetState(ausgang.naechster), marke)
+        const marken = [
+          ...(ausgang.marke ? [ausgang.marke] : []),
+          ...(ausgang.marken ?? []),
+        ].map((m) => `${m.bereich}:${m.kennung}`)
+        const begleiter =
+          ausgang.bindung === undefined
+            ? undefined
+            : { [bindungSchluessel(id)]: ausgang.bindung }
+        await ablage.schreibe(id, serializeRatchetState(ausgang.naechster), marken, begleiter)
       } catch (fehler) {
         // Der Nachfolger liegt jetzt nirgends und wird nie gebraucht, der
         // Vorgänger liegt unverändert in der Ablage. Beide RAM-Kopien können
@@ -324,6 +363,23 @@ export async function hatSitzung(id: string): Promise<boolean> {
   return (await ablage.lies(id)) !== null
 }
 
+/** Wo der abgelegte Schlüsselabdruck einer Sitzung liegt. */
+export function bindungSchluessel(id: string): string {
+  return `bindung:${id}`
+}
+
+/**
+ * Der Abdruck des Gegenstellen-Schlüssels, zu dem diese Sitzung gehört, oder
+ * `null`.
+ *
+ * `null` heißt „nicht bekannt" — etwa bei einer Sitzung aus der Zeit vor
+ * dieser Bindung. Dann wird nichts verworfen: eine fehlende Angabe ist kein
+ * Befund.
+ */
+export async function leseBindung(id: string): Promise<string | null> {
+  return ablage.lies(bindungSchluessel(id))
+}
+
 /**
  * Wirft eine Sitzung weg.
  *
@@ -332,7 +388,14 @@ export async function hatSitzung(id: string): Promise<boolean> {
  * Gegenstück hält, ist nur noch im Weg.
  */
 export async function verwirfSitzung(id: string): Promise<void> {
-  await imSchloss(id, () => ablage.loesche(id))
+  await imSchloss(id, async () => {
+    await ablage.loesche(id)
+    // Die Bindungszeile und die Marke „war schon einmal etabliert" gehen mit.
+    // Sonst gälte ein neuer Aufbau unter derselben Kennung als Wiederaufbau
+    // einer Sitzung, die es nicht mehr gibt.
+    await ablage.loesche(bindungSchluessel(id)).catch(() => {})
+    await ablage.loesche(`etabliert:${id}`).catch(() => {})
+  })
 }
 
 // ==========================================
@@ -362,7 +425,7 @@ export async function verwirfSitzung(id: string): Promise<void> {
  *   nächste Durchlauf nicht mehr, dass eine unlesbare Nachricht dieses Geräts
  *   zu einer Fälschung gehört — und würfe ihretwegen die echte Sitzung weg.
  */
-export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen'
+export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen' | 'etabliert'
 
 const MARKE_WERT = '1'
 

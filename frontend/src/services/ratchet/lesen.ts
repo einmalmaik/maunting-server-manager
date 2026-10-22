@@ -5,7 +5,14 @@ import { sha256Hex } from '@msdis/shield/integrity'
 import { decryptMessage, deserializeRatchetMessage } from '@msdis/shield/messaging'
 
 import { eigenesGeraet } from '../e2eeGeraet'
-import { hatSitzung, kennstMarke, merkeMarke, schritt, sitzungsId, verwirfSitzung } from '../ratchetSpeicher'
+import {
+  hatSitzung,
+  kennstMarke,
+  merkeMarke,
+  schritt,
+  sitzungsId,
+  verwirfSitzung,
+} from '../ratchetSpeicher'
 import {
   lieseKopf,
   type DrKontext,
@@ -72,17 +79,37 @@ export async function liesDrUmschlag(
    * eigener Marke: beim nächsten Abruf bleibt sie still, auch wenn der Aufbau
    * bis dahin aus dem Fenster gerutscht ist.
    */
+  const id = sitzungsId(meins.kennung, kopf.vonKonto, kopf.vonGeraet)
+
   const unlesbar = async (grund: string): Promise<DrLesung> => {
     if (optionen.schonen?.(kopf.vonKonto, kopf.vonGeraet)) {
       await merkeMarke('abgewiesen', marke)
       return { art: 'abgewiesen' }
     }
+    /*
+     * Ein Bruch ist erst ein Bruch, wenn diese Sitzung schon einmal getragen
+     * hat.
+     *
+     * Eine Empfängersitzung, die noch keine Nachricht geöffnet hat, ist beim
+     * ersten Kontakt angelegt — aber nichts an ihr hat je funktioniert. Bis
+     * 10/2026 wurde jeder unlesbare Umschlag dazu als Bruch gewertet, mit
+     * Marke: die Nachricht war für immer weg, und der Verlauf meldete einen
+     * Neuaufbau, den es nie gab. Jetzt bleibt sie ungeöffnet liegen.
+     */
+    if (!(await kennstMarke('etabliert', id))) return { art: 'keine-sitzung' }
     await merkeMarke('bruch', marke)
     return { art: 'bruch', vonKonto: kopf.vonKonto, vonGeraet: kopf.vonGeraet, grund }
   }
-
-  const id = sitzungsId(meins.kennung, kopf.vonKonto, kopf.vonGeraet)
-  if (!(await hatSitzung(id))) return unlesbar('keine Sitzung')
+  /*
+   * Noch keine Sitzung ist **kein** Bruch.
+   *
+   * Kam die Nachricht vor ihrem Aufbau an — umgekehrte Zeitfolge, zwei Geräte,
+   * ein Fenster voller Umschläge —, wurde bis 10/2026 ein Bruch daraus, mit
+   * Marke. Die Nachricht war damit dauerhaft verloren, obwohl die Sitzung im
+   * selben Durchlauf noch entstand. Jetzt bleibt sie liegen und wird beim
+   * nächsten Versuch geöffnet.
+   */
+  if (!(await hatSitzung(id))) return { art: 'keine-sitzung' }
 
   let nachricht
   try {
@@ -107,7 +134,20 @@ export async function liesDrUmschlag(
       // Nachrichtenschlüssel ohne abgelegten Klartext wäre eine verlorene
       // Nachricht, und zwar ohne jede Meldung.
       await klartext.lege(text)
-      return { naechster: nextState, ergebnis: text }
+      /*
+       * Ab jetzt ist diese Sitzung **etabliert**.
+       *
+       * Nur dann meldet ein späterer Bruch einen Neuaufbau. Ein Aufbau, der
+       * nichts getragen hat, ist ein Erstkontakt — und wer ihn als „Sitzung
+       * neu aufgebaut" meldet, zeigt beim ersten Zusammentreffen eine Warnung,
+       * die niemand deuten kann. Die Marke geht mit dem fortgeschriebenen
+       * Zustand in dieselbe Transaktion.
+       */
+      return {
+        naechster: nextState,
+        marken: [{ bereich: 'etabliert', kennung: id }],
+        ergebnis: text,
+      }
     })
     return { art: 'klartext', text, vonKonto: kopf.vonKonto, vonGeraet: kopf.vonGeraet }
   } catch (fehler) {

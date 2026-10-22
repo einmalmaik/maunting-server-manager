@@ -17,6 +17,7 @@ import {
   eigeneWirkungenFuer,
   leereEigeneWirkungen,
   merkeEigeneWirkung,
+  merkeWirkungAusKlartext,
   vergissEigeneWirkungen,
 } from './eigeneWirkungen'
 
@@ -44,6 +45,23 @@ beforeEach(() => {
 })
 
 describe('eigene Wirkungen', () => {
+  it('legt beim Start eine Wirkung aus dem Klartext ihres Gesprächs ab', async () => {
+    // Der Weg für `holeGeraeteSteuerung` ohne offenes Gespräch: der Cursor
+    // wandert weiter, und ohne diese Ablage war eine Bearbeitung oder Löschung
+    // aus dem Zweitgerät weg, bevor der Chat je geöffnet wurde.
+    await merkeWirkungAusKlartext(bearings, { id: 12, created_at: ZEIT })
+
+    expect(await eigeneWirkungenFuer(MAILBOX)).toEqual([
+      { mailbox: MAILBOX, payload: bearings, zeitpunkt: ZEIT },
+    ])
+  })
+
+  it('legt nichts ab, was zu keinem Gespräch gehört', async () => {
+    await merkeWirkungAusKlartext('kein json', { id: 1, created_at: ZEIT })
+    await merkeWirkungAusKlartext(JSON.stringify({ type: 'x' }), { id: 2, created_at: ZEIT })
+    expect(roh()).toBe('[]')
+  })
+
   it('legt den Text einer Bearbeitung ohne PIN im Klartext ab', async () => {
     // Ohne Siegel ändert sich nichts — das ist die Zusage der Ablage.
     await merkeEigeneWirkung({ mailbox: MAILBOX, payload: bearings, zeitpunkt: ZEIT })

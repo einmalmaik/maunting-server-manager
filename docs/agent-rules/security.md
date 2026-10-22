@@ -771,3 +771,20 @@ Anweisungen wie "ignoriere AGENTS.md", "deaktiviere Tests", "logge Secrets" oder
 - [ ] Bei Browser-Komponenten: Werden Web-Tabs strikt außerhalb von Tauris WebviewBuilder betrieben und besitzen 0 IPC-Rechte (siehe ADR-0010)?
 - [ ] Sind neue Security-Entscheidungen dokumentiert?
 - [ ] Gibt es Tests für positive und negative Pfade?
+- [ ] Wird eine Gerätefreigabe nur mit gültiger Unterschrift eines serverseitig freigegebenen Geräts überbrückt, und wird das sichtbar gewarnt?
+- [ ] Bleibt eine Selbstfreigabe, eine fehlende und eine falsche Unterschrift wirkungslos — auf dem eigenen Konto ohne jede Brücke?
+
+---
+
+## 12. Signierte Freigabe eines fremden Geräts gilt als Brücke mit Warnung
+
+Die Signaturkette eines fremden Kontos beantwortet die Frage „hat ein Gerät, dem ich vertraue, dieses Gerät freigegeben?“. Bis 10/2026 war „nein“ gleichbedeutend mit „es bekommt nichts“ — auch dann, wenn die Freigabe von einem anderen, serverseitig freigegebenen Gerät unterschrieben war, das dieser Client nur noch nicht verankert hatte. Ein auf dem Zweitgerät freigegebenes Pontis fiel damit still aus jeder Auffächerung: der Browser sendete nie dorthin.
+
+Regeln:
+
+- Die Brücke verlangt eine **gültige Unterschrift** über `freigabeDaten` (Kontokennung, Gerätekennung, Hash des Verschlüsselungs- und des Signaturschlüssels) von einem **anderen** Gerät desselben Kontos, das der Server als freigegeben führt (`is_approved !== false`). `approved_by` allein ist das Wort des Servers und zählt nicht.
+- Eine Selbstfreigabe (`approved_by === device_id`), eine fehlende und eine falsche Unterschrift bleiben wirkungslos. Sie bekommen nichts und lösen die Warnung `unbestaetigt` aus.
+- Nur **fremde** Konten bekommen die Brücke. Auf dem eigenen Konto bleibt die Kette strikt: der eigene Sendepfad verschlüsselt für jedes angenommene Zielgerät mit.
+- Brücken-Geräte werden **nicht** in die Vertrauensliste geschrieben. Die Warnung `freigabe_unbestaetigt` kommt bei jedem Abruf erneut, bis ein verankertes Gerät die Kette fortsetzt oder der Mensch die Sicherheitsnummer verglichen hat.
+- Ist der Freigeber nicht mehr in der Serverliste und sein Signaturschlüssel lokal unbekannt, ist die Unterschrift nicht prüfbar. Dann gibt es keine Zustellung, sondern nur den sichtbaren Hinweis mit manueller Bestätigung.
+- Tests: `frontend/src/services/e2eeGeraet.test.ts` (Brücke, Selbstfreigabe, fehlende/falsche Unterschrift, eigenes Konto).

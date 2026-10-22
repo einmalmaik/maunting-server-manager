@@ -333,6 +333,22 @@ describe('useKonversation', () => {
   })
 
   describe('Lesen im Direktchat', () => {
+    it('nennt beide Mailboxen für den Echtzeitstrom', async () => {
+      // Ein Gespräch liest nach dem Umzug aus zwei Mailboxen. Der Strom muss
+      // beide kennen, sonst lädt ein Umschlag in der neuen nicht nach.
+      umzug.set('dm-1-2', 'neu-1-2')
+      proMailbox.set('dm-1-2', [])
+      proMailbox.set('neu-1-2', [])
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      await waitFor(() => expect(result.current.leseMailboxen).toHaveLength(2))
+      expect([...result.current.leseMailboxen].sort()).toEqual(['dm-1-2', 'neu-1-2'])
+    })
+
     it('gibt Klartext zurück und legt ihn vorher ab', async () => {
       umschlaege = [umschlag(1, 'dr-1')]
       lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
@@ -383,6 +399,21 @@ describe('useKonversation', () => {
       expect(meldeSitzungsbruch).toHaveBeenCalledWith('fremd-a')
     })
 
+    it('behandelt eine fehlende Sitzung als „noch nicht aufgebaut", nicht als Bruch', async () => {
+      // Die Nachricht kam vor ihrem Aufbau an. Bis 10/2026 wurde daraus ein
+      // Bruch mit Marke: die Nachricht war dauerhaft verloren, und der Verlauf
+      // meldete einen Neuaufbau, den es nie gab.
+      umschlaege = [umschlag(1, 'dr-ohne-sitzung')]
+      lesungen.set('dr-ohne-sitzung', { art: 'keine-sitzung' })
+
+      const { result, meldeSitzungsbruch } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen!.map((l) => l.art)).toEqual(['still'])
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
+    })
+
     it('behält die Sitzung, wenn nur die lokale Ablage streikte', async () => {
       // Eine volle Platte darf nicht jeden Gesprächsfaden des Geräts abreißen.
       umschlaege = [umschlag(1, 'dr-fehler')]
@@ -406,6 +437,30 @@ describe('useKonversation', () => {
 
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
       expect(meldeSitzungsbruch).toHaveBeenCalledTimes(1)
+    })
+
+    it('verarbeitet den Sitzungsaufbau vor der Nachricht, auch bei umgekehrter Zeitfolge', async () => {
+      // Der Umschlag mit der kleineren Kennung und der früheren Zeit liegt
+      // zuerst. Ohne den Vorlauf liefe die Nachricht gegen eine Sitzung, die es
+      // noch nicht gibt.
+      umschlaege = [umschlag(1, 'dr-zuerst'), umschlag(2, 'sv-e2ee-hybrid-v1:aufbau')]
+      lesungen.set('dr-zuerst', {
+        art: 'klartext',
+        text: 'kommt zuerst',
+        vonKonto: DU,
+        vonGeraet: 'fremd-a',
+      })
+      lesungen.set('sv-e2ee-hybrid-v1:aufbau', 'AUFBAU OFFEN')
+      koepfe.set('dr-zuerst', { vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result, meldeSitzungsbruch } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      // Der offene Aufbau ist vorher gesehen: die Nachricht wird still
+      // zurückgestellt statt als Bruch verworfen.
+      expect(gelesen!.some((l) => l.art === 'klartext')).toBe(false)
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
     })
 
     it('stellt die Nachrichten eines Geräts zurück, solange sein Aufbau offen ist', async () => {

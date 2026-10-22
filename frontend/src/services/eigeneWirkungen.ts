@@ -150,6 +150,36 @@ export function merkeEigeneWirkungen(wirkungen: readonly EigeneWirkung[]): Promi
   })
 }
 
+/**
+ * Liest den Klartext eines Steuerpakets und legt die Wirkung für ihr Gespräch ab.
+ *
+ * Der Weg für den Start des Messengers: `holeGeraeteSteuerung` läuft dort
+ * **ohne offenes Gespräch**, und was eine Bearbeitung oder Löschung aus einem
+ * anderen Gerät dort ankommt, ließ sich bis 10/2026 gar nicht ablegen — der
+ * Rückruf fehlte. Der Cursor wanderte weiter, und die Wirkung war weg.
+ *
+ * Hier wird nichts ausgewertet; abgelegt wird der signierte Klartext, später
+ * angewendet durch dieselben Prüfungen wie ein Paket der Gegenseite.
+ */
+export function merkeWirkungAusKlartext(
+  klartext: string,
+  env: { id: number; created_at: string },
+): Promise<void> {
+  let roh: Record<string, unknown>
+  try {
+    const geparst = JSON.parse(klartext)
+    if (!geparst || typeof geparst !== 'object') return Promise.resolve()
+    roh = geparst as Record<string, unknown>
+  } catch {
+    return Promise.resolve()
+  }
+  const mailbox = typeof roh.mailbox === 'string' ? roh.mailbox : ''
+  if (!mailbox) return Promise.resolve()
+  return merkeEigeneWirkung({ mailbox, payload: klartext, zeitpunkt: env.created_at }).catch(
+    () => {},
+  )
+}
+
 /** Was für dieses Gespräch noch aussteht, älteste zuerst. */
 export function eigeneWirkungenFuer(mailbox: string): Promise<EigeneWirkung[]> {
   if (!mailbox) return Promise.resolve([])

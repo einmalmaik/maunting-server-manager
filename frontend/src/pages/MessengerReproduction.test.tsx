@@ -440,7 +440,7 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
       expect(socialApi.putE2eeKeyring).not.toHaveBeenCalled()
     }, 30_000)
 
-    it('UI layer: Messenger renders "Verschlüsselte Nachricht" placeholder when hybrid decryption fails', async () => {
+    it('UI layer: ein unlesbarer Hybridumschlag erzeugt keine Platzhalterblase, sondern eine Systemzeile', async () => {
       const aliceId = 101
       const bobId = 2
       setupAuthUser(bobId, 'bob')
@@ -505,10 +505,15 @@ describe('Requirement R1 Reproduction: E2EE Messenger Failure Modes', () => {
         expect(screen.getAllByText('alice').length).toBeGreaterThan(0)
       })
 
-      // Because decryption failed due to key mismatch, Messenger renders the "Verschlüsselte Nachricht" fallback
+      // Der Umschlag lässt sich mit dem falschen Schlüssel nicht öffnen. Bis
+      // 10/2026 stand dafür „Verschlüsselte Nachricht" als Blase im Verlauf —
+      // und blieb dort, bei jedem Laden neu gespeichert. Jetzt sagt **eine**
+      // Systemzeile, dass ältere Nachrichten dieses Geräts nicht mehr lesbar
+      // sind; eine Aussage über den Inhalt entsteht nicht.
       await waitFor(() => {
-        expect(screen.getByText(i18n.t('messenger.encryptedMessage'))).toBeInTheDocument()
+        expect(screen.getByText(i18n.t('messenger.unreadableOlderMessages'))).toBeInTheDocument()
       })
+      expect(screen.queryByText(i18n.t('messenger.encryptedMessage'))).toBeNull()
 
       // The actual secret plaintext is NOT displayed
       expect(screen.queryByText('Sensibles Root-Passwort: 12345')).toBeNull()

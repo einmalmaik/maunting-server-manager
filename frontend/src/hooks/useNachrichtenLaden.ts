@@ -29,11 +29,11 @@ import { vergissEigeneWirkungen } from '@/services/eigeneWirkungen'
 import { ereignisseAusNachrichten } from '@/services/funkenService'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import {
+  entfernePlatzhalterUndDubletten,
   isOptimisticMessage,
   loadLocalMessages,
   mischeVerlauf,
   saveLocalMessages,
-  sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
 import { tilgeInhalt, tilgeNachrichtLokal } from '@/services/nachrichtLoeschen'
 import { wendeReaktionenAn } from '@/services/reaktionen'
@@ -56,7 +56,7 @@ export interface NachrichtenLadenOptionen {
   setLoadingMessages: Dispatch<SetStateAction<boolean>>
   setAngeheftet: Dispatch<SetStateAction<ChatMessage | null>>
   setVerfallSekunden: (sekunden: number) => void
-  zeigeSystemzeile: (text: string) => void
+  zeigeSystemzeile: (text: string, kennung?: string) => void
   markAsRead: (mailbox: string) => void
   isBlocked: (userId: number) => boolean
   readReceiptsEnabled: boolean
@@ -142,6 +142,7 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         maxPartnerReadId,
         maxPartnerDeliveredId,
         maxIncomingId,
+        unlesbar,
       } = await werteUmschlaegeAus(gelesen, {
         currentMid,
         currentUserId,
@@ -298,6 +299,20 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
        * mich" lesen alle aus dieser Ablage. Ohne sie endeten Gruppen in jeder
        * dieser Ansichten als leere Stelle.
        */
+      /*
+       * Einmal aufräumen, vor dem Lesen.
+       *
+       * Hier liegen die Altlasten aus der Zeit, in der ein unlesbarer Umschlag
+       * als „Verschlüsselte Nachricht" gespeichert wurde: der Platzhalter neben
+       * der echten Zeile, dieselbe Nachricht zweimal. Die Anzeige mischt sie
+       * ohnehin zusammen; diese Bereinigung nimmt sie auch aus der Ablage, damit
+       * die Verlaufsübergabe sie nicht weiterreicht. Konservativ: ein
+       * alleinstehender Platzhalter bleibt und wird nur ausgeblendet.
+       */
+      const verlaufsArt = activeGroup ? ('gruppe' as const) : ('direkt' as const)
+      await entfernePlatzhalterUndDubletten(currentMid, verlaufsArt).catch(() => ({}))
+      if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
+
       const rohesLokal = await loadLocalMessages(currentMid)
       if (activeMailboxIdRef.current !== currentMid || currentLoadSeqRef.current !== seq) return
 
@@ -365,11 +380,12 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
           })
         const systemzeilen = prev.filter((m) => m.isSystem)
         const frisch = [...processedList, ...pendingOptimistic, ...systemzeilen]
-        const combined = lokalerVerlauf.length
-          ? (mischeVerlauf(lokalerVerlauf, frisch) as ChatMessage[])
-          : sortMessagesChronologically(frisch)
+        // **Immer** zusammenführen, auch bei leerem lokalem Verlauf: nur so
+        // greifen die Zusammenführungsregeln (echt schlägt Platzhalter,
+        // bestätigt schlägt optimistisch) und die Sortierung ist dieselbe.
+        const combined = mischeVerlauf(lokalerVerlauf, frisch, verlaufsArt) as ChatMessage[]
         sessionChatCache.set(currentMid, combined.slice(-80))
-        void saveLocalMessages(currentMid, combined.slice(-200))
+        void saveLocalMessages(currentMid, combined.slice(-200), verlaufsArt)
         return combined
       })
 
@@ -403,6 +419,16 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         // nach, sobald die Zeile da ist — eine falsche wäre schlimmer als keine.
         return [...processedList, ...lokalerVerlauf].find((m) => m.clientUuid === gemerkt) || null
       })
+
+      // Ungelesenes, das dieser Stand nicht mehr öffnen kann: **eine**
+      // Systemzeile je Gespräch, nicht je Umschlag. Die Kennung ist stabil,
+      // damit der nächste Durchlauf sie nicht noch einmal anhängt.
+      if (unlesbar > 0) {
+        zeigeSystemzeile(
+          t('messenger.unreadableOlderMessages'),
+          `unlesbar-${currentMid}`,
+        )
+      }
 
       // Ungelesen-Zähler zurücksetzen
       markAsRead(currentMid)

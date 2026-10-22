@@ -212,6 +212,13 @@ class MailboxMixin:
             "control_type": control_type,
         }
 
+        # Wie der Umschlag angekündigt wurde — für die eine Log-Zeile weiter
+        # unten. `konto` heißt: der Server konnte das Ziel auflösen und weckt
+        # dessen offene Verbindung; `mailbox` heißt: nur die Abonnenten dieser
+        # Kennung erfahren davon (`SyncEventService.publish(mailbox_id=…)`).
+        weckweg = "konto" if target_recipient_id else "mailbox"
+        push_raus = False
+
         if target_recipient_id and sender_user_id:
             SyncEventService.publish(msg_payload, user_id=target_recipient_id)
             if target_recipient_id != sender_user_id:
@@ -236,6 +243,7 @@ class MailboxMixin:
                     has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
                 )
                 if nutzlast:
+                    push_raus = True
                     webpush_service.sende_an_konto(db, target_recipient_id, nutzlast)
         else:
             # Kein kontogebundenes Ziel — die Mailbox **ist** die Adresse.
@@ -268,12 +276,38 @@ class MailboxMixin:
                 is_control=is_control, control_type=control_type
             )
             if nutzlast:
+                push_raus = True
                 webpush_service.sende_an_mailbox(
                     db,
                     clean_mailbox,
                     nutzlast,
                     ausser_abdruck=push_ausnahme,
                 )
+
+        # Eine Zeile je eingeliefertem Umschlag — der Anfang eines
+        # Nachrichtenwegs. Ohne sie steht im Log nur `POST
+        # /api/social/e2ee/relay 200`, und niemand sieht, ob der Umschlag ins
+        # Konto ging oder in eine abonnierte Mailbox, wie er angekündigt wurde
+        # und ob der Absender bekannt war. Das **Abholen** steht bewusst nicht
+        # hier: der offene Chat liest seine Mailbox alle fünf Sekunden, und jede
+        # dieser Abfragen trägt dieselben Umschläge erneut — eine Zeile je
+        # Abruf wäre keine Spur, sondern Rauschen. Wann der Empfänger gelesen
+        # hat, steht als `GET /api/social/e2ee/mailbox/… 200` im Zugriffslog
+        # (`docker logs -t`).
+        #
+        # Chiffretext steht nie im Log, die Kennung nur gekürzt: sie ist ein
+        # Abdruck, und ein volles Protokoll davon wäre eine Landkarte der
+        # Gespräche.
+        logger.info(
+            "E2EE-Umschlag eingeliefert mailbox=%s env=%s weg=%s absender=%s steuer=%s ziel=%s push=%s",
+            clean_mailbox[:12],
+            envelope.id,
+            weckweg,
+            sender_user_id,
+            is_control,
+            target_recipient_id,
+            push_raus,
+        )
 
         if sender_user_id and not is_control:
             # Nach der Zustellung: das Abzeichen-Ereignis darf der Nachricht

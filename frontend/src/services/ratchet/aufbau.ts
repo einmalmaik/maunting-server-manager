@@ -1,6 +1,7 @@
 /** Sitzungsaufbau des Double Ratchet: beginnen, prüfen, anwenden. */
 
-import { base64ToBytes, bytesToBase64 } from '@msdis/shield/core'
+import { base64ToBytes, bytesToBase64, utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
 import { randomBytes } from '@msdis/shield/random'
 import {
   generateRatchetKeyPair,
@@ -13,6 +14,7 @@ import { signiere } from '../absenderSignatur'
 import { encryptE2eeHybrid } from '../e2eeCrypto'
 import { eigenesGeraet, pruefeGeraeteBeleg, type EigenesGeraet } from '../e2eeGeraet'
 import { kennstMarke, merkeMarke, schritt, sitzungsId } from '../ratchetSpeicher'
+import { verzeichnisVon } from '../geraet/geraeteVerzeichnis'
 import {
   DR_INIT_TYP,
   GEHEIMNIS_BYTES,
@@ -165,6 +167,27 @@ export async function verarbeiteBootstrap(
 
   const id = sitzungsId(meins.kennung, inhalt.vonKonto, inhalt.vonGeraet)
 
+  /**
+   * Der Abdruck des Schlüssels, zu dem diese Sitzung gehört.
+   *
+   * Ohne ihn merkte sich der Client nur die Geräte-ID. Wechselt die
+   * Gegenstelle ihren Schlüssel unter derselben ID — Neuinstallation, neuer
+   * Browser, zurückgesetzte Ablage —, liefe die alte Ratchet-Sitzung weiter,
+   * und keine Nachricht käme mehr an. Der Abdruck kommt aus dem Verzeichnis,
+   * also aus derselben Quelle, gegen die schon die Unterschrift geprüft wurde.
+   * Ist er dort nicht zu haben, wird die alte Bindung gelöscht: sie gehört zu
+   * einem Zustand, den dieser Aufbau gerade ersetzt.
+   */
+  let bindung: string | null = null
+  try {
+    const liste = await verzeichnisVon(inhalt.vonKonto, { frisch: true })
+    const eintrag = liste.find((g) => g.device_id === inhalt.vonGeraet)
+    if (eintrag?.public_key) bindung = await sha256Hex(utf8ToBytes(eintrag.public_key))
+  } catch {
+    // Kein Netz: die Unterschrift oben hat schon getragen. Die Bindung bleibt
+    // unbekannt, und ein späterer Sendevorgang richtet nichts an.
+  }
+
   const paar: RatchetDhKeyPair = {
     algorithm: inhalt.paar.algorithm as RatchetDhKeyPair['algorithm'],
     publicKey: base64ToBytes(inhalt.paar.publicKey),
@@ -195,11 +218,22 @@ export async function verarbeiteBootstrap(
       dhKeyPair: paar,
       associatedData: gebundeneDaten(kontext, inhalt.vonGeraet, meins.kennung),
     })
-    // `alterZustand` räumt `schritt` selbst ab; hier zählt nur, ob es ihn gab.
+    /*
+     * Ein **Erstaufbau** ist kein Bruch.
+     *
+     * `alterZustand !== null` heisst nur, dass schon eine Sitzung dalag — etwa
+     * eine Empfängersitzung, die noch nie eine Nachricht geöffnet hat. Gemeldet
+     * wird ein Neuaufbau erst, wenn die ersetzte Sitzung wirklich getragen hat
+     * (`etabliert`, gesetzt beim ersten erfolgreichen Entschlüsseln). Sonst
+     * stand beim ersten Zusammentreffen „Die Sicherheitssitzung wurde neu
+     * aufgebaut", ohne dass je eine bestand.
+     */
+    const etabliert = await kennstMarke('etabliert', id)
     return {
       naechster: neu,
       marke: { bereich: 'aufbau', kennung: aufbauKennung },
-      ergebnis: alterZustand !== null,
+      bindung,
+      ergebnis: alterZustand !== null && etabliert,
     }
   })
   paar.privateKey.fill(0)

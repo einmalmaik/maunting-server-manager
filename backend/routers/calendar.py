@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from cookies import lies_zugangstoken
 from database import get_db
 from dependencies import _bearer_token, _user_from_token, verify_csrf
 from models.user import User
@@ -255,7 +256,7 @@ def get_calendar_feed_user(
         override = app.dependency_overrides[get_current_user]
         return override()
 
-    token_str = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    token_str = _bearer_token(request) or lies_zugangstoken(request.cookies)
     if not token_str:
         raise HTTPException(
             status_code=401,

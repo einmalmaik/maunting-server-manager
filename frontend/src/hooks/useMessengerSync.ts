@@ -24,6 +24,16 @@ type Aktivitaet = { status: 'typing' | 'recording'; username?: string } | null
 
 export interface MessengerSyncOptionen {
   blindMailboxId: string
+  /**
+   * Alle Mailboxen dieses Gesprächs (Wiederholungen beider Kennungen).
+   *
+   * Ein Gespräch liest seit dem Umzug aus zwei: der Kennung aus dem
+   * Chatgeheimnis und der alten, abgeleiteten. Kommt ein Umschlag in der neuen
+   * an, trug er nicht die Kennung des Gesprächs — der Strom hielt sie für einen
+   * fremden Chat und lud nicht nach. Die Nachricht erschien erst beim nächsten
+   * Fünf-Sekunden-Takt.
+   */
+  leseMailboxen: readonly string[]
   currentUserId: number
   /** Nur für die Abhängigkeiten: eine geänderte Einstellung soll neu binden. */
   geraeteMeldungen: unknown
@@ -37,6 +47,7 @@ export interface MessengerSyncOptionen {
 export function useMessengerSync(optionen: MessengerSyncOptionen): void {
   const {
     blindMailboxId,
+    leseMailboxen,
     currentUserId,
     geraeteMeldungen,
     loadMessages,
@@ -88,7 +99,9 @@ export function useMessengerSync(optionen: MessengerSyncOptionen): void {
       ) {
         useCallStore.getState().handleCallSyncEvent(detail)
       } else if (detail?.type === 'e2ee_blind_message') {
-        const isCurrentActive = detail.blind_mailbox_id === blindMailboxId
+        const isCurrentActive =
+          detail.blind_mailbox_id === blindMailboxId ||
+          leseMailboxen.includes(detail.blind_mailbox_id)
         // Outgoing Echo Prevention: Sender niemals benachrichtigen
         if (detail.sender_user_id && currentUserId && Number(detail.sender_user_id) === Number(currentUserId)) {
           if (isCurrentActive) {
@@ -149,5 +162,7 @@ export function useMessengerSync(optionen: MessengerSyncOptionen): void {
         clearTimeout(partnerActivityTimeoutRef.current)
       }
     }
-  }, [blindMailboxId, currentUserId, geraeteMeldungen])
+    // Die Liste selbst wechselt bei jedem Render die Referenz; ihre
+    // zusammengesetzte Form nicht.
+  }, [blindMailboxId, currentUserId, geraeteMeldungen, leseMailboxen.join('|')])
 }
