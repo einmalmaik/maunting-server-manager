@@ -552,8 +552,8 @@ def test_nachgereichter_signaturschluessel_ist_ein_wechsel(db: Session, clean_db
     assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)[0]["device_id"] == "altgeraet-01"
 
 
-def test_wieder_freigeben_nur_ohne_anderes_freigegebenes_geraet(db: Session, clean_db):
-    """Sonst waere es ein Weg an der Unterschrift vorbei."""
+def test_wieder_freigeben_ohne_nachweis_bleibt_an_der_unterschrift(db: Session, clean_db):
+    """Ohne den frischen Nachweis bleibt der alte Weg versperrt."""
     user = _konto(db, "freigabe11")
     _zwei_geraete(db, user)
     try:
@@ -565,6 +565,25 @@ def test_wieder_freigeben_nur_ohne_anderes_freigegebenes_geraet(db: Session, cle
 
     lap = next(g for g in e2ee_device_service.ausstehende_geraete(db, user))
     assert lap["device_id"] == "laptop-00002"
+
+
+def test_wieder_freigeben_mit_nachweis_neben_anderem_geraet(db: Session, clean_db):
+    """Mit geprueftem Passwort/2FA darf sich das Geraet selbst freigeben.
+
+    Der Nachweis ist derselbe wie beim Anmelden. Ohne ihn bleibt es bei der
+    Unterschrift des freigegebenen Geraets; ein gestohlenes Token allein kommt
+    nicht durch (`test_wieder_freigeben_ohne_nachweis_bleibt_an_der_unterschrift`).
+    """
+    user = _konto(db, "freigabe11b")
+    user.password_hash = AuthService.hash_password("richtig-genug-3")
+    db.commit()
+    _zwei_geraete(db, user)
+
+    assert e2ee_device_service.wieder_freigeben(
+        db, user, "laptop-00002", mit_nachweis=True
+    ) is True
+    freigegeben = {g["device_id"] for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)}
+    assert freigegeben == {"telefon-0001", "laptop-00002"}
 
 
 def test_wieder_freigeben_verlangt_frischen_nachweis(client: TestClient, db: Session, clean_db):
@@ -594,6 +613,31 @@ def test_wieder_freigeben_verlangt_frischen_nachweis(client: TestClient, db: Ses
     assert eintrag["device_id"] == "einziges-0001"
     # Freigegeben heisst nicht beglaubigt: niemand hat den Schluessel unterschrieben.
     assert eintrag["approved_by"] == "" and eintrag["approval_signature"] == ""
+
+
+def test_reapprove_mit_passwort_neben_freigegebenem_geraet(client: TestClient, db: Session, clean_db):
+    """Der Mensch mit Passwort kommt auch dann zurueck, wenn ein altes Geraet noch freigegeben ist.
+
+    Der Fall: das alte Telefon ist weg, das neue wartet. Ohne diesen Weg bliebe
+    nur das Zuruecksetzen aller Geraete. Der Nachweis ist derselbe wie beim
+    Anmelden; ohne ihn bleibt es bei der Unterschrift.
+    """
+    user = _konto(db, "freigabe12b")
+    user.password_hash = AuthService.hash_password("richtig-genug-12b")
+    db.commit()
+    _zwei_geraete(db, user)
+    kopf, _ = _sitzung(db, user)
+    pfad = "/api/social/e2ee/devices/self/reapprove"
+
+    assert client.post(pfad, headers=kopf, json={"device_id": "laptop-00002"}).status_code == 403
+    antwort = client.post(
+        pfad,
+        headers=kopf,
+        json={"device_id": "laptop-00002", "password": "richtig-genug-12b"},
+    )
+    assert antwort.status_code == 200
+    freigegeben = {g["device_id"] for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)}
+    assert freigegeben == {"telefon-0001", "laptop-00002"}
 
 
 def test_zwei_wartende_geraete_geben_sich_nicht_gegenseitig_frei(clean_db):
@@ -680,12 +724,11 @@ def test_zwei_wartende_geraete_geben_sich_nicht_gegenseitig_frei(clean_db):
 
 
 def test_abgelehnte_freigabe_verbraucht_keinen_code(client: TestClient, db: Session, clean_db):
-    """Der Nachweis gilt genau einmal — er darf nicht an einer 403 verfallen.
+    """Der Nachweis gilt genau einmal — er darf nicht an einer 404 verfallen.
 
-    Stand die Pruefung „es gibt noch ein freigegebenes Geraet" hinter dem
-    Nachweis, verbrannte ein gueltiger Code fuer eine Antwort, die ohnehin 403
-    lautet. Danach war derselbe Code nach dem Entfernen des anderen Geraets
-    nicht mehr zu gebrauchen.
+    Die Pruefung „Geraet unbekannt" steht vor dem Nachweis. Stand sie danach,
+    verbrannte ein gueltiger Code fuer eine Antwort, die ohnehin 404 lautet.
+    Danach war derselbe Code fuer das echte Geraet nicht mehr zu gebrauchen.
     """
     from services.dis_client import DisClient
     from tests._totp import totp_now
@@ -705,16 +748,11 @@ def test_abgelehnte_freigabe_verbraucht_keinen_code(client: TestClient, db: Sess
     pdaf = "/api/social/e2ee/devices/self/reapprove"
     code = totp_now(secret)
     assert client.post(
-        pdaf, headers=kopf, json={"device_id": "zweites-0002", "otp_code": code}
-    ).status_code == 403
+        pdaf, headers=kopf, json={"device_id": "gibt-es-nicht", "otp_code": code}
+    ).status_code == 404
 
-    # Erstes Geraet weg: jetzt ist das zweite das einzige und darf zurueck.
-    zusammen = e2ee_device_service.veroeffentlichen(
-        db, user, "erstes-0001", RSA_X, "Telefon", ecdsa, familie="fam-erstes"
-    )
-    assert zusammen.is_approved is False
-    assert e2ee_device_service.vergessen(db, user, "erstes-0001") is True
-
+    # Derselbe Code, diesmal fuer das echte Geraet. Mit frischem Nachweis darf
+    # es sich auch neben dem freigegebenen Telefon zulassen.
     antwort = client.post(pdaf, headers=kopf, json={"device_id": "zweites-0002", "otp_code": code})
     assert antwort.status_code == 200, antwort.text
 

@@ -208,32 +208,29 @@ def reapprove_own_e2ee_device(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Holt das eigene Geraet zurueck, wenn es das einzige ist.
+    """Holt das eigene Geraet zurueck.
 
     Der Fall dahinter: das Geraet hat seinen Schluessel neu erzeugt (verlorene
-    Ablage, neuer Browser) und ist damit wartend. Es gibt kein zweites
-    freigegebenes Geraet, das unterschreiben koennte — ohne diesen Weg bliebe
-    nur der Neustart des ganzen Verzeichnisses, der alle Sitzungen sperrt.
+    Ablage, neuer Browser) und ist damit wartend. Ohne diesen Weg bliebe nur
+    der Neustart des ganzen Verzeichnisses, der alle Sitzungen sperrt — oder
+    ein anderes freigegebenes Geraet, das der Mensch vielleicht nicht mehr hat.
 
     Der Nachweis ist Pflicht (Regel: was einen Zugang erzeugt, verlangt einen
-    frischen Nachweis) und liegt hinter `auth_rate_limit`. Existiert noch ein
-    freigegebenes Geraet, antwortet die Route 403: dann ist die Unterschrift
-    der vorgesehene Weg.
+    frischen Nachweis) und liegt hinter `auth_rate_limit`. Mit ihm darf sich
+    das Geraet auch dann freigeben, wenn noch ein anderes freigegebenes Geraet
+    existiert: der Nachweis ist derselbe wie beim Anmelden, und das andere
+    Geraet sieht die neue Freigabe in seiner Liste. Ohne Nachweis bleibt es
+    bei der Unterschrift des freigegebenen Geraets.
 
     **Erst pruefen, dann den Nachweis verbrauchen.** Ein Passkey oder
     Einmalcode gilt genau einmal; stand er vor der Pruefung „Geraet
-    unbekannt" oder „anderes Geraet freigegeben", war er fuer eine 403/404
-    weg. Die Regel selbst faellt trotzdem erst in `wieder_freigeben` unter
-    der Kontosperre — hier wird nur der offensichtliche Fall abgefangen.
+    unbekannt" war er fuer eine 404 weg. Die Regel selbst faellt trotzdem erst
+    in `wieder_freigeben` unter der Kontosperre — hier wird nur der
+    offensichtliche Fall abgefangen.
     """
     hindernis = e2ee_device_service.freigabe_hindernis(db, user, req.device_id)
     if hindernis == "nicht_gefunden":
         raise HTTPException(status_code=404, detail="Gerät nicht gefunden")
-    if hindernis == "anderes_freigegeben":
-        raise HTTPException(
-            status_code=403,
-            detail="Ein freigegebenes Gerät muss dieses Gerät freigeben.",
-        )
 
     _geraete_nachweis(
         db,
@@ -246,7 +243,7 @@ def reapprove_own_e2ee_device(
     )
     try:
         freigegeben = e2ee_device_service.wieder_freigeben(
-            db, user, req.device_id, signatur=req.signature or None
+            db, user, req.device_id, signatur=req.signature or None, mit_nachweis=True
         )
     except e2ee_device_service.GeraeteaenderungAbgelehntError as e:
         raise HTTPException(status_code=403, detail=str(e))

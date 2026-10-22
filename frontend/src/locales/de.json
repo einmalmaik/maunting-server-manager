@@ -3759,7 +3759,7 @@
       "reapprove": "Dieses Gerät wieder zulassen",
       "reapproveHelp": "Niemand kann dieses Gerät freigeben, weil es das einzige ist. Bestätige mit dem Nachweis, den dein Konto verlangt — danach bekommst du wieder Nachrichten. Beglaubigt ist es damit nicht: vergleiche die Sicherheitsnummer mit deinem Gegenüber.",
       "reapproveDone": "Gerät wieder zugelassen.",
-      "reapproveOtherDevice": "Ein anderes freigegebenes Gerät muss dieses hier freigeben — dort findest du es in derselben Liste.",
+      "reapproveOtherDevice": "Ein freigegebenes Gerät kann dieses hier freigeben. Du kannst es auch selbst mit deinem Passwort oder zweiten Faktor freigeben, wenn du das andere Gerät nicht mehr hast. Danach müssen Kontakte die Sicherheitsnummer vergleichen, bevor sie dir schreiben.",
       "notCovered": "Ohne gültige Freigabe",
       "notCoveredHelp": "Dieses Gerät steht als freigegeben in der Liste, aber keines deiner Geräte hat die Freigabe unterschrieben — deshalb bekommt es keine Nachrichten (die Warnung im Chat meint genau diesen Eintrag). Prüfe die Sicherheitsnummer, entferne das Gerät und koppele es neu.",
       "approve": "Freigeben",
@@ -7919,7 +7919,7 @@
     "ownUnverifiedDeviceWarning": "Sicherheitswarnung: Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat. Es bekommt nichts. Prüfe Profil → Geräte.",
     "ownNewDevice": "Ein neues Gerät wurde für dein Konto freigegeben.",
     "ownAccountResetWarning": "Sicherheitswarnung: Alle dir bekannten Geräte deines Kontos wurden ersetzt. Warst du das nicht, ändere sofort dein Passwort.",
-    "thisDevicePending": "Dieses Gerät wartet auf Freigabe. Bestätige es auf einem deiner anderen Geräte unter Profil → Geräte. Bis dahin bekommt es keine Nachrichten.",
+    "thisDevicePending": "Dieses Gerät wartet auf Freigabe. Bestätige es auf einem deiner anderen Geräte unter Profil → Geräte, oder gib es dort selbst mit deinem Passwort bzw. zweiten Faktor frei. Bis dahin bekommt es keine Nachrichten.",
     "streak": {
       "active_one": "{{count}} Tag Funke mit {{name}}",
       "active_other": "{{count}} Tage Funke mit {{name}}",

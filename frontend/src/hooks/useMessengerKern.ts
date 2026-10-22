@@ -8,7 +8,7 @@ import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import { useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
 import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { IDENTITY_LOADING, resolveIdentity, type E2eeIdentity } from '@/services/e2eeIdentity'
-import { deriveBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
+import { decryptE2eeHybridWithKeyring, deriveBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   eigenesGeraetFreigegeben,
@@ -16,6 +16,8 @@ import {
   onEigeneFreigabe,
   onSchluesselWarnung,
 } from '@/services/e2eeGeraet'
+import { sendeVerlaufAnNeueGeraete } from '@/services/geraet/verlaufsAbgleich'
+import { holeGeraeteSteuerung } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { quittungsstand } from '@/services/quittungsstand'
@@ -194,6 +196,29 @@ export function useMessengerKern({
       .catch(() => {})
     return () => { active = false }
   }, [currentUserId, messengerGesperrt])
+
+  /**
+   * Die eigene Geräte-Mailbox einmal beim Öffnen lesen — nicht erst, wenn ein
+   * Gespräch offen ist.
+   *
+   * Dort liegen die Chatgeheimnisse und die Verlaufsübergaben. Ohne diesen
+   * Schritt erfuhr ein Gerät von beidem erst beim Öffnen eines Chats; die
+   * Kontaktliste blieb stumm, und ein frisch freigegebenes Gerät sah seinen
+   * Verlauf erst nach dem ersten Klick. Der laufende Chat liest weiterhin
+   * selbst, dieser Durchlauf ist nur der Anfang.
+   */
+  const nachgeholtRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready' || !identity.decryptionKeys) return
+    if (nachgeholtRef.current === currentUserId) return
+    nachgeholtRef.current = currentUserId
+    void holeGeraeteSteuerung(
+      currentUserId,
+      (umschlag) => decryptE2eeHybridWithKeyring(umschlag, identity.decryptionKeys),
+    ).catch(() => {})
+    void sendeVerlaufAnNeueGeraete().catch(() => {})
+  }, [currentUserId, identity, messengerGesperrt])
 
   useEffect(() => {
     if (!currentUserId) return

@@ -23,6 +23,7 @@ import { STANDARD_BEZEICHNUNG, geraeteBezeichnung } from '../geraeteBezeichnung'
 import { eigenesGeraet, meinKonto, type EigenesGeraet } from './geraeteAblage'
 import { entfernenDaten, freigabeDaten, setzeEigeneFreigabe } from './geraeteVertrauen'
 import { vergessenGeraete } from './geraeteVerzeichnis'
+import { sendeVerlaufAnGeraet } from './verlaufsAbgleich'
 
 let veroeffentlichtAls: string | null = null
 
@@ -129,6 +130,21 @@ export async function gebeGeraetFrei(geraet: E2eeGeraetItem): Promise<void> {
   const { kennung, sig } = await unterschreibeMitEigenem(daten)
   await approveEigenesGeraet(geraet.device_id, kennung, sig)
   vergessenGeraete(konto)
+
+  /*
+   * Der Verlauf dieses Geräts geht an das neue.
+   *
+   * Ohne ihn beginnt das freigegebene Gerät am Tag seiner Freigabe: die
+   * Umschläge davor sind für die alten Geräte versiegelt und für dieses
+   * unlesbar. Die Übergabe läuft nach der Freigabe, damit der neue Eintrag im
+   * Verzeichnis schon steht; scheitert sie, bleibt die Freigabe gültig und der
+   * nächste Versand erreicht das Gerät trotzdem.
+   */
+  try {
+    await sendeVerlaufAnGeraet(geraet)
+  } catch {
+    // Der Verlauf ist ein Zusatz, kein Teil der Freigabe.
+  }
 }
 
 /**

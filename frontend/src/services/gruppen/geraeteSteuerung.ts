@@ -22,6 +22,7 @@ import {
 } from './dmGeheimnis'
 import { leereAntwortSperren, verarbeiteGruppenSteuerung } from './gruppenSteuerung'
 import { normalisiereMitglieder, type GruppenKontext } from './typen'
+import { VERLAUF_SYNC_TYP, verarbeiteVerlaufsAbgleich } from '../geraet/verlaufsAbgleich'
 
 /**
  * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
@@ -165,6 +166,19 @@ export async function holeGeraeteSteuerung(
           if (await beantworteDmAnfrage(eigeneId, roh)) verarbeitet += 1
         } catch {
           // Eine Anfrage hält die übrigen Zustellungen nicht auf.
+        }
+        if (!angehalten) stand = env.id
+        continue
+      }
+
+      // Der Verlauf eines frisch freigegebenen eigenen Geräts. Er kommt aus
+      // derselben Mailbox wie die Schlüssel und ist dort an genau dieses Gerät
+      // versiegelt; der Absender ist ein freigegebenes Geschwistergerät.
+      if (roh.type === VERLAUF_SYNC_TYP) {
+        try {
+          verarbeitet += await verarbeiteVerlaufsAbgleich(roh, eigeneId, entsiegle)
+        } catch {
+          // Ein kaputtes Paket hält die übrigen Zustellungen nicht auf.
         }
         if (!angehalten) stand = env.id
         continue

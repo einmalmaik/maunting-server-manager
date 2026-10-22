@@ -2413,10 +2413,18 @@ describe('Messenger (Allround Chat)', () => {
       </MemoryRouter>
     )
 
-    const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+    await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 1001 } as any)
 
-    fireEvent.change(input, { target: { value: 'Nachricht vor Wechsel' } })
+    // Der Kontakt kommt aus der Adresse, die Mailbox-Kennung aus einem
+    // Promise. Erst wenn beides steht, bleibt das Getippte liegen — vorher
+    // kann ein Gesprächswechsel die Eingabe noch leeren.
+    await waitFor(() => {
+      fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
+        target: { value: 'Nachricht vor Wechsel' },
+      })
+      expect(screen.getByLabelText(i18n.t('messenger.send'))).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     await waitFor(() => {
@@ -2563,8 +2571,19 @@ describe('Messenger (Allround Chat)', () => {
       // Sowohl dr-init als auch die abhängige Nachricht müssen eingereiht werden
       expect(enqueueMessageMutation).toHaveBeenCalledTimes(2)
     })
-    // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein (nur dr-init wurde versucht)
-    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledTimes(1)
+    // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein —
+    // nur der Sitzungsaufbau wurde versucht. Gezählt wird nur, was zu dieser
+    // Nachricht gehört: eine verzögerte Quittung aus dem vorigen Test kann
+    // hier noch eintreffen und machte eine Gesamtzahl zeitabhängig.
+    const relayAufrufe = vi
+      .mocked(socialApi.relayE2eeEnvelope)
+      .mock.calls.map(([auftrag]) => auftrag)
+    expect(
+      relayAufrufe.filter(
+        (auftrag) => auftrag.ciphertext_envelope === 'sv-e2ee-dr-v1:1.testgeraet.dev-1.msg-data',
+      ),
+    ).toHaveLength(0)
+    expect(relayAufrufe.filter((auftrag) => auftrag.control_type === 'dr-init')).toHaveLength(1)
   })
 
   /**

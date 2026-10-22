@@ -284,16 +284,14 @@ export function E2eeGeraeteCard() {
             {faktor.wahl === 'passkey' ? (
               <div className="space-y-2 pt-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  {!andereFrei && (
-                    <Button
-                      variant="primary"
-                      disabled={laeuft !== null}
-                      onClick={() => void wiederFreigebenMitFaktor()}
-                    >
-                      <ShieldCheck className="h-4 w-4 mr-2" aria-hidden="true" />
-                      {t('profile.e2eeDevices.reapprove')}
-                    </Button>
-                  )}
+                  <Button
+                    variant="primary"
+                    disabled={laeuft !== null}
+                    onClick={() => void wiederFreigebenMitFaktor()}
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2" aria-hidden="true" />
+                    {t('profile.e2eeDevices.reapprove')}
+                  </Button>
                   <Button
                     variant="secondary"
                     disabled={laeuft !== null}
@@ -319,15 +317,13 @@ export function E2eeGeraeteCard() {
                       onChange={(e) => faktor.setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                       className="font-mono tracking-widest"
                     />
-                    {!andereFrei && (
-                      <Button
-                        variant="primary"
-                        disabled={!faktor.bereit || laeuft !== null}
-                        onClick={() => void wiederFreigebenMitFaktor()}
-                      >
-                        {t('profile.e2eeDevices.reapprove')}
-                      </Button>
-                    )}
+                    <Button
+                      variant="primary"
+                      disabled={!faktor.bereit || laeuft !== null}
+                      onClick={() => void wiederFreigebenMitFaktor()}
+                    >
+                      {t('profile.e2eeDevices.reapprove')}
+                    </Button>
                     <Button
                       variant="secondary"
                       disabled={!faktor.bereit || laeuft !== null}
@@ -353,15 +349,13 @@ export function E2eeGeraeteCard() {
                     onChange={(e) => setConfirmationWord(e.target.value)}
                     className="min-w-0 flex-1 font-mono"
                   />
-                  {!andereFrei && (
-                    <Button
-                      variant="primary"
-                      disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft !== null}
-                      onClick={() => void wiederFreigeben({ confirmation: 'RESET' })}
-                    >
-                      {t('profile.e2eeDevices.reapprove')}
-                    </Button>
-                  )}
+                  <Button
+                    variant="primary"
+                    disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft !== null}
+                    onClick={() => void wiederFreigeben({ confirmation: 'RESET' })}
+                  >
+                    {t('profile.e2eeDevices.reapprove')}
+                  </Button>
                   <Button
                     variant="secondary"
                     disabled={confirmationWord.trim().toUpperCase() !== 'RESET' || laeuft !== null}
@@ -382,15 +376,13 @@ export function E2eeGeraeteCard() {
                   onChange={(e) => setPasswort(e.target.value)}
                   className="min-w-0 flex-1"
                 />
-                {!andereFrei && (
-                  <Button
-                    variant="primary"
-                    disabled={!passwort || laeuft !== null}
-                    onClick={() => void wiederFreigeben({ password: passwort })}
-                  >
-                    {t('profile.e2eeDevices.reapprove')}
-                  </Button>
-                )}
+                <Button
+                  variant="primary"
+                  disabled={!passwort || laeuft !== null}
+                  onClick={() => void wiederFreigeben({ password: passwort })}
+                >
+                  {t('profile.e2eeDevices.reapprove')}
+                </Button>
                 <Button
                   variant="secondary"
                   disabled={!passwort || laeuft !== null}

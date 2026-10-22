@@ -565,18 +565,25 @@ def freigabe_hindernis(db: Session, user: User, device_id: str) -> str | None:
     return None
 
 
-def wieder_freigeben(db: Session, user: User, device_id: str, signatur: str | None = None) -> bool:
-    """Holt ein wartendes Geraet zurueck, wenn es das einzige ist.
+def wieder_freigeben(
+    db: Session,
+    user: User,
+    device_id: str,
+    signatur: str | None = None,
+    *,
+    mit_nachweis: bool = False,
+) -> bool:
+    """Holt ein wartendes Geraet zurueck.
 
     Der Gegenpol zu `_auffrischen`: wer seinen Schluessel verloren und neu
     erzeugt hat, sitzt sonst in einem Wartezustand, den niemand aufloesen kann
     — es gibt kein zweites freigegebenes Geraet, das unterschreiben koennte.
 
-    **Nur wenn kein freigegebenes Geraet mehr existiert.** Existiert eines,
-    ist das hier ein Weg an der Unterschrift vorbei und wird abgelehnt: sonst
-    holte sich jeder, der nur das Passwort hat, mit einem Klick wieder Zutritt.
-    Den Nachweis (2FA oder Passwort) prueft der Aufrufer — hier steht nur die
-    Regel, wer ueberhaupt in Frage kommt.
+    **Mit `mit_nachweis` auch neben einem freigegebenen Geraet.** Der Aufrufer
+    hat dann Passwort oder zweiten Faktor bereits geprueft. Das ist derselbe
+    frische Nachweis, den Regel 21 fuer alles verlangt, was einen neuen Zugang
+    erzeugt. Ohne ihn bleibt die alte Regel: ein freigegebenes Geraet muss
+    unterschreiben. Ein gestohlenes Sitzungs-Token allein kommt so nicht durch.
 
     **Gelesen und geschrieben unter einer Sperre.** Zwei wartende Geraete, die
     gleichzeitig anfragen, saehen sonst beide „kein freigegebenes" und gäben
@@ -607,7 +614,7 @@ def wieder_freigeben(db: Session, user: User, device_id: str, signatur: str | No
     if eintrag.is_approved:
         db.rollback()
         return True
-    if _freigegebene(db, user.id).count() > 0:
+    if not mit_nachweis and _freigegebene(db, user.id).count() > 0:
         db.rollback()
         raise GeraeteaenderungAbgelehntError(
             "Ein freigegebenes Geraet muss dieses Geraet freigeben."

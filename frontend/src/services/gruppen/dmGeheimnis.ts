@@ -372,6 +372,59 @@ export async function nimmDmGeheimnis(eigeneId: number, roh: Record<string, unkn
 }
 
 /**
+ * Übernimmt ein Chatgeheimnis aus einer **signierten Verlaufsübergabe** eines
+ * eigenen Geräts.
+ *
+ * Anders als `nimmDmGeheimnis` prüft diese Funktion nicht die Regel „die
+ * kleinere Kennung erzeugt". Die Beglaubigung liegt hier schon hinter ihr: der
+ * Aufrufer hat das äußere Paket gegen den Signaturschlüssel eines freigegebenen
+ * Geschwistergeräts geprüft. Dieses Gerät hat das Geheimnis aus dem eigenen
+ * Bestand; es gibt keinen Dritten, der es untergeschoben haben könnte.
+ *
+ * Ohne diesen Weg müsste ein frisch freigegebenes Gerät warten, bis ein
+ * Geschwistergerät online ist und seine `dm_secret_request` beantwortet. Bis
+ * dahin läse es die alte Mailbox und sähe keine neuen Nachrichten — der
+ * Zustand, der wie ein halber Messenger aussieht.
+ */
+export async function uebernimmDmGeheimnis(
+  peerId: number,
+  geheimnis: string,
+  beleg?: Record<string, unknown>,
+): Promise<boolean> {
+  if (!Number.isInteger(peerId) || peerId <= 0 || !geheimnis) return false
+  const vorhanden = await ablage.liesDmGeheimnis(peerId)
+  if (vorhanden?.geheimnis) return false
+
+  const jetzt = new Date().toISOString()
+  await ablage.schreibeDmGeheimnis({
+    peerId,
+    geheimnis,
+    erzeugtAm: jetzt,
+    verteiltAm: jetzt,
+    // Der Originalumschlag der Gegenseite, damit dieses Gerät das Geheimnis
+    // später an ein eigenes Zweitgerät weitergeben darf. Selbst unterschrieben
+    // trüge es die falsche Kennung und würde dort abgewiesen.
+    ...(beleg ? { beleg } : {}),
+  })
+  const neu = await mailboxAusGeheimnis(geheimnis)
+  const token = await nachweisAusGeheimnis(geheimnis)
+  merkeMailboxNachweis(neu, token)
+  abonniereMailbox(neu, token)
+  try {
+    await registriereMailbox(neu, token)
+  } catch {
+    // Nachholbar; das Geheimnis selbst ist wichtiger als der Nachweis.
+  }
+  try {
+    const { merkeGespraech } = await import('../gespraechsListe')
+    await merkeGespraech(peerId, {})
+  } catch {
+    // Verschlossener Messenger oder volle Ablage.
+  }
+  return true
+}
+
+/**
  * Wohin ein Direktchat sendet und woraus er liest — das Gegenstück zu
  * `gruppenZiele`.
  *

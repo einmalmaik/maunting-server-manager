@@ -3759,7 +3759,7 @@
       "reapprove": "Allow this device again",
       "reapproveHelp": "Nobody can approve this device because it is the only one. Confirm with the proof your account requires — afterwards you receive messages again. That does not make it verified: compare the safety number with your contact.",
       "reapproveDone": "Device allowed again.",
-      "reapproveOtherDevice": "Another approved device has to approve this one — you will find it in the same list there.",
+      "reapproveOtherDevice": "An approved device can approve this one. You can also approve it yourself with your password or second factor if you no longer have the other device. Afterwards contacts must compare the safety number before they can message you.",
       "notCovered": "No valid approval",
       "notCoveredHelp": "This device is listed as approved, but none of your devices signed its approval — that is why it receives no messages (the warning in the chat refers to exactly this entry). Check the safety number, remove the device and pair it again.",
       "approve": "Approve",
@@ -7919,7 +7919,7 @@
     "ownUnverifiedDeviceWarning": "Security warning: a device is registered for your account that none of your devices approved. It receives nothing. Check Profile → Devices.",
     "ownNewDevice": "A new device was approved for your account.",
     "ownAccountResetWarning": "Security warning: all devices of your account that you knew were replaced. If this wasn't you, change your password now.",
-    "thisDevicePending": "This device is waiting for approval. Confirm it on one of your other devices under Profile → Devices. Until then it receives no messages.",
+    "thisDevicePending": "This device is waiting for approval. Confirm it on one of your other devices under Profile → Devices, or approve it there yourself with your password or second factor. Until then it receives no messages.",
     "streak": {
       "active_one": "{{count}}-day streak with {{name}}",
       "active_other": "{{count}}-day streak with {{name}}",

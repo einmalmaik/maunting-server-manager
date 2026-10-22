@@ -476,9 +476,10 @@ describe('E2eeGeraeteCard', () => {
     gemeldet.mockRestore()
   })
 
-  it('verweist bei einem anderen freigegebenen Gerät auf dessen Unterschrift', async () => {
-    // Dort ist der Weg die Unterschrift — „wieder zulassen" lehnt der Server
-    // ab, und ein Knopf, der nur 403 erzeugt, gehörte nicht auf den Schirm.
+  it('bietet auch neben einem freigegebenen Gerät die Selbstfreigabe mit Nachweis an', async () => {
+    // Wer das andere Gerät nicht mehr hat, kommt mit Passwort oder zweitem
+    // Faktor zurück; die Unterschrift des alten Geräts ist nicht mehr der
+    // einzige Weg.
     liste.inhalt = [
       { device_id: 'dieses-geraet-0001', public_key: 'pub-1', label: '', is_approved: false },
       { device_id: 'altes-geraet-0002', public_key: 'pub-2', label: 'Telefon', is_approved: true },
@@ -486,9 +487,11 @@ describe('E2eeGeraeteCard', () => {
     render(<E2eeGeraeteCard />)
 
     expect(
-      await screen.findByText(/Ein anderes freigegebenes Gerät muss dieses hier freigeben/),
+      await screen.findByText(/Du kannst es auch selbst mit deinem Passwort/),
     ).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Dieses Gerät wieder zulassen' })).toBeNull()
+    expect(
+      screen.getByRole('button', { name: 'Dieses Gerät wieder zulassen' }),
+    ).toBeInTheDocument()
   })
 
   it('bietet bei aktiver 2FA die Eingabe des OTP-Codes an', async () => {

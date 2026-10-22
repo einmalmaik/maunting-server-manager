@@ -14,6 +14,17 @@ import { setzeEigeneFreigabe, vertrauteGeraete } from './geraeteVertrauen'
 
 const CACHE_FRIST_MS = 600000
 /**
+ * Wie alt die Empfängerliste beim Senden höchstens sein darf.
+ *
+ * Ein frisch freigegebenes Gerät steht erst nach dem Abruf in der Liste. Mit
+ * der Zehn-Minuten-Frist gingen Nachrichten bis zu zehn Minuten weiter nur an
+ * die alten Geräte — der Absender sah „nicht zugestellt", das neue Gerät bekam
+ * nichts, und niemand konnte sagen, warum. Fünf Sekunden sind lang genug, um
+ * mehrere Nachrichten hintereinander nicht je in einen Abruf zu verwandeln,
+ * und kurz genug, dass die Freigabe praktisch sofort wirkt.
+ */
+const SENDE_FRIST_MS = 5_000
+/**
  * Wie alt die Liste höchstens sein darf, wenn eine Prüfung „frisch" verlangt.
  * Kurz genug für ein Gerät, das sich gerade angemeldet hat; lang genug, dass
  * eine Flut gefälschter Umschläge nicht in eine Flut von Abrufen übersetzt.
@@ -195,10 +206,18 @@ async function holeGeraete(
   {
     mitWartenden = false,
     eigenes,
+    rueckfallBeiFehler = false,
   }: {
     mitWartenden?: boolean
     /** Dieses Gerät, wie der Aufrufer es kennt. Siehe `vertrauteGeraete`. */
     eigenes?: { kennung: string; publicKeyJwk: string }
+    /**
+     * Bei einem Ausfall den abgelaufenen Eintrag nehmen. Der Sendepfad will
+     * frisch nachsehen (damit ein eben freigegebenes Gerät dabei ist), aber
+     * ohne Netz lieber mit der letzten bekannten Liste weitersenden als gar
+     * nicht.
+     */
+    rueckfallBeiFehler?: boolean
   } = {},
 ): Promise<E2eeGeraetItem[]> {
   const schluessel = cacheSchluessel(userId, mitWartenden, Boolean(eigenes))
@@ -228,7 +247,7 @@ async function holeGeraete(
   } catch (fehler) {
     // Ein abgelaufener Eintrag ist immer noch besser als gar keiner: die
     // Geräteliste ändert sich selten, der Abruf scheitert oft nur kurz.
-    if (cached && frist === CACHE_FRIST_MS) return cached.geraete
+    if (cached && (frist === CACHE_FRIST_MS || rueckfallBeiFehler)) return cached.geraete
     throw fehler
   }
 }
@@ -290,7 +309,7 @@ export class E2eeKeinGeraetError extends Error {
  * und es sagen, als eine Zusage brechen, die niemand nachprüfen kann.
  */
 export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
-  const geraete = await holeGeraete(userId)
+  const geraete = await holeGeraete(userId, SENDE_FRIST_MS, { rueckfallBeiFehler: true })
   if (geraete.length === 0) throw new E2eeKeinGeraetError(userId)
   return geraete
 }
