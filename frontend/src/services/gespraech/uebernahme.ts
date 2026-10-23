@@ -25,6 +25,7 @@ import { vergissEigeneWirkungen } from '@/services/eigeneWirkungen'
 import { ereignisseAusNachrichten } from '@/services/funkenService'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { sichereAnhaenge } from '@/services/medienSicherung'
+import { holeOffeneMedien } from '@/services/medienNachholen'
 import {
   entfernePlatzhalterUndDubletten,
   isOptimisticMessage,
@@ -265,9 +266,18 @@ export async function uebernimmLesungen(
     void tilgeNachrichtLokal(currentMid, msg, geloeschtAm).catch(() => {})
   }
 
-  // Die Anhaenge holen und dauerhaft ablegen. Ein Anhang, der nicht zu holen
-  // war, blockiert nichts.
-  void sichereAnhaenge(processedList, currentMid).catch(() => {})
+  /*
+   * Die Anhaenge holen und dauerhaft ablegen. Ein Anhang, der nicht zu holen
+   * war, blockiert nichts — er bekommt einen dauerhaften Auftrag.
+   *
+   * Danach die faelligen Auftraege dieses Kontos abarbeiten. Das ist der
+   * „nach jedem Nachrichten-Ladepfad"-Teil: der offene Chat und der
+   * Hintergrundlauf kommen hier vorbei, und ein Anhang aus einer laengst
+   * quittierten Postfach-Nachricht bekommt so seinen zweiten Anlauf.
+   */
+  void sichereAnhaenge(processedList, currentMid)
+    .then(() => holeOffeneMedien())
+    .catch(() => {})
 
   /*
    * Der Häkchenstand der eigenen Zeilen zieht mit.

@@ -17,17 +17,24 @@
  * 1. **Ein Anhang wird einmal geholt.** Liegt er schon in der Ablage, ist der
  *    Download erledigt. Der Arbeitsspeicher davor ist nur eine Optimierung.
  * 2. **Ein Fehler ist kein Verlust.** Ein Anhang, der nicht geladen werden
- *    kann (Server weg, Ablauf, Kontingent), blockiert nichts. Die Anzeige
- *    versucht es später wieder.
+ *    kann (Server weg, Ablauf, Kontingent), blockiert nichts. Er bekommt einen
+ *    dauerhaften Nachholauftrag (`medienNachholen.ts`); die Anzeige versucht
+ *    es später wieder, auch ohne offenen Chat und nach einem Neustart.
  * 3. **Der Inhalt bleibt lokal.** Was hier abgelegt wird, ist der Klartext der
  *    Datei als data-URL — im Siegel der Ablage, also mit demselben Schutz wie
  *    der Verlauf. Ohne PIN gilt dieselbe Grenze wie dort.
  */
 
 import { ladeAnhangHerunter } from '@/api/social'
+import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { getSafeAttachmentUrl } from '@/lib/sanitizeSvg'
-import { leseMedium, speichereMedium } from './messengerLocalStore'
+import {
+  istMediumGeloescht,
+  leseMedium,
+  speichereMedium,
+} from './messengerLocalStore'
 import { chatMediaBlobCache } from './klartextSpeicher'
+import { merkeMedienNachholauftrag } from './medienAuftraege'
 import type { MedienZeiger } from './medienKrypto'
 
 /** Wie viele Anhänge gleichzeitig geholt werden. */
@@ -103,24 +110,91 @@ export async function sichereMedium(
   bindung: MedienBindung,
   name?: string | null,
 ): Promise<boolean> {
+  return (await sichereMediumMitGrund(zeiger, bindung, name)) === 'gesichert'
+}
+
+/**
+ * Warum ein Anhang (noch) nicht liegt — die Auskunft, die der Nachholauftrag
+ * braucht.
+ *
+ * `gesichert` heisst: liegt dauerhaft in der Ablage.
+ * `geloescht` heisst: seine Nachricht wurde geloescht oder ist verfallen; ein
+ * Grabstein weist jeden weiteren Versuch ab.
+ * `nicht_mehr_da` heisst: der Blob ist endgueltig nicht zu bekommen (404/410)
+ * oder die Antwort ist unbrauchbar. Ein zweiter Versuch wuerde nichts aendern.
+ * `offen` heisst: Netz, Sperre, Kontingent — spaeter noch einmal.
+ */
+export type SicherungsGrund = 'gesichert' | 'geloescht' | 'nicht_mehr_da' | 'offen'
+
+/** Ist der Fehler endgueltig? Nur ein Status, kein Text. */
+function istEndgueltigWeg(fehler: unknown): boolean {
+  const status = Number((fehler as { status?: unknown } | null | undefined)?.status)
+  return status === 404 || status === 410
+}
+
+export async function sichereMediumMitGrund(
+  zeiger: MedienZeiger,
+  bindung: MedienBindung,
+  name?: string | null,
+  /**
+   * Das Konto, fuer das der Aufrufer gestartet ist.
+   *
+   * Ein Hintergrundlauf darf nicht in die Ablage eines anderen Kontos
+   * schreiben, wenn waehrend des Downloads jemand wechselt. Ist der Wert
+   * angegeben und stimmt nicht mehr, wird nicht gespeichert.
+   */
+  erwartetesKonto?: number | null,
+): Promise<SicherungsGrund> {
+  // Ein geloeschter Anhang wird nicht mehr geholt. Der Grabstein entsteht vor
+  // dem Loeschen; danach ist die Kennung fuer immer gesperrt.
+  try {
+    if (await istMediumGeloescht(zeiger.mediaId)) return 'geloescht'
+  } catch {
+    // Ohne Ablage entscheidet am Ende das Schreiben.
+  }
+
   try {
     const gespeichert = await leseMedium(zeiger.mediaId)
-    if (gespeichert) return true
+    if (gespeichert) return 'gesichert'
   } catch {
     // Die Ablage streikt: dann holen wir den Anhang und versuchen es noch
     // einmal mit dem Schreiben.
   }
+
   try {
     const klartext = await ladeAnhangHerunter(zeiger, bindung)
     const sicher = getSafeAttachmentUrl(klartext)
-    if (!sicher) return false
+    // Eine abgewiesene URL wird durch Wiederholen nicht besser.
+    if (!sicher) return 'nicht_mehr_da'
+
+    /*
+     * Nach dem Download noch einmal fragen.
+     *
+     * Zwischen dem ersten Blick und der Antwort des Servers kann die Nachricht
+     * geloescht worden sein. Das Schreiben prueft den Grabstein zwar selbst in
+     * seiner Transaktion; hier sparen wir uns den Weg dorthin — und vor allem
+     * den Eintrag im Arbeitsspeicher, der sonst genau die geloeschte Datei
+     * wieder anzeigte.
+     */
+    try {
+      if (await istMediumGeloescht(zeiger.mediaId)) return 'geloescht'
+    } catch {
+      // siehe oben
+    }
+
+    if (erwartetesKonto !== undefined && angemeldetesKonto() !== erwartetesKonto) {
+      return 'offen'
+    }
+    const abgelegt = await speichereMedium(zeiger.mediaId, sicher, name ?? null)
+    if (!abgelegt) return 'geloescht'
+    // Erst nach dem Schreiben in den Zwischenspeicher: der Arbeitsspeicher ist
+    // die Optimierung, nicht der Bestand.
     chatMediaBlobCache.set(zeiger.mediaId, sicher)
-    await speichereMedium(zeiger.mediaId, sicher, name ?? null)
-    return true
-  } catch {
+    return 'gesichert'
+  } catch (fehler) {
     // Kein Netz, abgelaufen, Kontingent: der Anhang bleibt offen und wird
-    // später erneut versucht.
-    return false
+    // spaeter erneut versucht. Nur ein ausdrueckliches 404/410 gibt auf.
+    return istEndgueltigWeg(fehler) ? 'nicht_mehr_da' : 'offen'
   }
 }
 
@@ -139,7 +213,8 @@ export async function sichereMedium(
  *
  * Gibt zurück, wie viele Anhänge danach lokal gesichert sind. Ein Anhang, der
  * nicht gesichert werden konnte, ist **nicht** gesichert — und wird nicht so
- * gemeldet.
+ * gemeldet. Für ihn liegt danach ein Nachholauftrag in der Ablage; ein
+ * geloeschter Anhang bekommt keinen.
  */
 export async function sichereAnhaenge(
   nachrichten: readonly SicherbareNachricht[],
@@ -147,6 +222,9 @@ export async function sichereAnhaenge(
 ): Promise<{ gesichert: number; offen: number }> {
   if (!blindMailboxId) return { gesichert: 0, offen: 0 }
 
+  // Das Konto, fuer das dieser Durchlauf arbeitet. Wechselt es mittendrin,
+  // wird nichts mehr gespeichert und kein Auftrag in die fremde Ablage gelegt.
+  const konto = angemeldetesKonto()
   const aufträge: { zeiger: MedienZeiger; bindung: MedienBindung; name?: string | null }[] = []
   for (const nachricht of nachrichten) {
     const absenderId = Number(nachricht.senderId)
@@ -175,11 +253,26 @@ export async function sichereAnhaenge(
   for (let i = 0; i < aufträge.length; i += GLEICHZEITIG) {
     const stueck = aufträge.slice(i, i + GLEICHZEITIG)
     const ergebnisse = await Promise.all(
-      stueck.map((a) => sichereMedium(a.zeiger, a.bindung, a.name)),
+      stueck.map(async (a) => {
+        const grund = await sichereMediumMitGrund(a.zeiger, a.bindung, a.name, konto)
+        /*
+         * Ein offener Anhang bekommt einen dauerhaften Auftrag.
+         *
+         * Bisher haing der zweite Versuch daran, dass dieselben Umschlaege
+         * noch einmal verarbeitet werden. Eine quittierte Postfach-Nachricht
+         * kommt nie wieder, und ohne offenen Chat gab es gar keinen Anlass —
+         * der Anhang war dann fuer immer verloren, obwohl der Server ihn noch
+         * haelt. Der Auftrag ueberlebt Neustart und Chatwechsel.
+         */
+        if (grund === 'offen' && angemeldetesKonto() === konto) {
+          await merkeMedienNachholauftrag(a.zeiger, a.bindung, a.name).catch(() => {})
+        }
+        return grund
+      }),
     )
-    for (const ok of ergebnisse) {
-      if (ok) gesichert += 1
-      else offen += 1
+    for (const grund of ergebnisse) {
+      if (grund === 'gesichert') gesichert += 1
+      else if (grund === 'offen') offen += 1
     }
   }
   return { gesichert, offen }

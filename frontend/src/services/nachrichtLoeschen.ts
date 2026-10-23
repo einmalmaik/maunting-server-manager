@@ -23,6 +23,7 @@
 
 import { loescheBlindeUmschlaege, loescheChatMedium } from '@/api/social'
 import { umgezogeneMailbox } from './gruppenSchluessel'
+import { chatMediaBlobCache } from './klartextSpeicher'
 import {
   leereUmschlagKlartext,
   loescheMedium,
@@ -144,11 +145,17 @@ export async function tilgeNachrichtLokal(
    * Nachricht nur im Text verschwunden, ihr Bild aber weiterhin auf diesem
    * Gerät — und die Zusage „für alle gelöscht" wäre falsch.
    *
+   * `loescheMedium` nimmt in einer Transaktion den Klartext, angefangene
+   * Stuecke eines Historientransfers, einen offenen Nachholauftrag und setzt
+   * den Grabstein. Der Arbeitsspeicher faellt hier mit: er ist nur die
+   * Optimierung ueber der Ablage.
+   *
    * Der Serverteil ist eine eigene Angelegenheit: dort darf nur der Absender
    * löschen, und das steht in `tilgeNachrichtBeimServer`.
    */
   for (const mediaId of medienKennungen(msg)) {
     await loescheMedium(mediaId).catch(() => {})
+    chatMediaBlobCache.delete(mediaId)
   }
 }
 

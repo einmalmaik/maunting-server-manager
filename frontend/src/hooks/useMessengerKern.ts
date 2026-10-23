@@ -22,6 +22,7 @@ import {
   verteileOffeneZustellungenAller,
 } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
+import { holeOffeneMedien } from '@/services/medienNachholen'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
 import { verfallsfrist } from '@/services/nachrichtVerfall'
@@ -254,6 +255,37 @@ export function useMessengerKern({
     if (!currentUserId) return
     void sichereDauerhafteAblage()
   }, [currentUserId])
+
+  /**
+   * Anhaenge nachholen, die beim Verarbeiten nicht zu holen waren.
+   *
+   * Drei Anlaesse: der Messenger ist bereit (Identitaet da, nicht gesperrt),
+   * das Netz kommt zurueck, und die App tritt wieder nach vorn. Der dritte
+   * fehlte sonst: ein Telefon, das im Hintergrund das Netz verliert und
+   * wiedergewinnt, sah kein `online`, und der Anhang wartete bis zum naechsten
+   * Start. Der Ladepfad selbst stoesst ebenfalls an (`gespraech/uebernahme`).
+   *
+   * Der Auftrag liegt in der Ablage; hier wird nur gelesen, was faellig ist.
+   * Kein Timer, kein Dauerfeuer.
+   */
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready') return
+    let aktiv = true
+    const lauf = () => {
+      if (!aktiv) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void holeOffeneMedien().catch(() => {})
+    }
+    lauf()
+    window.addEventListener('online', lauf)
+    document.addEventListener('visibilitychange', lauf)
+    return () => {
+      aktiv = false
+      window.removeEventListener('online', lauf)
+      document.removeEventListener('visibilitychange', lauf)
+    }
+  }, [currentUserId, identity, messengerGesperrt])
 
   /**
    * Das Gerätepostfach im Hintergrund leeren.

@@ -11,6 +11,11 @@
  * abgelegt hat. Erst dann kommt sein ACK zurück, und erst dann merkt sich der
  * Absender ihn als übergeben. Ein Teilfehler läßt die Übergabe offen; der
  * nächste Lauf schickt dieselben Stücke mit derselben Kennung noch einmal.
+ *
+ * Ein geloeschter Anhang bleibt geloescht: der Grabstein der Medienkennung
+ * weist jeden spaeteren Transfer ab, auch von einem Geraet, das die Loeschung
+ * nie gesehen hat. Es gibt dann kein ACK — die Datei ist hier nicht
+ * angekommen, sie ist bewusst weg.
  */
 
 import { utf8ToBytes } from '@msdis/shield/core'
@@ -23,6 +28,7 @@ import { sichereMedium, zeigerVon } from '../medienSicherung'
 import type { MedienZeiger } from '../medienKrypto'
 import {
   holeMedienTeile,
+  istMediumGeloescht,
   legeMedienTeilAb,
   leseMedium,
   loescheMedienTeile,
@@ -284,6 +290,20 @@ export async function nimmtMedienTeil(
   if (typeof paket.daten !== 'string' || paket.daten.length > MEDIEN_TEIL_ZEICHEN) return 0
   const name = typeof paket.name === 'string' ? paket.name.slice(0, 200) : null
 
+  /*
+   * Ein geloeschter Anhang kommt nicht zurueck.
+   *
+   * Das Quellgeraet kann offline gewesen sein, als die Nachricht geloescht
+   * wurde, und schickt seinen Verlauf spaeter. Ohne diese Pruefung legte der
+   * Transfer die Datei wieder in `medien` — geloescht waere sie nur auf dem
+   * Geraet, das den Befehl gesehen hat. Geprueft wird vor dem Ablegen und nach
+   * jedem `await`: zwischen zweien kann die Loeschung eintreffen.
+   */
+  if (await istMediumGeloescht(mediaId)) {
+    await loescheMedienTeile(transferId).catch(() => {})
+    return 1
+  }
+
   await legeMedienTeilAb({
     transferId,
     mediaId,
@@ -296,6 +316,10 @@ export async function nimmtMedienTeil(
   })
 
   const vorhanden = await holeMedienTeile(transferId)
+  if (await istMediumGeloescht(mediaId)) {
+    await loescheMedienTeile(transferId).catch(() => {})
+    return 1
+  }
   if (
     new Set(vorhanden.map((t) => t.teil)).size < teile ||
     !vorhanden.every(
@@ -313,8 +337,15 @@ export async function nimmtMedienTeil(
     await loescheMedienTeile(transferId)
     return 0
   }
-  await speichereMedium(mediaId, daten, name)
+  if (await istMediumGeloescht(mediaId)) {
+    await loescheMedienTeile(transferId).catch(() => {})
+    return 1
+  }
+  // `false` heisst: der Grabstein ist inzwischen da. Dann gibt es kein ACK —
+  // der Anhang ist hier nicht angekommen, er ist geloescht.
+  const abgelegt = await speichereMedium(mediaId, daten, name)
   await loescheMedienTeile(transferId)
+  if (!abgelegt) return 1
   await sendeMedienAck(vonGeraet, mediaId, transferId).catch(() => {})
   return 1
 }

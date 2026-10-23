@@ -14,12 +14,17 @@ vi.mock('@/api/social', () => ({
 }))
 
 vi.mock('./messengerLocalStore', () => ({
+  istMediumGeloescht: vi.fn(async () => false),
   leseMedium: vi.fn(async () => null),
-  speichereMedium: vi.fn(async () => {}),
+  speichereMedium: vi.fn(async () => true),
+}))
+vi.mock('./medienAuftraege', () => ({
+  merkeMedienNachholauftrag: vi.fn(async () => {}),
 }))
 
 import { ladeAnhangHerunter } from '@/api/social'
 import { chatMediaBlobCache, leereKlartextSpeicher } from './klartextSpeicher'
+import { merkeMedienNachholauftrag } from './medienAuftraege'
 import { leseMedium, speichereMedium } from './messengerLocalStore'
 import { sichereAnhaenge, sichereMedium, zeigerVon } from './medienSicherung'
 
@@ -98,6 +103,13 @@ describe('medienSicherung', () => {
 
     expect(ergebnis).toEqual({ gesichert: 0, offen: 1 })
     expect(speichereMedium).not.toHaveBeenCalled()
+    // Und er bekommt einen dauerhaften Auftrag, sonst waere der zweite Anlauf
+    // an das erneute Verarbeiten derselben Umschlaege gebunden.
+    expect(merkeMedienNachholauftrag).toHaveBeenCalledWith(
+      ZEIGER,
+      { absenderId: 2, blindMailboxId: 'mailbox-1' },
+      null,
+    )
   })
 
   it('holt die eigenen Anhänge nur, wenn sie hier fehlen', async () => {

@@ -79,7 +79,7 @@ vi.mock('../messengerLocalStore', async (original) => {
   }
 })
 
-import { leseMedium, speichereMedium } from '../messengerLocalStore'
+import { holeMedienTeile, leseMedium, loescheMedium, speichereMedium } from '../messengerLocalStore'
 import {
   VERLAUF_SYNC_TYP,
   merkeVerlaufGesendet,
@@ -517,6 +517,52 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
       ),
     ).toBe(0)
     expect(await leseMedium('m-alt')).toBeNull()
+  })
+
+  it('legt einen gelöschten Anhang durch einen späten Transfer nicht wieder an', async () => {
+    /*
+     * Ein Gerät war offline, als die Nachricht gelöscht wurde, und schickt
+     * seinen Verlauf später. Ohne Grabstein landete der Anhang wieder in
+     * `medien` — die gelöschte Datei wäre zurück, obwohl niemand sie mehr
+     * sehen darf.
+     */
+    const daten = 'data:image/png;base64,' + 'D'.repeat(10_000)
+    const sha256 = await sha256Hex(utf8ToBytes(daten))
+    await speichereMedium('m-weg', daten, 'alt.png')
+    await loescheMedium('m-weg')
+
+    const paket = JSON.stringify({
+      v: 1,
+      transferId: 't-weg',
+      mediaId: 'm-weg',
+      name: 'alt.png',
+      teil: 0,
+      teile: 1,
+      sha256,
+      groesse: daten.length,
+      daten,
+      ablauf: Date.now() + 60_000,
+    })
+    const roh = {
+      type: VERLAUF_MEDIA_TYP,
+      ziel: 'sender-1',
+      geraet: 'ziel-1',
+      von_konto: 3,
+      sig: 'beleg',
+      paket: `sv-e2ee-hybrid-v1:${btoa(paket)}`,
+    }
+
+    expect(
+      await verarbeiteVerlaufsAbgleich(roh, 3, async (u) =>
+        atob(u.replace('sv-e2ee-hybrid-v1:', '')),
+      ),
+    ).toBe(1)
+    expect(await leseMedium('m-weg')).toBeNull()
+    expect(await holeMedienTeile('t-weg')).toEqual([])
+    // Kein ACK: der Anhang ist hier nicht angekommen, er ist gelöscht.
+    expect(
+      relay.mock.calls.some(([a]) => a.control_type === VERLAUF_MEDIA_ACK_TYP),
+    ).toBe(false)
   })
 
   it('überspringt einen Anhang, den das Ziel bestätigt hat', async () => {

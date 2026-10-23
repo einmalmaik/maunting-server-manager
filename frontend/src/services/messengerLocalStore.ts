@@ -113,7 +113,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 6
+const DB_VERSION = 7
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -127,6 +127,22 @@ const STORE_FUNKEN = 'funken'
 const STORE_MEDIEN = 'medien'
 /** Angefangene Medienuebertragungen, Stueck fuer Stueck. */
 const STORE_MEDIEN_TEILE = 'medien_teile'
+/** Offene Nachholauftraege fuer Anhaenge, die nicht zu holen waren. */
+const STORE_MEDIEN_AUFTRAEGE = 'medien_auftraege'
+/** Inhaltslose Marken geloeschter Medienkennungen. */
+const STORE_MEDIEN_GRABSTEINE = 'medien_grabsteine'
+
+/**
+ * So viele Grabsteine bleiben.
+ *
+ * Ein Grabstein ist eine Kennung und ein Zeitpunkt, kein Inhalt. Trotzdem darf
+ * die Liste nicht mit jedem geloeschten Bild wachsen: sie wird bei jedem
+ * Schreiben eines Anhangs gefragt. 500 decken einen langen Verlauf ab; was
+ * aelter ist, faellt weg. Ein uralter Historientransfer koennte diese Kennung
+ * dann wieder anlegen — die Grenze ist der Preis dafuer, dass die Ablage nicht
+ * unbegrenzt waechst.
+ */
+export const GRABSTEINE_MAX = 500
 
 /**
  * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
@@ -301,6 +317,40 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_MEDIEN_TEILE)) {
         const teile = db.createObjectStore(STORE_MEDIEN_TEILE, { keyPath: 'id' })
         teile.createIndex('by_transfer', 'transferId', { unique: false })
+        teile.createIndex('by_media', 'mediaId', { unique: false })
+      }
+      /*
+       * Version 7: der Nachholauftrag und der Grabstein.
+       *
+       * Der Auftrag liegt in **dieser** Ablage und nicht im localStorage: er
+       * traegt Paketschluessel, Dateiname und Bindung, also dieselben Angaben
+       * wie die Nachricht daneben. Hier gilt das Siegel des Messengers; im
+       * localStorage waere er fuer jedes Konto des Browsers lesbar. Eine eigene
+       * Datenbank waere ausserdem ein zweiter Ort, an dem ein Kontowechsel
+       * aufgeraeumt werden muesste — die Ablage je Konto gibt es hier schon.
+       *
+       * Der Grabstein ist bewusst inhaltslos: nur die Medienkennung und wann
+       * sie geloescht wurde. Er verhindert, dass ein verspaeteter Download
+       * oder Historientransfer die Datei wieder anlegt.
+       */
+      if (!db.objectStoreNames.contains(STORE_MEDIEN_AUFTRAEGE)) {
+        const auftraege = db.createObjectStore(STORE_MEDIEN_AUFTRAEGE, { keyPath: 'id' })
+        auftraege.createIndex('by_mailbox', 'mailbox', { unique: false })
+        auftraege.createIndex('by_media', 'mediaId', { unique: false })
+        auftraege.createIndex('by_angelegt', 'angelegtAm', { unique: false })
+      }
+      if (!db.objectStoreNames.contains(STORE_MEDIEN_GRABSTEINE)) {
+        const grabsteine = db.createObjectStore(STORE_MEDIEN_GRABSTEINE, { keyPath: 'mediaId' })
+        grabsteine.createIndex('by_geloescht', 'geloeschtAm', { unique: false })
+      }
+      // Die vorhandene Tabelle aus Version 6 bekommt ihren Index nach. In
+      // einer frisch angelegten steht er schon oben.
+      const upgrade = req.transaction
+      if (upgrade && db.objectStoreNames.contains(STORE_MEDIEN_TEILE)) {
+        const teile = upgrade.objectStore(STORE_MEDIEN_TEILE)
+        if (!teile.indexNames.contains('by_media')) {
+          teile.createIndex('by_media', 'mediaId', { unique: false })
+        }
       }
     }
 
@@ -770,8 +820,8 @@ export async function speichereMedium(
   mediaId: string,
   klartext: string,
   name?: string | null,
-): Promise<void> {
-  if (!mediaId || !klartext) return
+): Promise<boolean> {
+  if (!mediaId || !klartext) return false
   const db = await openLocalDatabase()
   // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
   const zeile = await versiegleZeile(
@@ -779,10 +829,30 @@ export async function speichereMedium(
     ['mediaId'],
     mediumAad(mediaId),
   )
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_MEDIEN, 'readwrite')
-    tx.objectStore(STORE_MEDIEN).put(zeile)
-    tx.oncomplete = () => resolve()
+  return await new Promise<boolean>((resolve, reject) => {
+    /*
+     * Der Grabstein wird **in derselben** Transaktion gelesen wie geschrieben.
+     *
+     * Ein getrennter Blick davor waere ein Zeitfenster: Loeschen schreibt den
+     * Grabstein, ein schon laufender Download legt danach seine Zeile ab, und
+     * die geloeschte Datei ist wieder da. IndexedDB fuehrt Transaktionen mit
+     * gemeinsamem Bereich nacheinander aus; damit entscheidet genau eine
+     * Reihenfolge — loeschen oder speichern, nie beides.
+     */
+    const tx = db.transaction([STORE_MEDIEN, STORE_MEDIEN_GRABSTEINE], 'readwrite')
+    const grabstein = tx.objectStore(STORE_MEDIEN_GRABSTEINE)
+    const req = grabstein.get(mediaId)
+    let geschrieben = false
+    req.onsuccess = () => {
+      // `== null` deckt beide Formen ab: die echte Ablage liefert `undefined`,
+      // ein Test-Double ohne Treffer `null`.
+      if (req.result == null) {
+        tx.objectStore(STORE_MEDIEN).put(zeile)
+        geschrieben = true
+      }
+    }
+    req.onerror = () => reject(req.error)
+    tx.oncomplete = () => resolve(geschrieben)
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
   })
@@ -837,8 +907,16 @@ export async function legeMedienTeilAb(teil: MedienTeil): Promise<void> {
     medienTeilAad(teil.transferId, teil.teil),
   )
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_MEDIEN_TEILE, 'readwrite')
-    tx.objectStore(STORE_MEDIEN_TEILE).put(zeile)
+    // Dieselbe Regel wie beim fertigen Anhang: eine geloeschte Kennung bekommt
+    // auch kein Stueck mehr. Sonst fuellte ein spaeter Transfer das Staging
+    // wieder, aus dem beim naechsten Teil ein Eintrag in `medien` wuerde.
+    const tx = db.transaction([STORE_MEDIEN_TEILE, STORE_MEDIEN_GRABSTEINE], 'readwrite')
+    const grabstein = tx.objectStore(STORE_MEDIEN_GRABSTEINE)
+    const req = grabstein.get(teil.mediaId)
+    req.onsuccess = () => {
+      if (req.result == null) tx.objectStore(STORE_MEDIEN_TEILE).put(zeile)
+    }
+    req.onerror = () => reject(req.error)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
@@ -885,13 +963,256 @@ export async function loescheMedienTeile(transferId: string): Promise<void> {
   })
 }
 
-/** Nimmt einen Anhang aus der Ablage. Gehört zum Löschen und zum Verfall. */
+/** Haelt die Zahl der Grabsteine klein. Nur die echte Ablage kennt `count`. */
+function begrenzeGrabsteine(store: IDBObjectStore): void {
+  if (typeof store.count !== 'function') return
+  const zahl = store.count()
+  zahl.onsuccess = () => {
+    const zuViel = zahl.result - GRABSTEINE_MAX
+    if (zuViel <= 0) return
+    const alle = store.index('by_geloescht').getAll()
+    alle.onsuccess = () => {
+      for (const alt of ((alle.result || []) as { mediaId?: string }[]).slice(0, zuViel)) {
+        if (alt?.mediaId) store.delete(alt.mediaId)
+      }
+    }
+  }
+}
+
+/**
+ * Setzt die inhaltslose Marke „diese Medienkennung ist geloescht".
+ *
+ * Sie ist der einzige Schutz gegen Wiederauferstehen: ein Download, ein
+ * Historientransfer oder ein Stueck aus dem Staging, das nach dem Loeschen
+ * eintrifft, findet die Marke und legt nichts mehr an. Inhalt steht nicht
+ * darin — nur die Kennung und der Zeitpunkt.
+ */
+export async function legeMedienGrabstein(mediaId: string): Promise<void> {
+  if (!mediaId) return
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_GRABSTEINE, 'readwrite')
+    const store = tx.objectStore(STORE_MEDIEN_GRABSTEINE)
+    store.put({ mediaId, geloeschtAm: new Date().toISOString() })
+    begrenzeGrabsteine(store)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Traegt diese Medienkennung einen Grabstein? */
+export async function istMediumGeloescht(mediaId: string): Promise<boolean> {
+  if (!mediaId) return false
+  const db = await openLocalDatabase()
+  return await new Promise<boolean>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_GRABSTEINE, 'readonly')
+    const req = tx.objectStore(STORE_MEDIEN_GRABSTEINE).get(mediaId)
+    req.onsuccess = () => resolve(Boolean(req.result))
+    req.onerror = () => reject(req.error)
+  })
+}
+
+/** Loescht jede Zeile eines Stores, deren Indexfeld den Wert traegt. */
+function loescheUeberIndex(store: IDBObjectStore, indexName: string, wert: string): void {
+  // Der Index fehlt nur in alten Test-Doubles; die echte Ablage hat ihn.
+  if (!store.indexNames || !store.indexNames.contains(indexName)) return
+  const req = store.index(indexName).getAll(IDBKeyRange.only(wert))
+  req.onsuccess = () => {
+    for (const zeile of ((req.result || []) as { id?: string }[])) {
+      if (zeile?.id !== undefined) store.delete(zeile.id)
+    }
+  }
+}
+
+/**
+ * Nimmt einen Anhang **ganz** aus der Ablage — und sperrt seine Kennung.
+ *
+ * Gehoert zum Loeschen einer Nachricht und zum Verfall. Vier Dinge gehen in
+ * einer Transaktion:
+ *
+ * 1. der Grabstein, damit ein spaeter eintreffender Download oder Transfer
+ *    nichts mehr anlegt,
+ * 2. der Klartext in `medien`,
+ * 3. angefangene Stuecke in `medien_teile`,
+ * 4. ein offener Nachholauftrag.
+ *
+ * Eine Transaktion, weil ein halber Zustand genau die Wiederauferstehung
+ * waere, gegen die diese Funktion geschrieben ist: Klartext weg, Auftrag
+ * stehen gelassen, und der naechste Anlauf holt die Datei zurueck.
+ */
 export async function loescheMedium(mediaId: string): Promise<void> {
   if (!mediaId) return
   const db = await openLocalDatabase()
   await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_MEDIEN, 'readwrite')
+    const tx = db.transaction(
+      [STORE_MEDIEN, STORE_MEDIEN_TEILE, STORE_MEDIEN_AUFTRAEGE, STORE_MEDIEN_GRABSTEINE],
+      'readwrite',
+    )
+    const grabsteine = tx.objectStore(STORE_MEDIEN_GRABSTEINE)
+    grabsteine.put({ mediaId, geloeschtAm: new Date().toISOString() })
+    begrenzeGrabsteine(grabsteine)
     tx.objectStore(STORE_MEDIEN).delete(mediaId)
+    loescheUeberIndex(tx.objectStore(STORE_MEDIEN_TEILE), 'by_media', mediaId)
+    loescheUeberIndex(tx.objectStore(STORE_MEDIEN_AUFTRAEGE), 'by_media', mediaId)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+// ==========================================
+// Die Nachholauftraege
+// ==========================================
+
+/**
+ * Ein Anhang, der beim Verarbeiten nicht zu holen war.
+ *
+ * Der Zeiger und die Bindung stehen hier noch einmal, weil die Nachricht, aus
+ * der sie stammen, laengst quittiert und aus dem Postfach verschwunden sein
+ * kann. Ohne diese Kopie gaebe es keinen zweiten Anlauf.
+ */
+export interface MedienNachholauftrag {
+  /** `${mailbox}:${mediaId}` — eine Zeile je Anhang und Gespraech. */
+  id: string
+  mailbox: string
+  mediaId: string
+  paketSchluessel: string
+  fileId: string
+  absenderId: number
+  name: string | null
+  versuche: number
+  naechsterVersuch: number
+  angelegtAm: number
+}
+
+/** So viele offene Auftraege bleiben; die aeltesten fallen. */
+const MEDIEN_AUFTRAEGE_MAX = 200
+
+function medienAuftragAad(id: string): string {
+  return `msm-medienauftrag:${id}`
+}
+
+/** Der Auftrag ist versiegelt wie der Verlauf: Name und Schluessel sind Inhalt. */
+const AUFTRAG_KLARFELDER = ['id', 'mailbox', 'mediaId', 'naechsterVersuch', 'angelegtAm'] as const
+
+/** Haelt die Warteschlange klein. Nur die echte Ablage kennt `count`. */
+function begrenzeAuftraege(store: IDBObjectStore): void {
+  if (typeof store.count !== 'function') return
+  const zahl = store.count()
+  zahl.onsuccess = () => {
+    const zuViel = zahl.result - MEDIEN_AUFTRAEGE_MAX
+    if (zuViel <= 0) return
+    const alle = store.index('by_angelegt').getAll()
+    alle.onsuccess = () => {
+      for (const alt of ((alle.result || []) as { id?: string }[]).slice(0, zuViel)) {
+        if (alt?.id) store.delete(alt.id)
+      }
+    }
+  }
+}
+
+/**
+ * Legt einen Auftrag an — **idempotent**.
+ *
+ * Gibt es ihn schon, bleibt der alte stehen. Sonst setzte jeder Fuenf-Sekunden-
+ * Takt die Versuche zurueck und den naechsten Versuch nach vorn: der Anhang
+ * wuerde nie wieder versucht, weil er immer „gerade eben gescheitert" waere.
+ */
+export async function legeMedienAuftragAn(auftrag: MedienNachholauftrag): Promise<void> {
+  if (!auftrag?.id || !auftrag.mailbox || !auftrag.mediaId) return
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(
+    auftrag,
+    AUFTRAG_KLARFELDER,
+    medienAuftragAad(auftrag.id),
+  )
+  await new Promise<void>((resolve, reject) => {
+    // Ein geloeschter Anhang bekommt keinen Auftrag. Die Pruefung steht in
+    // derselben Transaktion wie das Schreiben: zwischen einem Blick davor und
+    // dem Ablegen kann die Loeschung eintreffen.
+    const tx = db.transaction([STORE_MEDIEN_AUFTRAEGE, STORE_MEDIEN_GRABSTEINE], 'readwrite')
+    const store = tx.objectStore(STORE_MEDIEN_AUFTRAEGE)
+    const grabstein = tx.objectStore(STORE_MEDIEN_GRABSTEINE).get(auftrag.mediaId)
+    grabstein.onsuccess = () => {
+      if (grabstein.result != null) return
+      const vorhanden = store.get(auftrag.id)
+      vorhanden.onsuccess = () => {
+        if (vorhanden.result != null) return
+        store.put(zeile)
+        begrenzeAuftraege(store)
+      }
+      vorhanden.onerror = () => reject(vorhanden.error)
+    }
+    grabstein.onerror = () => reject(grabstein.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Schreibt den fortgeschriebenen Stand eines Auftrags (Versuche, naechster Termin). */
+export async function schreibeMedienAuftrag(auftrag: MedienNachholauftrag): Promise<void> {
+  if (!auftrag?.id) return
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(
+    auftrag,
+    AUFTRAG_KLARFELDER,
+    medienAuftragAad(auftrag.id),
+  )
+  await new Promise<void>((resolve, reject) => {
+    // Kein Fortschreiben an einer geloeschten Medienkennung vorbei: sonst
+    // legte ein Lauf, der waehrend der Loeschung scheitert, den Auftrag wieder
+    // an, den `loescheMedium` gerade entfernt hat.
+    const tx = db.transaction([STORE_MEDIEN_AUFTRAEGE, STORE_MEDIEN_GRABSTEINE], 'readwrite')
+    const grabstein = tx.objectStore(STORE_MEDIEN_GRABSTEINE).get(auftrag.mediaId)
+    grabstein.onsuccess = () => {
+      if (grabstein.result == null) tx.objectStore(STORE_MEDIEN_AUFTRAEGE).put(zeile)
+    }
+    grabstein.onerror = () => reject(grabstein.error)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Alle offenen Auftraege dieses Kontos, entsiegelt und ungeprueft. */
+export async function ladeMedienAuftraege(): Promise<MedienNachholauftrag[]> {
+  try {
+    const db = await openLocalDatabase()
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_MEDIEN_AUFTRAEGE, 'readonly')
+      const req = tx.objectStore(STORE_MEDIEN_AUFTRAEGE).getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    const offen = await entsiegleZeilen<MedienNachholauftrag>(rohzeilen, (z) =>
+      medienAuftragAad(String(z.id)),
+    )
+    return offen.filter(
+      (a) =>
+        typeof a?.id === 'string' &&
+        typeof a.mailbox === 'string' &&
+        typeof a.mediaId === 'string' &&
+        typeof a.paketSchluessel === 'string' &&
+        typeof a.fileId === 'string' &&
+        Number.isInteger(a.absenderId) &&
+        Number.isInteger(a.versuche) &&
+        Number.isFinite(a.naechsterVersuch),
+    )
+  } catch {
+    // Gesperrt oder Ablage weg: es gibt nichts nachzuholen. Der naechste
+    // Anlauf nach dem Entsperren liest wieder.
+    return []
+  }
+}
+
+export async function loescheMedienAuftrag(id: string): Promise<void> {
+  if (!id) return
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_AUFTRAEGE, 'readwrite')
+    tx.objectStore(STORE_MEDIEN_AUFTRAEGE).delete(id)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
@@ -1592,13 +1913,25 @@ export async function clearLocalMessengerStore(): Promise<void> {
       // zurückbleiben.
       // Die Funken ebenso: sie sind aus diesem Verlauf gerechnet.
       const tx = db.transaction(
-        [STORE_MESSAGES, STORE_MAILBOXES, STORE_KLARTEXTE, STORE_FUNKEN],
+        [
+          STORE_MESSAGES,
+          STORE_MAILBOXES,
+          STORE_KLARTEXTE,
+          STORE_FUNKEN,
+          // Die Nachholauftraege und Grabsteine gehoeren zu diesem Konto wie
+          // der Verlauf. Ein „alles loeschen", das sie stehen laesst, holte
+          // spaeter Anhaenge zu Nachrichten, die es hier nicht mehr gibt.
+          STORE_MEDIEN_AUFTRAEGE,
+          STORE_MEDIEN_GRABSTEINE,
+        ],
         'readwrite'
       )
       tx.objectStore(STORE_MESSAGES).clear()
       tx.objectStore(STORE_MAILBOXES).clear()
       tx.objectStore(STORE_KLARTEXTE).clear()
       tx.objectStore(STORE_FUNKEN).clear()
+      tx.objectStore(STORE_MEDIEN_AUFTRAEGE).clear()
+      tx.objectStore(STORE_MEDIEN_GRABSTEINE).clear()
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
