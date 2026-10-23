@@ -53,6 +53,14 @@ OHNE_KONTOBEZUG: dict[str, str] = {
     "direct_chats": "blind, dem Server ist kein Konto bekannt",
     "e2ee_blind_envelopes": "blind, dem Server ist kein Konto bekannt",
     "e2ee_blind_mailboxes": "blind, dem Server ist kein Konto bekannt",
+    # Der gerätebezogene Transport. Das sind Zustellpuffer: der Chiffretext
+    # einer Nachricht, die im Gespraechsverlauf des Geraets steht, und ein
+    # Idempotenzrest, der mit der Quittung verschwindet. Der Geraetebezug
+    # steht in der Geraeteliste, die mitgeht.
+    "e2ee_device_inboxes": "Zustelladresse eines Geraets; der Geraetebezug steht in der Geraeteliste",
+    "e2ee_delivery_payloads": "Zustellpuffer: der Chiffretext einer Nachricht, die im Gespraechsverlauf steht",
+    "e2ee_deliveries": "Zustellpuffer: eine offene Zustellung, die mit der Quittung verschwindet",
+    "e2ee_delivery_receipts": "Zustellpuffer: der Idempotenzrest einer quittierten Zustellung",
     "e2ee_mailbox_push": "blind, dem Server ist kein Konto bekannt",
     "email_verifications": "kurzlebiger Bestaetigungscode, nur als Hash",
     "guardian_incident_deliveries": "Server-Daten",

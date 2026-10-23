@@ -53,6 +53,7 @@ def put_own_e2ee_device(
             signing_public_key_jwk=req.signing_public_key or "",
             familie=familie,
             self_signature=req.approval_signature or "",
+            inbox_hash=req.inbox_hash or "",
         )
     except (e2ee_device_service.GeraetedeckelErreichtError, e2ee_device_service.FremdeSitzungError) as e:
         # 409, nicht 400: die Anfrage ist in Ordnung, der Zustand des Kontos
@@ -60,7 +61,7 @@ def put_own_e2ee_device(
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return e2ee_device_service.eintrag_als_dict(eintrag)
+    return e2ee_device_service.eintrag_als_dict(eintrag, db)
 
 
 @router.get("/e2ee/devices/{target_user_id}", response_model=list[E2eeDeviceItem], dependencies=[Depends(_check_social_enabled)])

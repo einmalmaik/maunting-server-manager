@@ -21,6 +21,7 @@ import {
 import { signiere } from '../absenderSignatur'
 import { STANDARD_BEZEICHNUNG, geraeteBezeichnung } from '../geraeteBezeichnung'
 import { eigenesGeraet, meinKonto, type EigenesGeraet } from './geraeteAblage'
+import { inboxAdresseAus } from './inboxAdresse'
 import { entfernenDaten, freigabeDaten, setzeEigeneFreigabe } from './geraeteVertrauen'
 import { vergessenGeraete } from './geraeteVerzeichnis'
 import { merkeVerlaufGesendet, sendeVerlaufAnGeraet } from './verlaufsAbgleich'
@@ -38,6 +39,10 @@ async function veroeffentliche(
     signingPublicKey: geraet.signaturPaar.publicKeyJwk,
     label,
     approvalSignature,
+    // Die Zustelladresse dieses Geräts. Sie geht mit jeder Veroeffentlichung
+    // mit, damit der Server sie kennt — auch wenn der Geraeteschluessel
+    // unveraendert bleibt.
+    inboxHash: await inboxAdresseAus(geraet),
   })
 }
 

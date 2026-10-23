@@ -236,6 +236,15 @@ export interface E2eeGeraetItem {
   /** Das Gerät, das dieses freigegeben hat, und seine Unterschrift (`vertrauteGeraete`). */
   approved_by?: string
   approval_signature?: string
+  /**
+   * Die opake Zustelladresse des Geräts, falls es den neuen Weg kennt.
+   *
+   * Sie entsteht aus einem Geheimnis, das nur das Gerät kennt; allein bringt
+   * sie nichts, zum Abholen gehört der Gerätebeleg dazu.
+   */
+  inbox_hash?: string
+  /** Die Transportfähigkeit des Geräts. Leer heißt: der alte Weg. */
+  transport?: string
 }
 
 /**
@@ -251,6 +260,14 @@ export async function putEigenesGeraet(payload: {
   label?: string
   /** Selbst-Signatur des Erstgeräts über seine eigene Freigabe. */
   approvalSignature?: string
+  /**
+   * Die opake Zustelladresse dieses Geräts.
+   *
+   * Sie entsteht aus dem geheimen Schlüsselpaar des Geräts und ist damit
+   * nur für dieses Gerät berechenbar. Fehlt sie, benutzt das Gerät den alten
+   * Weg (geteilte Mailbox) und kennt die Zustellung mit Quittung nicht.
+   */
+  inboxHash?: string
 }): Promise<E2eeGeraetItem> {
   return api<E2eeGeraetItem>('/social/e2ee/devices/self', {
     method: 'PUT',
@@ -260,6 +277,7 @@ export async function putEigenesGeraet(payload: {
       signing_public_key: payload.signingPublicKey ?? '',
       label: payload.label ?? '',
       approval_signature: payload.approvalSignature ?? '',
+      inbox_hash: payload.inboxHash ?? '',
     }),
   })
 }

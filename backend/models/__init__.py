@@ -74,6 +74,12 @@ from .user_friend import UserFriend
 from .user_presence import UserPresence
 from .e2ee_blind_envelope import E2eeBlindEnvelope
 from .e2ee_blind_mailbox import E2eeBlindMailbox
+from .e2ee_delivery import (
+    E2eeDelivery,
+    E2eeDeliveryPayload,
+    E2eeDeliveryReceipt,
+    E2eeDeviceInbox,
+)
 from .e2ee_mailbox_push import E2eeMailboxPush
 from .user_e2ee_device import UserE2eeDevice
 from .push_subscription import PushSubscription
@@ -124,6 +130,7 @@ __all__ = [
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket", "VaultBlob", "VaultBucketFormat", "VaultBucketTombstone", "VaultEingang", "VaultSicherungszugang",
     "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
     "E2eeBlindMailbox", "E2eeMailboxPush",
+    "E2eeDeviceInbox", "E2eeDeliveryPayload", "E2eeDelivery", "E2eeDeliveryReceipt",
     "UserE2eeDevice", "PushSubscription",
     "ChatGroup", "ChatGroupMember", "ChatGroupConfig", "ChatStory", "DirectChat", "ChatMedia",
 ]  # noqa: E501

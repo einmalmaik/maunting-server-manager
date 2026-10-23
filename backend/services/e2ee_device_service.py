@@ -80,6 +80,7 @@ def veroeffentlichen(
     signing_public_key_jwk: str = "",
     familie: str | None = None,
     self_signature: str = "",
+    inbox_hash: str = "",
 ) -> UserE2eeDevice:
     """Legt den Schluessel dieses Geraets ab oder frischt ihn auf.
 
@@ -99,6 +100,11 @@ def veroeffentlichen(
     `self_signature` ist die Unterschrift des Geraets ueber seine eigene
     Freigabe (`_selbst_beglaubigen`). Sie wird nur eingetragen, solange das
     Geraet freigegeben ist — ein wartendes hat nichts zu beglaubigen.
+
+    `inbox_hash` ist die opake Zustelladresse des Geraets. Sie entsteht aus
+    einem Geheimnis, das nur das Geraet kennt; der Server kann sie nicht
+    nachrechnen. Leer heisst: das Geraet benutzt den alten Weg (geteilte
+    Mailbox) und kennt die Zustellung mit Quittung nicht.
     """
     from schemas.social import validate_ecdsa_public_key_jwk, validate_rsa_public_key_jwk
 
@@ -113,9 +119,11 @@ def veroeffentlichen(
 
     bestand = _geraet(db, user.id, kennung)
     if bestand is not None:
-        return _auffrischen(
+        eintrag = _auffrischen(
             db, user, bestand, public_key_jwk, signatur, label, familie, self_signature
         )
+        _inbox_merken(db, eintrag, inbox_hash)
+        return eintrag
 
     _deckel_einhalten(db, user)
 
@@ -158,12 +166,29 @@ def veroeffentlichen(
         bestand = _geraet(db, user.id, kennung)
         if bestand is None:
             raise
-        return _auffrischen(
+        eintrag = _auffrischen(
             db, user, bestand, public_key_jwk, signatur, label, familie, self_signature
         )
+        _inbox_merken(db, eintrag, inbox_hash)
+        return eintrag
     db.refresh(eintrag)
+    _inbox_merken(db, eintrag, inbox_hash)
     _verzeichnis_geaendert(user.id)
     return eintrag
+
+
+def _inbox_merken(db: Session, eintrag: UserE2eeDevice, inbox_hash: str) -> None:
+    """Traegt die Zustelladresse des Geraets ein (oder laesst sie weg).
+
+    Leer heisst: das Geraet benutzt den alten Weg. Es wird **nicht**
+    nachgetragen — ein Geraet, das seine Adresse nicht kennt, soll keine
+    bekommen.
+    """
+    if not (inbox_hash or "").strip():
+        return
+    from services.social import zustellung
+
+    zustellung.inbox_registrieren(db, eintrag, inbox_hash.strip())
 
 
 def _selbst_beglaubigen(eintrag: UserE2eeDevice, user_id: int, signatur: str | None) -> bool:
@@ -381,7 +406,22 @@ def _deckel_einhalten(db: Session, user: User) -> None:
         raise GeraetedeckelErreichtError()
 
 
-def eintrag_als_dict(e: UserE2eeDevice) -> dict:
+def eintrag_als_dict(e: UserE2eeDevice, db: Session | None = None) -> dict:
+    """Der Eintrag, wie er im Verzeichnis herauskommt.
+
+    `db` wird gebraucht, um die Zustelladresse des Geraets zu finden. Ohne
+    Sitzung (etwa in einem Aufruf ohne Datenbank) bleibt das Feld leer — der
+    Eintrag nennt dann nur, was ohnehin am Geraet steht.
+    """
+    inbox_hash = ""
+    transport = ""
+    if db is not None:
+        from services.social import zustellung
+
+        inbox = zustellung.inbox_von_geraet(db, e.id)
+        if inbox is not None:
+            inbox_hash = inbox.inbox_hash
+            transport = "geraet-v1"
     return {
         "device_id": e.device_id,
         "public_key": e.public_key_jwk,
@@ -393,6 +433,8 @@ def eintrag_als_dict(e: UserE2eeDevice) -> dict:
         "is_approved": bool(e.is_approved),
         "approved_by": e.approved_by or "",
         "approval_signature": e.approval_signature or "",
+        "inbox_hash": inbox_hash,
+        "transport": transport,
     }
 
 
@@ -408,7 +450,10 @@ def geraete(db: Session, user_id: int, nur_bestaetigt: bool = False) -> list[dic
     query = db.query(UserE2eeDevice).filter(UserE2eeDevice.user_id == user_id)
     if nur_bestaetigt:
         query = query.filter(UserE2eeDevice.is_approved.is_(True))
-    return [eintrag_als_dict(e) for e in query.order_by(UserE2eeDevice.last_seen_at.desc()).all()]
+    return [
+        eintrag_als_dict(e, db)
+        for e in query.order_by(UserE2eeDevice.last_seen_at.desc()).all()
+    ]
 
 
 def _hash(wert: str | None) -> str:
@@ -439,6 +484,19 @@ def entfernen_daten(user_id: int, device_id: str, public_key_jwk: str) -> str:
     Anmeldung unter derselben Kennung wieder entfernen kann.
     """
     return f"msm:device-removal:v1:{user_id}:{device_id}:{_hash(public_key_jwk)}"
+
+
+def pruefe_geraetesignatur(daten: str, signing_jwk_str: str, signatur_b64: str) -> bool:
+    """Prueft eine Geraeteunterschrift — ECDSA P-256 / SHA-256, WebCrypto-Format.
+
+    Der oeffentliche Name fuer die Wege, die nicht selbst ein Geraet
+    freigeben, sondern nur **belegen** wollen, dass der Absender dieses
+    Geraet ist: die gerätebezogene Zustellung. Dort ist die Unterschrift
+    keine Freigabe, sondern ein Besitznachweis.
+    """
+    if not signing_jwk_str or not signatur_b64:
+        return False
+    return _pruefe_signatur(daten, signing_jwk_str, signatur_b64)
 
 
 def _pruefe_signatur(daten: str, signing_jwk_str: str, signatur_b64: str) -> bool:
@@ -636,7 +694,7 @@ def ausstehende_geraete(db: Session, user: User) -> list[dict]:
         .order_by(UserE2eeDevice.created_at.desc())
         .all()
     )
-    return [eintrag_als_dict(e) for e in eintraege]
+    return [eintrag_als_dict(e, db) for e in eintraege]
 
 
 def _sperre_sitzung(db: Session, user: User, familie: str | None) -> None:

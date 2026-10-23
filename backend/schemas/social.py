@@ -583,6 +583,11 @@ class E2eeDeviceUpdate(BaseModel):
     # „ohne gueltige Freigabe" sagte. Ein freigegebenes Geraet ersetzt sie
     # jederzeit durch seine Unterschrift (`e2ee_device_service.bestaetigen`).
     approval_signature: str = Field(default="", max_length=256)
+    # Die opake Zustelladresse dieses Geraets (64 Hex-Zeichen). Sie entsteht
+    # aus einem Geheimnis, das **nur** das Geraet kennt — der Server kann sie
+    # nicht nachrechnen. Leer heisst: dieses Geraet benutzt den alten Weg
+    # (geteilte Mailbox) und kennt die Zustellung mit Quittung nicht.
+    inbox_hash: str = Field(default="", max_length=64)
 
     @field_validator("device_id")
     @classmethod
@@ -620,6 +625,62 @@ class E2eeDeviceItem(BaseModel):
     # selbst (`vertrauteGeraete`), statt `is_approved` zu glauben.
     approved_by: str = ""
     approval_signature: str = ""
+    # Die opake Zustelladresse des Geraets, falls es den neuen Weg kennt.
+    #
+    # Sie wird wie der oeffentliche Schluessel im Verzeichnis ausgegeben: ein
+    # angemeldetes Konto darf sie sehen. Sie allein bringt nichts — zum Abholen
+    # braucht es zusaetzlich die Unterschrift des Geraets.
+    inbox_hash: str = ""
+    # Die Transportfaehigkeit des Geraets. "geraet-v1" heisst: es kennt die
+    # Zustellung mit Quittung. Leer heisst: der alte Weg.
+    transport: str = ""
+
+
+# ==========================================
+# Die gerätebezogene Zustellung
+# ==========================================
+
+
+class E2eeZustellPayload(BaseModel):
+    """Ein Chiffretextobjekt — ohne Ziel, ohne Absender."""
+
+    id: str = Field(..., min_length=36, max_length=36)
+    ciphertext: str = Field(..., min_length=1, max_length=MAX_E2EE_ENVELOPE_CHARS)
+    ciphertext_sha256: str = Field(..., min_length=64, max_length=64)
+
+
+class E2eeZustellEintrag(BaseModel):
+    """Ein Zustellauftrag: ein Chiffretextobjekt fuer eine Zustelladresse."""
+
+    delivery_id: str = Field(..., min_length=36, max_length=36)
+    payload_id: str = Field(..., min_length=36, max_length=36)
+    inbox_hash: str = Field(..., min_length=64, max_length=64)
+
+
+class E2eeZustellCreate(BaseModel):
+    """Ein Stapel Zustellungen fuer eine Gespraechsmailbox.
+
+    `mailbox_id` ist der **Kontext**, nicht das Ziel: er sagt, in welche
+    Mailbox geschrieben wird, und der Server prueft daraus die Berechtigung
+    (dieselbe Pruefung wie beim Relais). Gespeichert wird er nicht — der
+    Zustellbestand fuehrt keinen Kontaktgraph.
+    """
+
+    mailbox_id: str = Field(..., min_length=16, max_length=64)
+    geraet_id: str = Field(..., min_length=8, max_length=64)
+    payloads: list[E2eeZustellPayload] = Field(default_factory=list, max_length=50)
+    eintraege: list[E2eeZustellEintrag] = Field(default_factory=list, max_length=50)
+    # Die Unterschrift des sendenden Geraets ueber den ganzen Stapel.
+    signatur: str = Field(..., min_length=16, max_length=512)
+
+
+class E2eeZustellQuittung(BaseModel):
+    """Die Quittung einer Inbox: genau diese Zustellkennungen."""
+
+    inbox_hash: str = Field(..., min_length=64, max_length=64)
+    geraet_id: str = Field(..., min_length=8, max_length=64)
+    delivery_ids: list[str] = Field(default_factory=list, max_length=100)
+    signatur: str = Field(..., min_length=16, max_length=512)
 
 
 class E2eeDeviceApproveRequest(BaseModel):

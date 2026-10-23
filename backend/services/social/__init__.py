@@ -16,6 +16,7 @@ from .mailbox_zugang import MailboxZugangMixin
 from .praesenz import PraesenzMixin
 from .profile import ProfilMixin
 from .stories import StoriesMixin
+from . import zustellung
 
 __all__ = [
     "DirektchatMixin",
@@ -27,4 +28,5 @@ __all__ = [
     "PraesenzMixin",
     "ProfilMixin",
     "StoriesMixin",
+    "zustellung",
 ]
