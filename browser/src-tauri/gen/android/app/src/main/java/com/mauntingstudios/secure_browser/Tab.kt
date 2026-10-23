@@ -308,6 +308,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     }
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+      TabChrome.verwerfen(id)
       seite = url
       kanal = null
       kanalHerkunft = ""

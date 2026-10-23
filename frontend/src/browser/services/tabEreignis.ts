@@ -48,6 +48,9 @@ export function ereignisAnwenden(e: TabEreignis, z: TabZugriff): void {
       })
       useFormulare.getState().laedt(e.id)
       useUebersetzung.getState().seiteWeg(e.id)
+      // Eine offene Rechte-Frage gehörte zum alten Dokument; Rust hat sie
+      // beim Navigationsstart bereits abgelehnt.
+      useRueckfragen.getState().tabWeg(e.id)
       // Erstes Laden oder Zurück aus einer Fehlerseite: die Webview wieder nach vorn.
       if (!tab.url || tab.fehler) z.zeigen(e.id)
       break

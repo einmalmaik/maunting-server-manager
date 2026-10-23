@@ -8686,6 +8686,7 @@
       "beenden": "Stop voice search",
       "zuhoeren": "Listening …",
       "nichtUnterstuetzt": "Voice search is not supported on this browser.",
+      "keinErkenner": "No speech recognition app found. Set up a voice assistant on this device.",
       "fehler": "Speech recognition failed.",
       "offline": "No internet connection – the speech model cannot be loaded.",
       "keineBerechtigung": "Microphone access denied.",

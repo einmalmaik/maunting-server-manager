@@ -101,6 +101,7 @@ pub(super) unsafe fn einrichten(
                     args.NavigationId(&mut navigation)?;
                     hauptadresse.setzen(navigation, text(|p| args.Uri(p)));
                     schild::seitenwechsel(&app, &id);
+                    super::rueckfragen::rechte_vergessen(&id);
                     crate::tabs::seite_vergessen(&id);
                 }
                 Ok(())

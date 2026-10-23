@@ -18,9 +18,17 @@ vi.mock('@/lib/offlineSync', () => ({
   loadNotesOfflineFirst: () => Promise.resolve({ notes: [], isOffline: false }),
 }))
 vi.mock('@/services/notesCalendarCrypto', () => ({ NOTE_CIPHERTEXT_PREFIX: 'sv-note-v1:', CALENDAR_CIPHERTEXT_PREFIX: 'sv-cal-v1:' }))
+vi.mock('../services/lokalesWhisper', () => ({
+  vorwaermenWhisperModell: vi.fn(),
+  istLokalesWhisperMoeglich: () => false,
+  ladeWhisperModell: vi.fn(),
+  starteAudioAufnahme: vi.fn(),
+  transkribiereAudioMitWhisper: vi.fn(),
+}))
 
 const { Startseite } = await import('./Startseite')
 const { useEinstellungenStore } = await import('../services/einstellungenStore')
+const { vorwaermenWhisperModell } = await import('../services/lokalesWhisper')
 
 const UA = navigator.userAgent
 const alsAndroid = (an: boolean) =>
@@ -35,6 +43,7 @@ beforeEach(() => {
   useEinstellungenStore.setState({ widgetAngeboten: false })
   nativ.lage = 'anheftbar'
   nativ.gerufen.length = 0
+  vi.mocked(vorwaermenWhisperModell).mockClear()
 })
 afterEach(() => alsAndroid(false))
 
@@ -52,6 +61,15 @@ describe('Suche auf der Startseite', () => {
     expect(screen.getByRole('textbox', { name: 'Suchen' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Suchmaschine' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Sprachsuche/i })).toBeInTheDocument()
+  })
+
+  it('lädt am Handy das lokale Whisper-Modell nicht vor', async () => {
+    alsAndroid(true)
+    zeigen()
+    await vi.waitFor(() => expect(vorwaermenWhisperModell).not.toHaveBeenCalled())
+    alsAndroid(false)
+    zeigen()
+    await vi.waitFor(() => expect(vorwaermenWhisperModell).toHaveBeenCalled())
   })
 })
 

@@ -331,6 +331,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun wegraeumen(tab: Tab) {
+    TabChrome.verwerfen(tab.id)
     Rueckfragen.tabWeg(tab.id)
     herunterladen.seiteWeg(tab.id)
     inhalt.removeView(tab.webView)

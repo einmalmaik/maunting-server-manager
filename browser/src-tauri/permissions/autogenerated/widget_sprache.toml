@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-widget-sprache"
+description = "Enables the widget_sprache command without any pre-configured scope."
+commands.allow = ["widget_sprache"]
+
+[[permission]]
+identifier = "deny-widget-sprache"
+description = "Denies the widget_sprache command without any pre-configured scope."
+commands.deny = ["widget_sprache"]

@@ -25,10 +25,25 @@ use crate::tabs::{id_pruefen, weg, ziel_pruefen, Tabs, Weg};
 
 pub const EREIGNIS: &str = "msb:widget";
 
+/// Antwort der System-Spracherkennung für die Oberfläche (`WidgetPlugin.kt`).
+/// `fehler` ist ein stabiler Code, kein Satz für die Anzeige.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SprachEingabe {
+    pub text: Option<String>,
+    pub fehler: Option<String>,
+}
+
 /// `{art: "suche" | "text" | "bild", text?}` oder nichts.
 #[tauri::command(async)]
 pub fn widget_start(app: AppHandle) -> Result<Option<Value>, String> {
     plattform::start(&app)
+}
+
+/// Öffnet unter Android die eingerichtete System-Spracherkennung; auf dem
+/// Desktop gibt es diesen Weg nicht.
+#[tauri::command(async)]
+pub fn widget_sprache(app: AppHandle) -> Result<SprachEingabe, String> {
+    plattform::sprache(&app)
 }
 
 /// Die gewählte Suchmaschine sucht Bilder: das Widget zeigt die Kamera.

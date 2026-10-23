@@ -55,6 +55,11 @@ pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {    Ok(LINK.lock()
     }))
 }
 
+/// Die System-Spracherkennung gibt es nur unter Android.
+pub fn sprache(_: &AppHandle) -> Result<super::SprachEingabe, String> {
+    Err("nur_android".into())
+}
+
 pub fn stand(_: &AppHandle, _: bool) -> Result<(), String> {
     Ok(())
 }

@@ -2,6 +2,7 @@ package com.mauntingstudios.secure_browser
 
 import android.app.Activity
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -41,6 +42,7 @@ class WetterSetzenArgs {
 @TauriPlugin
 class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
   private var oberflaeche: WebView? = null
+  private var spracheLaeuft = false
 
   override fun load(webView: WebView) {
     oberflaeche = webView
@@ -105,6 +107,36 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
   @ActivityCallback
   private fun nachStandard(invoke: Invoke, ergebnis: ActivityResult) {
     invoke.resolve(JSObject().put("standard", istStandard()))
+  }
+
+  /**
+   * Die Mikrofonknöpfe der Oberfläche öffnen dieselbe System-App wie das
+   * Widget. Der Text kommt erst zurück, wenn die App ihn erkannt hat; die
+   * Oberfläche setzt ihn in das Feld ein und sendet ihn nicht selbst ab.
+   */
+  @Command
+  fun sprache(invoke: Invoke) {
+    if (spracheLaeuft) {
+      invoke.resolve(JSObject().put("text", JSONObject.NULL).put("fehler", "laeuft"))
+      return
+    }
+    spracheLaeuft = true
+    try {
+      startActivityForResult(invoke, SprachText.intent(), "nachSprache")
+    } catch (e: ActivityNotFoundException) {
+      spracheLaeuft = false
+      invoke.resolve(JSObject().put("text", JSONObject.NULL).put("fehler", "kein_erkenner"))
+    } catch (e: Exception) {
+      spracheLaeuft = false
+      invoke.reject(e.message ?: e.toString())
+    }
+  }
+
+  @ActivityCallback
+  private fun nachSprache(invoke: Invoke, ergebnis: ActivityResult) {
+    spracheLaeuft = false
+    val text = if (ergebnis.resultCode == Activity.RESULT_OK) SprachText.aus(ergebnis.data) else null
+    invoke.resolve(JSObject().put("text", text ?: JSONObject.NULL).put("fehler", JSONObject.NULL))
   }
 
   /** Die Standard-Apps in den Android-Einstellungen. */

@@ -17,7 +17,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager};
@@ -167,12 +167,30 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
     Ok(u)
 }
 
+/// Die WebView2-Profile eigener Workspaces, für die Rechteverwaltung. Beim
+/// Start sind noch keine Tabs geladen; die Liste füllt sich mit dem ersten
+/// Tab eines Workspace.
+static BENANNTE_PROFILE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// Der Profilname eines Workspace-Tabs; „standard“/„default“ bleiben im
 /// gemeinsamen Profil.
 fn benanntes_profil(workspace: Option<&str>) -> Option<String> {
     let ws = workspace?;
     let saubere_id: String = ws.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
-    (!saubere_id.is_empty() && saubere_id != "standard" && saubere_id != "default").then(|| format!("ws_{saubere_id}"))
+    if saubere_id.is_empty() || saubere_id == "standard" || saubere_id == "default" {
+        return None;
+    }
+    let name = format!("ws_{saubere_id}");
+    if let Ok(mut liste) = BENANNTE_PROFILE.lock() {
+        if !liste.contains(&name) {
+            liste.push(name.clone());
+        }
+    }
+    Some(name)
+}
+
+pub(crate) fn benannte_profile() -> Vec<String> {
+    BENANNTE_PROFILE.lock().map(|liste| liste.clone()).unwrap_or_default()
 }
 
 fn ist_aussen_profil(profil: Option<&str>) -> bool {

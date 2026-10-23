@@ -16,6 +16,8 @@ pub mod erweiterungen;
 pub mod fenster;
 pub mod kachelsymbol;
 pub mod konfig;
+#[cfg(windows)]
+pub mod medien;
 pub mod kurzinfo;
 #[cfg(windows)]
 pub mod mixer;
@@ -121,6 +123,13 @@ pub fn run() {
             }
             browserdaten::beim_start(handle, konfig.vergessen_beim_schliessen);
             browserimport::beim_start(handle);
+            #[cfg(windows)]
+            medien::freigeben(handle);
+            #[cfg(windows)]
+            std::thread::spawn({
+                let app = handle.clone();
+                move || browserdaten::mikrofon_denies_loeschen(&app)
+            });
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
@@ -230,6 +239,7 @@ pub fn run() {
             browserdaten::seitenrechte,
             browserdaten::seitenrecht_zuruecksetzen,
             widget::widget_start,
+            widget::widget_sprache,
             widget::widget_stand,
             widget::widget_lage,
             widget::widget_anheften,

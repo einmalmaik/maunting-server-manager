@@ -80,6 +80,7 @@ const BEFEHLE: &[&str] = &[
     "seitenrechte",
     "seitenrecht_zuruecksetzen",
     "widget_start",
+    "widget_sprache",
     "widget_stand",
     "widget_lage",
     "widget_anheften",

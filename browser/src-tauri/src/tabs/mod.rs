@@ -32,8 +32,8 @@ pub mod weg;
 mod desktop;
 #[cfg(windows)]
 pub(crate) use desktop::{
-    erweiterung_laden, erweiterung_popup, erweiterung_popup_schliessen, erweiterungen_abgleichen, im_profil, mit_profil,
-    profil_helfer_schliessen, recht_art, recht_name,
+    benannte_profile, erweiterung_laden, erweiterung_popup, erweiterung_popup_schliessen, erweiterungen_abgleichen, im_profil,
+    mit_profil, profil_helfer_schliessen, recht_art, recht_name,
 };
 #[cfg(target_os = "android")]
 pub mod android;

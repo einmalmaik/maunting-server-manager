@@ -152,7 +152,7 @@ export interface MenueEintrag {
 export type Antwort =
   | { art: 'menue'; befehl: number | null }
   | { art: 'dialog'; ok: boolean; text: string | null }
-  | { art: 'recht'; erlauben: boolean }
+  | { art: 'recht'; erlauben: boolean | null }
   | { art: 'anmeldung'; benutzer: string | null; passwort: string | null }
 
 export async function tabEreignisse(rueckruf: (e: TabEreignis) => void): Promise<() => void> {
@@ -271,6 +271,8 @@ export const nativ = {
   schutzBestaetigen: () => rufen<SchutzStand>('schutz_bestaetigen'),
   /** Was das Such-Widget oder ein Link aus einer anderen App angestoßen hat, einmal (`widget.rs`). */
   widgetStart: () => rufen<WidgetStart | null>('widget_start'),
+  /** Unter Android die System-Spracherkennung; `kein_erkenner`, wenn keine App da ist. */
+  sprachEingabe: () => rufen<SprachEingabe>('widget_sprache'),
   widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
   widgetLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_lage'),
   /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
@@ -314,6 +316,13 @@ export type WidgetStart =
   | { art: 'bild' }
   /** Ein Link aus einer anderen App (`WidgetPlugin.linkAufnehmen`). */
   | { art: 'link'; url: string; privat?: boolean }
+
+/** Antwort der System-Spracherkennung (`widget_sprache`). */
+export interface SprachEingabe {
+  text: string | null
+  /** `kein_erkenner`, wenn keine Spracherkennungs-App installiert ist. */
+  fehler: string | null
+}
 
 /** Ein neuer Anstoß des Such-Widgets, während der Browser läuft. */
 export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void> {

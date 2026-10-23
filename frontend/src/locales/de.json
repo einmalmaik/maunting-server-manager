@@ -8686,6 +8686,7 @@
       "beenden": "Sprachsuche beenden",
       "zuhoeren": "Ich höre zu …",
       "nichtUnterstuetzt": "Sprachsuche wird auf diesem Browser nicht unterstützt.",
+      "keinErkenner": "Keine Spracherkennungs-App gefunden. Richte eine Sprachassistenz auf dem Gerät ein.",
       "fehler": "Spracheingabe fehlgeschlagen.",
       "offline": "Kein Internet – das Sprachmodell kann nicht geladen werden.",
       "keineBerechtigung": "Mikrofonzugriff verweigert.",

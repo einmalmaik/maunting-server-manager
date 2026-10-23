@@ -11,15 +11,21 @@ import { PasswordInput } from '@/components/ui/PasswordInput'
 
 import { herkunftsName, useFrageDesTabs, useRueckfragen, type Rueckfrage } from '../services/rueckfragen'
 import type { Tab } from '../services/tab'
-import { useAktiverTab } from '../services/tabsStore'
+import { useAktiverTab, useTabsStore } from '../services/tabsStore'
 import { useKlickSperre } from './klickSperre'
 
 /** Längere Texte einer Seite werden gekürzt; ein Dialog ist kein Leseort. */
 const TEXT_MAX = 2000
 
 export function SeitenDialoge({ tab: externerTab }: { tab?: Tab }) {
-  const tab = externerTab ?? useAktiverTab()
-  const frage = useFrageDesTabs(tab?.id)
+  const aktiver = useAktiverTab()
+  const split = useTabsStore((s) => s.split)
+  const tab = externerTab ?? aktiver
+  // Rechte einer Seite dürfen nicht warten, bis zufällig zu ihr gewechselt
+  // wird: In der geteilten Ansicht fragt auch die zweite Hälfte.
+  const frageAktiv = useFrageDesTabs(tab?.id)
+  const frageSekundaer = useFrageDesTabs(externerTab ? undefined : split?.sekundaerId)
+  const frage = frageAktiv ?? frageSekundaer
   if (!frage || frage.art === 'kontextmenue') return null
   // `key`: jede Frage bekommt frische Eingabefelder.
   return <Frage key={frage.nr} frage={frage} />
@@ -36,11 +42,16 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
   const textId = useId()
   const sperre = useKlickSperre()
 
-  // Was nur bestätigt, schließt ohne Eingabe; Escape und Zurück heißen „nein“.
-  const nein = () => {
+  // „Blockieren“ ist eine ausdrückliche Entscheidung und wird gemerkt.
+  const ablehnen = () => {
     if (frage.art === 'dialog') antworten(frage.nr, { art: 'dialog', ok: false, text: null })
     else if (frage.art === 'recht') antworten(frage.nr, { art: 'recht', erlauben: false })
     else antworten(frage.nr, { art: 'anmeldung', benutzer: null, passwort: null })
+  }
+  // Schließen ohne Wahl darf ein Recht nicht dauerhaft blockieren.
+  const abbrechen = () => {
+    if (frage.art === 'recht') antworten(frage.nr, { art: 'recht', erlauben: null })
+    else ablehnen()
   }
   const ja = () => {
     if (frage.art === 'dialog') antworten(frage.nr, { art: 'dialog', ok: true, text: frage.dialog === 'prompt' ? text : null })
@@ -69,7 +80,7 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
   }
 
   return (
-    <Dialog open onOpenChange={(offen) => !offen && nein()}>
+    <Dialog open onOpenChange={(offen) => !offen && abbrechen()}>
       <DialogContent className="max-w-md" aria-labelledby={titelId} aria-describedby={textId}>
         <form
           onClickCapture={sperre}
@@ -96,7 +107,7 @@ function Frage({ frage }: { frage: Exclude<Rueckfrage, { art: 'kontextmenue' }> 
           <DialogFooter>
             {/* Bei Rechten liegt der Fokus auf „Blockieren“: ein Enter, das der Seite galt, erlaubt nichts. */}
             {neinText && (
-              <Button type="button" variant="ghost" onClick={nein} autoFocus={frage.art === 'recht'}>
+              <Button type="button" variant="ghost" onClick={ablehnen} autoFocus={frage.art === 'recht'}>
                 {neinText}
               </Button>
             )}

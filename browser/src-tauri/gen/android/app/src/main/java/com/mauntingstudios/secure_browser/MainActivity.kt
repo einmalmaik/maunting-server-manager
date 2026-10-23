@@ -15,6 +15,8 @@ import android.widget.TextView
 import android.graphics.Color
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebViewFeature
@@ -28,6 +30,44 @@ class MainActivity : TauriActivity() {
    * lib/gestenleiste.ts, Punkt 87).
    */
   @Volatile private var rand = mapOf("oben" to 0f, "links" to 0f, "rechts" to 0f, "unten" to 0f)
+
+  private data class RechteAuftrag(val rechte: Array<String>, val fertig: (Boolean) -> Unit)
+  private val rechteWarteschlange = ArrayDeque<RechteAuftrag>()
+  private var rechteAktuell: RechteAuftrag? = null
+  private val rechteLauncher: ActivityResultLauncher<Array<String>> =
+    registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { ergebnisse ->
+      val auftrag = rechteAktuell
+      rechteAktuell = null
+      auftrag?.fertig?.invoke(RechteRegeln.alleErteilt(ergebnisse))
+      starteNaechstesRecht()
+    }
+
+  /**
+   * Fragt die Android-Systemrechte für eine Seite nacheinander ab. Der
+   * Activity-Result-Launcher gehört dieser Activity; Wry hat seinen eigenen
+   * und einen einzelnen Listener, den wir nicht überschreiben dürfen.
+   */
+  fun seitenrechteErfragen(rechte: Array<String>, fertig: (Boolean) -> Unit) {
+    if (rechte.isEmpty()) {
+      fertig(true)
+      return
+    }
+    rechteWarteschlange.addLast(RechteAuftrag(rechte, fertig))
+    starteNaechstesRecht()
+  }
+
+  private fun starteNaechstesRecht() {
+    if (rechteAktuell != null) return
+    val auftrag = rechteWarteschlange.removeFirstOrNull() ?: return
+    rechteAktuell = auftrag
+    try {
+      rechteLauncher.launch(auftrag.rechte)
+    } catch (e: Exception) {
+      rechteAktuell = null
+      auftrag.fertig(false)
+      starteNaechstesRecht()
+    }
+  }
 
   override fun attachBaseContext(newBase: Context) {
     // Pontis hat nur eine dunkle Oberfläche. Die WebView entscheidet anhand

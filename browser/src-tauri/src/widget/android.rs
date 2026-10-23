@@ -35,6 +35,21 @@ pub fn start(app: &AppHandle) -> Result<Option<Value>, String> {
     rufen::<Start>(app, "startAbholen", json!({})).map(|s| s.start)
 }
 
+/// Die eingerichtete System-Spracherkennung (`WidgetPlugin.sprache`).
+pub fn sprache(app: &AppHandle) -> Result<super::SprachEingabe, String> {
+    #[derive(serde::Deserialize)]
+    struct Antwort {
+        text: Option<String>,
+        fehler: Option<String>,
+    }
+    let antwort: Antwort = rufen(app, "sprache", json!({}))?;
+    let text = antwort
+        .text
+        .map(|t| t.trim().chars().take(2000).collect::<String>())
+        .filter(|t| !t.is_empty());
+    Ok(super::SprachEingabe { text, fehler: antwort.fehler })
+}
+
 /// Ob das Widget die Kamera zeigt.
 pub fn stand(app: &AppHandle, bildsuche: bool) -> Result<(), String> {
     rufen::<Leer>(app, "stand", json!({ "bildsuche": bildsuche })).map(|_| ())

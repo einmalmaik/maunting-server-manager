@@ -56,8 +56,10 @@ export function Startseite({ privat }: { privat: boolean }) {
   const handy = istAndroid()
 
   useEffect(() => {
-    vorwaermenWhisperModell()
-  }, [])
+    // Auf Android öffnet der Mikrofonknopf die System-Spracherkennung; das
+    // lokale Whisper-Modell wird dort weder gebraucht noch geladen.
+    if (!handy) vorwaermenWhisperModell()
+  }, [handy])
 
   // Wie weit gerollt ist, 0 bis 1 über die erste halbe Höhe.
   const gerollt = () => {

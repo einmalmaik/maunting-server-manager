@@ -35,6 +35,14 @@ pub fn loeschen(app: &AppHandle) -> Result<(), String> {
     plattform::leeren(app)
 }
 
+/// Einmalig nach dem Update: frühere Fassungen speicherten ein Schließen des
+/// Rechte-Dialogs als endgültiges Mikrofon-Verbot. Nur diese Denies werden
+/// gelöst, damit die betroffenen Seiten wieder fragen; Allows bleiben.
+#[cfg(windows)]
+pub fn mikrofon_denies_loeschen(app: &AppHandle) {
+    plattform::mikrofon_denies_loeschen(app);
+}
+
 /// Beim Start, bevor eine Webview das Profil öffnet.
 pub fn beim_start(app: &AppHandle, vergessen: bool) {
     if !vergessen {
@@ -169,13 +177,26 @@ mod plattform {
         }
     }
 
+    /// Alle Profile, in denen Seiten Rechte bekommen können: das gemeinsame,
+    /// die Messenger und die eigenen Workspaces. Die Workspace-Namen füllen
+    /// sich, sobald ein Tab darin angelegt wird.
+    fn profile_namen() -> Vec<String> {
+        let mut aus: Vec<String> = crate::tabs::EXTERNE_PROFILE.iter().map(|p| (*p).to_string()).collect();
+        for p in crate::tabs::benannte_profile() {
+            if !aus.contains(&p) {
+                aus.push(p);
+            }
+        }
+        aus
+    }
+
     fn alle_profile(app: &AppHandle, leeren: impl Fn(&AppHandle, Option<&str>) -> Result<(), String>) -> Result<(), String> {
         let mut fehler = Vec::new();
         if let Err(e) = leeren(app, None) {
             fehler.push(e);
         }
-        for p in crate::tabs::EXTERNE_PROFILE {
-            if let Err(e) = leeren(app, Some(p)) {
+        for p in profile_namen() {
+            if let Err(e) = leeren(app, Some(&p)) {
                 fehler.push(e);
             }
         }
@@ -235,8 +256,8 @@ mod plattform {
         if let Ok(mut rechte) = rechte_in(app, None) {
             alle.append(&mut rechte);
         }
-        for p in crate::tabs::EXTERNE_PROFILE {
-            if let Ok(mut rechte) = rechte_in(app, Some(p)) {
+        for p in profile_namen() {
+            if let Ok(mut rechte) = rechte_in(app, Some(&p)) {
                 alle.append(&mut rechte);
             }
         }
@@ -321,10 +342,40 @@ mod plattform {
         if let Err(e) = zuruecksetzen_in(app, None, art, &herkunft) {
             fehler = Some(e);
         }
-        for p in crate::tabs::EXTERNE_PROFILE {
-            let _ = zuruecksetzen_in(app, Some(p), art, &herkunft);
+        for p in profile_namen() {
+            let _ = zuruecksetzen_in(app, Some(&p), art, &herkunft);
         }
         fehler.map_or(Ok(()), Err)
+    }
+
+    /// Einmalig die Mikrofon-Denies früherer Fassungen lösen. Der Marker
+    /// verhindert, dass eine spätere ausdrückliche Ablehnung erneut verschwindet.
+    pub fn mikrofon_denies_loeschen(app: &AppHandle) {
+        use tauri::Manager;
+
+        let Ok(ordner) = app.path().app_local_data_dir() else { return };
+        let marker = ordner.join("mikrofonrechte-2026-10");
+        if marker.exists() {
+            return;
+        }
+        let Some(art) = crate::tabs::recht_art("mikrofon") else { return };
+        let mut profile: Vec<Option<String>> = vec![None];
+        profile.extend(profile_namen().into_iter().map(Some));
+        let mut gelesen = false;
+        for p in profile {
+            let Ok(rechte) = rechte_in(app, p.as_deref()) else { continue };
+            gelesen = true;
+            for recht in rechte {
+                if recht.art == "mikrofon" && !recht.erlaubt {
+                    let herkunft = HSTRING::from(recht.herkunft);
+                    let _ = zuruecksetzen_in(app, p.as_deref(), art, &herkunft);
+                }
+            }
+        }
+        // Ohne gelesenes Profil (noch keine WebView2) beim nächsten Start erneut.
+        if gelesen {
+            let _ = std::fs::write(marker, b"1");
+        }
     }
 }
 
