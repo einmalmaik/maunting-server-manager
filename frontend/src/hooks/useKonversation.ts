@@ -28,12 +28,9 @@ import type { BlindEnvelopeItem } from '@/api/social'
 import {
   deriveBlindMailboxId,
   deriveGroupBlindMailboxId,
-  deriveUserDeviceMailboxId,
-  encryptE2eeHybrid,
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
-import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   dmZiele,
@@ -45,6 +42,11 @@ import { abonniereMailbox } from '@/services/mailboxAbo'
 import { mailboxNachweis } from '@/services/mailboxNachweis'
 import { baueZustellungen, type DrKontext } from '@/services/ratchetSitzung'
 import { verarbeiteGespraech } from '@/services/gespraech/verarbeitung'
+import {
+  baueSteuerVersand,
+  sendeSteuerpaket as sendeSteuerpaketDienst,
+  type SteuerKontext,
+} from '@/services/gespraech/steuerung'
 
 /** Mit wem oder was gesprochen wird. */
 export type GespraechsZiel =
@@ -150,6 +152,14 @@ export interface Konversation {
     clientUuid: string,
     typ: string,
   ) => Promise<Versandauftrag[]>
+  /**
+   * Ein Steuerpaket signieren und abschicken.
+   *
+   * Derselbe Weg wie `baueSteuerversand`, nur vollständig: der Aufrufer
+   * liefert den Inhalt, die Kennung entsteht hier. Der Hintergrundlauf des
+   * Gerätepostfachs nimmt ihn für Zustellquittungen ohne offenen Chat.
+   */
+  sendeSteuerpaket: (payloadObj: Record<string, unknown>) => Promise<string | null>
 }
 
 /**
@@ -474,96 +484,32 @@ export function useKonversation({
     [blindMailboxId, gruppenKontext, drKontext],
   )
 
-  const baueSteuerversand = useCallback(
-    async (payload: string, clientUuid: string, typ: string): Promise<Versandauftrag[]> => {
-      const mid = blindMailboxId
-      if (!mid || !eigeneId) return []
-
-      /**
-       * Dieselbe Wirkung für die **eigenen übrigen Geräte**.
-       *
-       * Sie geht nicht in die Chat-Mailbox: das Relais weist einen Umschlag
-       * an das eigene Konto dort mit 400 ab. Ihr Weg ist die Geräte-Mailbox,
-       * in der schon die Schlüssel liegen, versiegelt gegen jedes einzelne
-       * Gerät. Das sendende Gerät überspringt sich selbst — es hat die Wirkung
-       * bereits lokal angewandt.
-       *
-       * Ohne diesen Schritt blieb „gelesen", „bearbeitet", „gelöscht" und
-       * „reagiert" auf dem Gerät stehen, an dem es passiert ist: das Web zeigte
-       * ein Häkchen, während die App weiter die alte Fassung hatte.
-       */
-      const eigeneAuftraege = async (): Promise<Versandauftrag[]> => {
-        const sendPair = identitaetRef.current.sendPair
-        if (!sendPair) return []
-        const [geraete, meins, geraeteMailbox] = await Promise.all([
-          verlangeGeraeteVon(eigeneId).catch(() => []),
-          eigenesGeraet().catch(() => null),
-          deriveUserDeviceMailboxId(eigeneId),
-        ])
-        const auftraege = await Promise.all(
-          geraete
-            .filter((geraet) => geraet.device_id !== meins?.kennung)
-            .map(async (geraet, i) => ({
-              blind_mailbox_id: geraeteMailbox,
-              ciphertext_envelope: await encryptE2eeHybrid(
-                payload,
-                geraet.public_key,
-                sendPair.publicKeyJwk,
-              ),
-              // Eigene Kennung je Gerät; `#own` hält die Kopie aus dem
-              // Nachrichtenfenster des Empfängers heraus.
-              client_uuid: `${clientUuid}#own${i}`,
-              is_control: true,
-              control_type: typ,
-            })),
-        )
-        return auftraege
-      }
-
-      if (gruppenKontext) {
-        // Quittungen laufen in der Gruppe über denselben Schlüssel wie die
-        // Nachrichten. Anders als beim Ratchet kostet das nichts: ein
-        // Gruppenschlüssel verbraucht sich nicht.
-        const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
-        return [
-          {
-            blind_mailbox_id: mid,
-            ciphertext_envelope: umschlag,
-            client_uuid: clientUuid,
-            is_control: true,
-            control_type: typ,
-          },
-          ...(await eigeneAuftraege()),
-        ]
-      }
-
-      if (!drKontext) return []
-      const sendPair = identitaetRef.current.sendPair
-      if (!sendPair) return []
-
-      // Quittungen bleiben auf dem Hybridumschlag und laufen bewusst **nicht**
-      // durch den Ratchet. Sie sind häufig, sie sind klein, und sie dürfen den
-      // Nachrichtenfaden unter keinen Umständen stören: eine verlorene Quittung
-      // kostet ein Häkchen, eine verbrauchte Kettenposition kostet eine
-      // Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto hat
-      // keinen gemeinsamen privaten Schlüssel mehr.
-      const geraete = await verlangeGeraeteVon(drKontext.peerId)
-      const ziel = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
-      const auftraege = await Promise.all(
-        geraete.map(async (geraet, i) => ({
-          blind_mailbox_id: ziel.senden,
-          ciphertext_envelope: await encryptE2eeHybrid(payload, geraet.public_key, sendPair.publicKeyJwk),
-          // Je Gerät eine eigene Kennung, sonst gibt das Relais beim zweiten
-          // Aufruf still den ersten Umschlag zurück und nur ein Gerät erfährt
-          // von der Quittung.
-          client_uuid: `${clientUuid}#${i}`,
-          is_control: true,
-          control_type: typ,
-        })),
-      )
-      return [...auftraege, ...(await eigeneAuftraege())]
-    },
+  /*
+   * Die Identität wird **beim Aufruf** gelesen, nicht beim Rendern: sie
+   * wechselt mit dem Entsperren, und ein festgehaltenes Objekt schickte nach
+   * dem Sperren weiter mit dem alten Schlüssel.
+   */
+  const steuerKontext = useCallback(
+    (): SteuerKontext => ({
+      eigeneId,
+      mailbox: blindMailboxId,
+      drKontext,
+      gruppenKontext,
+      identitaet: identitaetRef.current,
+    }),
     [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef],
+  )
+
+  const baueSteuerversand = useCallback(
+    (payload: string, clientUuid: string, typ: string): Promise<Versandauftrag[]> =>
+      baueSteuerVersand(steuerKontext(), payload, clientUuid, typ),
+    [steuerKontext],
+  )
+
+  const sendeSteuerpaket = useCallback(
+    (payloadObj: Record<string, unknown>) =>
+      sendeSteuerpaketDienst(steuerKontext(), payloadObj, crypto.randomUUID()),
+    [steuerKontext],
   )
 
   return {
@@ -574,5 +520,6 @@ export function useKonversation({
     uebernimmLesestand,
     baueVersand,
     baueSteuerversand,
+    sendeSteuerpaket,
   }
 }

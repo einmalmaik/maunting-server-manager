@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
 import type { ChatGroupItem } from '@/api/social'
-import { relayE2eeEnvelope } from '@/api/social'
 import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import { useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
@@ -26,7 +25,6 @@ import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesCh
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
 import { verfallsfrist } from '@/services/nachrichtVerfall'
-import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { verarbeitePostfach, type PostfachGespraech } from '@/services/gespraech/postfach'
@@ -325,6 +323,7 @@ export function useMessengerKern({
           eigeneId: currentUserId,
           decryptionKeys: identity.decryptionKeys ?? [],
           gespraeche: liste,
+          identitaet: identity,
           ...postfachRef.current,
         })
       } catch {
@@ -439,21 +438,8 @@ export function useMessengerKern({
 
   const sendE2eeControlMessage = async (payloadObj: Record<string, unknown>) => {
     if (!blindMailboxId || !currentUserId || (!activeContact && !activeGroup)) return
-    const clientUuid = typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : 'ctrl-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9)
-    const payload = JSON.stringify(
-      await signiereNutzlast(blindMailboxId, currentUserId, {
-        actor_id: currentUserId,
-        ...payloadObj,
-        mailbox: blindMailboxId,
-        client_uuid: clientUuid,
-      }),
-    )
-    const auftraege = await konversation.baueSteuerversand(
-      payload, clientUuid, String(payloadObj.type || 'control'),
-    )
-    await Promise.all(auftraege.map((auftrag) => relayE2eeEnvelope(auftrag)))
+    // Ein Weg für Oberfläche und Hintergrund (`services/gespraech/steuerung`).
+    await konversation.sendeSteuerpaket(payloadObj)
   }
 
   // Der Wechsel in ein anderes Gespräch: Anzeige leeren, Zähler setzen, Verlauf zeigen.

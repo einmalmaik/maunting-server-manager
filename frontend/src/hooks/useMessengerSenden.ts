@@ -61,6 +61,7 @@ import {
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
 import { sessionChatCache } from '@/services/klartextSpeicher'
+import { partnerKennungen } from '@/services/quittungsstand'
 import { vergissMailbox } from '@/services/verlaufSuche'
 import { findeErwaehnungen } from '@/services/erwaehnungen'
 import { verfaelltAm as berechneVerfall } from '@/services/nachrichtVerfall'
@@ -781,7 +782,7 @@ export function useMessengerSenden(optionen: Optionen) {
         throw new E2eeRecipientKeyMissingError(targetUserId ?? 0)
       }
 
-      const { niedrigsteId, verbindungsfehler } = await stelleZu(auftraege)
+      const { niedrigsteId, verbindungsfehler, ueberInbox } = await stelleZu(auftraege)
 
       if (verbindungsfehler && niedrigsteId === 0) {
         toast.info(t('messenger.queuedOffline'))
@@ -790,8 +791,18 @@ export function useMessengerSenden(optionen: Optionen) {
       if (niedrigsteId > 0) {
         if (!weitergeleitet) meldeInhaltsErrungenschaften(auftrag, rawText)
         const serverId = niedrigsteId
-        const isRead = maxPartnerReadIdRef.current >= serverId
-        const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= serverId
+        // Ausdrückliche Kennungen gelten vor der Obergrenze — der Partner
+        // nennt seit 23.10.2026 die Nachricht selbst.
+        const bestaetigt = partnerKennungen(targetBlindMailboxId)
+        const perIdRead = bestaetigt.gelesen.has(clientUuid)
+        // Eine Zeile aus dem Gerätepostfach trägt eine Annahmenummer; die
+        // alten Zahlenquittungen gehören zu einem anderen Kennungsraum.
+        const zahlenGelten = !ueberInbox
+        const isRead = perIdRead || (zahlenGelten && maxPartnerReadIdRef.current >= serverId)
+        const isDelivered =
+          isRead ||
+          bestaetigt.zugestellt.has(clientUuid) ||
+          (zahlenGelten && maxPartnerDeliveredIdRef.current >= serverId)
         const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead
           ? 'read'
           : isDelivered
@@ -805,6 +816,9 @@ export function useMessengerSenden(optionen: Optionen) {
                 status,
                 isRead: m.isRead || isRead,
                 isDelivered: m.isDelivered || isDelivered,
+                // Einmal über das Postfach, immer über das Postfach: die
+                // Kennung dieser Zeile bleibt eine Annahmenummer.
+                ...(ueberInbox ? { viaInbox: true } : {}),
               }
             : m
         setMessages((prev) => sortMessagesChronologically(prev.map(nachziehen)))
@@ -821,6 +835,7 @@ export function useMessengerSenden(optionen: Optionen) {
           status,
           isRead,
           isDelivered,
+          ...(ueberInbox ? { viaInbox: true } : {}),
         }).catch(() => {})
       }
 

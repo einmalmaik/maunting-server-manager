@@ -35,6 +35,7 @@ import {
 import { tilgeInhalt, tilgeNachrichtLokal } from '@/services/nachrichtLoeschen'
 import { wendeReaktionenAn } from '@/services/reaktionen'
 import { hakenFuer } from '@/services/auswertung/quittung'
+import { partnerKennungen } from '@/services/quittungsstand'
 import { werteUmschlaegeAus } from '@/services/umschlagAuswertung'
 import { useFunkenStore } from '@/stores/funkenStore'
 
@@ -51,6 +52,9 @@ export interface UebernahmeKontext {
   maxPartnerDeliveredId: number
   quittiertGelesen: (bis: number) => void
   quittiertZugestellt: (bis: number) => void
+  /** Der Partner nennt die Nachrichten selbst — der genaue Weg. */
+  quittiertGelesenIds?: (ids: string[]) => void
+  quittiertZugestelltIds?: (ids: string[]) => void
   markAsRead: (mailbox: string) => void
   setVerfallSekunden: (sekunden: number) => void
   zeigeSystemzeile: (text: string, kennung?: string) => void
@@ -104,6 +108,8 @@ export async function uebernimmLesungen(
     t: kontext.t,
     quittiertGelesen: kontext.quittiertGelesen,
     quittiertZugestellt: kontext.quittiertZugestellt,
+    quittiertGelesenIds: kontext.quittiertGelesenIds,
+    quittiertZugestelltIds: kontext.quittiertZugestelltIds,
     markAsRead: kontext.markAsRead,
     setVerfallSekunden: kontext.setVerfallSekunden,
     zeigeSystemzeile: kontext.zeigeSystemzeile,
@@ -160,6 +166,10 @@ export async function uebernimmLesungen(
     return neue === zeile.reaktionen ? zeile : { ...zeile, reaktionen: neue }
   }
 
+  // Was der Partner ausdrücklich bestätigt hat — einmal gelesen, nicht je
+  // Zeile aus der Ablage geholt.
+  const partner = partnerKennungen(currentMid)
+
   // Geloescht = geloescht. Kein Originaltext wird aufbewahrt (Zero Knowledge).
   const processedList: ChatMessage[] = decryptedList.map((msg) => {
     let text = msg.text
@@ -190,6 +200,8 @@ export async function uebernimmLesungen(
     const { isRead, isDelivered, status } = hakenFuer(msg, {
       maxPartnerReadId,
       maxPartnerDeliveredId,
+      gelesenIds: partner.gelesen,
+      zugestelltIds: partner.zugestellt,
     })
 
     const fertig = {
@@ -257,9 +269,32 @@ export async function uebernimmLesungen(
   // war, blockiert nichts.
   void sichereAnhaenge(processedList, currentMid).catch(() => {})
 
+  /*
+   * Der Häkchenstand der eigenen Zeilen zieht mit.
+   *
+   * Er kommt aus den Partnerquittungen, nicht aus dem Umschlag dieses Laufs:
+   * eine Zustellquittung ist ein eigenes Steuerpaket und steht in einer
+   * anderen Zeile. Bis 23.10.2026 rechnete nur die Anzeige darüber
+   * (`anzeigeVerlauf`); gespeichert blieb der Stand vom Senden. Nach einem
+   * Neustart war das Häkchen dann weg, bis der nächste Lauf es neu ergab.
+   */
+  const lokalerVerlaufMitHaken = lokalerVerlauf.map((m) =>
+    m.isSelf
+      ? {
+          ...m,
+          ...hakenFuer(m, {
+            maxPartnerReadId,
+            maxPartnerDeliveredId,
+            gelesenIds: partner.gelesen,
+            zugestelltIds: partner.zugestellt,
+          }),
+        }
+      : m,
+  )
+
   // **Immer** zusammenfuehren, auch bei leerem lokalem Verlauf: nur so greifen
   // die Zusammenfuehrungsregeln und die Sortierung ist dieselbe.
-  const combined = mischeVerlauf(lokalerVerlauf, processedList, verlaufsArt) as ChatMessage[]
+  const combined = mischeVerlauf(lokalerVerlaufMitHaken, processedList, verlaufsArt) as ChatMessage[]
   sessionChatCache.set(currentMid, combined.slice(-80))
   await saveLocalMessages(currentMid, combined.slice(-200), verlaufsArt)
 
@@ -268,7 +303,7 @@ export async function uebernimmLesungen(
   // idempotent noch einmal an.
   await vergissEigeneWirkungen(currentMid).catch(() => {})
 
-  return { processedList, lokalerVerlauf, combined, verlaufsArt, mailbox: currentMid, maxIncomingId, unlesbar }
+  return { processedList, lokalerVerlauf: lokalerVerlaufMitHaken, combined, verlaufsArt, mailbox: currentMid, maxIncomingId, unlesbar }
 }
 
 /**
@@ -289,11 +324,17 @@ export function anzeigeVerlauf(
   for (const m of uebernahme.processedList) {
     if (m.clientUuid) processedClientUuids.add(m.clientUuid)
   }
+  const partner = partnerKennungen(uebernahme.mailbox)
   const pendingOptimistic = bisher
     .filter((m) => m.isSelf && m.clientUuid && !processedClientUuids.has(m.clientUuid))
     .map((m) => ({
       ...m,
-      ...hakenFuer(m, { maxPartnerReadId, maxPartnerDeliveredId }),
+      ...hakenFuer(m, {
+        maxPartnerReadId,
+        maxPartnerDeliveredId,
+        gelesenIds: partner.gelesen,
+        zugestelltIds: partner.zugestellt,
+      }),
     }))
   const systemzeilen = bisher.filter((m) => m.isSystem)
   const frisch = [...uebernahme.processedList, ...pendingOptimistic, ...systemzeilen]

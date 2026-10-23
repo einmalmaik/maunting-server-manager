@@ -357,6 +357,49 @@ describe('Steuerpakete', () => {
     expect(ergebnis.decryptedList).toEqual([])
   })
 
+  it('nimmt ausdrückliche Kennungen und lässt die Obergrenze dabei liegen', async () => {
+    const idsGelesen = vi.fn()
+    const idsZugestellt = vi.fn()
+    const k = kontext({ quittiertGelesenIds: idsGelesen, quittiertZugestelltIds: idsZugestellt })
+    const ergebnis = await werteUmschlaegeAus(
+      [
+        klartext({
+          type: 'read_receipt',
+          reader_id: BERT,
+          read_up_to_id: 900,
+          read_ids: ['u-a', 'u-b'],
+        }),
+        klartext({
+          type: 'delivery_receipt',
+          receiver_id: BERT,
+          delivered_up_to_id: 900,
+          delivered_ids: ['u-a'],
+        }),
+      ],
+      k,
+    )
+    expect(idsGelesen).toHaveBeenCalledWith(['u-a', 'u-b'])
+    // Wer gelesen hat, hat auch empfangen.
+    expect(idsZugestellt).toHaveBeenCalledWith(['u-a', 'u-b'])
+    expect(idsZugestellt).toHaveBeenCalledWith(['u-a'])
+    // Die Zahl daneben gilt hier nicht mehr — sonst wären alle Zeilen bis 900
+    // „gelesen", obwohl nur zwei benannt sind.
+    expect(k.quittiertGelesen).not.toHaveBeenCalled()
+    expect(k.quittiertZugestellt).not.toHaveBeenCalled()
+    expect(ergebnis).toMatchObject({ maxPartnerReadId: 0, maxPartnerDeliveredId: 0 })
+  })
+
+  it('versteht weiter die Obergrenze einer älteren Quittung', async () => {
+    const idsGelesen = vi.fn()
+    const k = kontext({ quittiertGelesenIds: idsGelesen })
+    await werteUmschlaegeAus(
+      [klartext({ type: 'read_receipt', reader_id: BERT, read_up_to_id: 7 })],
+      k,
+    )
+    expect(idsGelesen).not.toHaveBeenCalled()
+    expect(k.quittiertGelesen).toHaveBeenCalledWith(7)
+  })
+
   it('meldet eine Quittung sofort und nicht erst am Ende des Durchlaufs', async () => {
     const k = kontext()
     let gemeldetVorDemZweiten = -1

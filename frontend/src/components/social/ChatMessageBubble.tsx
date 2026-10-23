@@ -151,6 +151,16 @@ export interface ChatMessage {
    * anders als eine Uhr, die nie stehen bleibt, sagt sie die Wahrheit.
    */
   status?: 'queued' | 'failed' | 'sent' | 'delivered' | 'read'
+  /**
+   * Über das Gerätepostfach zugestellt — die Kennung ist dann eine
+   * Annahmenummer, keine Umschlagkennung.
+   *
+   * Beide Folgen zählen unabhängig voneinander. Eine alte Quittung über
+   * Umschlagkennungen darf eine solche Zeile deshalb nicht als gelesen
+   * markieren, obwohl ihre Zahl größer ist (am 23.10.2026 in der
+   * Laufzeitprobe: 748 aus der alten Mailbox gegen Annahmenummer 2).
+   */
+  viaInbox?: boolean
 
   /** Zeichen → wer damit reagiert hat. Siehe `services/reaktionen.ts`. */
   reaktionen?: Reaktionen

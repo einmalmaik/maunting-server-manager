@@ -259,13 +259,13 @@ describe('stelleZu', () => {
     const ids: Record<string, number> = { 'u#iA': 1, 'u#A': 12, 'u#B': 10 }
     relais.mockImplementation(async (a) => ({ id: ids[a.client_uuid as string] }) as never)
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), nachricht('B')])
-    expect(ergebnis).toEqual({ niedrigsteId: 10, verbindungsfehler: false })
+    expect(ergebnis).toEqual({ niedrigsteId: 10, verbindungsfehler: false, ueberInbox: false })
     expect(einreihen).not.toHaveBeenCalled()
   })
 
   it('zählt eine Antwort ohne Kennung nicht mit', async () => {
     relais.mockResolvedValue({} as never)
-    expect(await stelleZu([nachricht('A')])).toEqual({ niedrigsteId: 0, verbindungsfehler: false })
+    expect(await stelleZu([nachricht('A')])).toEqual({ niedrigsteId: 0, verbindungsfehler: false, ueberInbox: false })
   })
 
   it('schickt die Nachricht nicht ohne ihren Sitzungsaufbau, sondern reiht beide ein', async () => {
@@ -278,7 +278,7 @@ describe('stelleZu', () => {
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), aufbau('B'), nachricht('B')])
     expect(gesendet()).toEqual(['u#iA', 'u#iB', 'u#B'])
     expect(eingereiht()).toEqual(['u#iA', 'u#A'])
-    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: true })
+    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: true, ueberInbox: false })
   })
 
   it('hält die Nachricht auch zurück, wenn ihr Aufbau keine Gerätemarke trägt', async () => {
@@ -312,7 +312,7 @@ describe('stelleZu', () => {
     relais.mockRejectedValue(new Error('offline'))
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), aufbau('B'), nachricht('B')])
     expect(eingereiht()).toEqual(['u#iA', 'u#A', 'u#iB', 'u#B'])
-    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true })
+    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true, ueberInbox: false })
   })
 
   it('lässt einen Steuerumschlag nach einem gescheiterten Aufbau durch', async () => {
@@ -363,7 +363,7 @@ describe('stelleZu über das Gerätepostfach', () => {
       'i' + 'b'.repeat(63),
     ])
     // Die kleinste Annahmenummer gilt als Kennung der Nachricht.
-    expect(ergebnis).toEqual({ niedrigsteId: 40, verbindungsfehler: false })
+    expect(ergebnis).toEqual({ niedrigsteId: 40, verbindungsfehler: false, ueberInbox: true })
   })
 
   it('laesst die Nummer eines Sitzungsaufbaus nicht als Nachrichtenkennung gelten', async () => {
@@ -394,7 +394,7 @@ describe('stelleZu über das Gerätepostfach', () => {
     const ergebnis = await stelleZu([auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) })])
 
     expect(relais).toHaveBeenCalledTimes(1)
-    expect(ergebnis).toEqual({ niedrigsteId: 7, verbindungsfehler: false })
+    expect(ergebnis).toEqual({ niedrigsteId: 7, verbindungsfehler: false, ueberInbox: false })
   })
 
   it('faellt ganz auf den alten Weg zurueck, wenn der neue nicht antwortet', async () => {

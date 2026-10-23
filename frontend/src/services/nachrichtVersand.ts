@@ -301,7 +301,7 @@ export function baueNutzlast(angaben: Nutzlastangaben): Record<string, unknown> 
  */
 export async function stelleZu(
   auftraege: Versandauftrag[],
-): Promise<{ niedrigsteId: number; verbindungsfehler: boolean }> {
+): Promise<{ niedrigsteId: number; verbindungsfehler: boolean; ueberInbox: boolean }> {
   /**
    * Die niedrigste Umschlagkennung der Auffächerung gilt als Kennung dieser
    * Nachricht. Quittungen der Gegenstelle nennen die Kennung der Kopie, die
@@ -310,6 +310,8 @@ export async function stelleZu(
    */
   let niedrigsteId = 0
   let verbindungsfehler = false
+  /** Woher die Kennung der Zeile stammt — die beiden Folgen sind getrennt. */
+  let idQuelle: 'inbox' | 'mailbox' | '' = ''
 
   /*
    * Der neue Weg zuerst: je Zielgeraet eine eigene Inbox.
@@ -357,7 +359,10 @@ export async function stelleZu(
         // Die Annahmenummer ist global; die kleinste der Auffaecherung gilt
         // als Kennung dieser Nachricht — genau wie beim alten Weg.
         if (!auftrag || auftrag.is_control || !(an.seq > 0)) continue
-        if (niedrigsteId === 0 || an.seq < niedrigsteId) niedrigsteId = an.seq
+        if (niedrigsteId === 0 || an.seq < niedrigsteId) {
+          niedrigsteId = an.seq
+          idQuelle = 'inbox'
+        }
       }
       for (const ab of antwort.abgelehnt) {
         const auftrag = jeKennung.get(ab.delivery_id)
@@ -394,7 +399,10 @@ export async function stelleZu(
     try {
       const r = await relayE2eeEnvelope(auftrag)
       if (!auftrag.is_control && r && typeof r.id === 'number') {
-        if (niedrigsteId === 0 || r.id < niedrigsteId) niedrigsteId = r.id
+        if (niedrigsteId === 0 || r.id < niedrigsteId) {
+          niedrigsteId = r.id
+          idQuelle = 'mailbox'
+        }
       }
     } catch {
       if (geraetKey) {
@@ -408,5 +416,5 @@ export async function stelleZu(
     }
   }
 
-  return { niedrigsteId, verbindungsfehler }
+  return { niedrigsteId, verbindungsfehler, ueberInbox: idQuelle === 'inbox' }
 }

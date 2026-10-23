@@ -10,7 +10,16 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { merkePartnerQuittung, merkeQuittung, partnerstand, quittungsstand } from './quittungsstand'
+import {
+  merkePartnerKennungen,
+  merkePartnerQuittung,
+  merkeQuittung,
+  merkeQuittungKennungen,
+  partnerKennungen,
+  partnerstand,
+  quittungsKennungen,
+  quittungsstand,
+} from './quittungsstand'
 
 const MID = 'mb-1'
 const ANDERE = 'mb-2'
@@ -124,5 +133,74 @@ describe('Quittungsstand', () => {
     const schluessel = Object.keys(localStorage)
     expect(schluessel).toContain('msm:chat_quittungsstand')
     expect(schluessel.some((k) => k.startsWith('msm_chat_'))).toBe(false)
+  })
+})
+
+describe('Ausdrückliche Kennungen der eigenen Quittungen', () => {
+  it('merkt, was dieses Gerät schon quittiert hat', () => {
+    merkeQuittungKennungen(MID, 'zugestellt', ['u-a', 'u-b'])
+    merkeQuittungKennungen(MID, 'gelesen', ['u-b'])
+    expect(quittungsKennungen(MID, 'zugestellt')).toEqual(['u-a', 'u-b'])
+    expect(quittungsKennungen(MID, 'gelesen')).toEqual(['u-b'])
+  })
+
+  it('behält sie, wenn der Zahlenstand fortgeschrieben wird', () => {
+    merkeQuittungKennungen(MID, 'zugestellt', ['u-a'])
+    merkeQuittung(MID, 'zugestellt', 42)
+    expect(quittungsKennungen(MID, 'zugestellt')).toEqual(['u-a'])
+    expect(quittungsstand(MID).zugestellt).toBe(42)
+  })
+
+  it('übernimmt keine doppelten oder unbrauchbaren Werte', () => {
+    merkeQuittungKennungen(MID, 'zugestellt', ['u-a', 'u-a', '', 'mit leerzeichen'])
+    expect(quittungsKennungen(MID, 'zugestellt')).toEqual(['u-a'])
+  })
+})
+
+describe('Ausdrückliche Kennungen der Gegenseite', () => {
+  it('merkt sich die genannten Nachrichten und trennt die Arten', () => {
+    merkePartnerKennungen(MID, 'zugestellt', ['u-a', 'u-b'])
+    merkePartnerKennungen(MID, 'gelesen', ['u-b'])
+    expect([...partnerKennungen(MID).zugestellt]).toEqual(['u-a', 'u-b'])
+    expect([...partnerKennungen(MID).gelesen]).toEqual(['u-b'])
+  })
+
+  it('behält die Kennungen, wenn ein Zahlenstand dazukommt', () => {
+    // Der Zahlenstand wird bei jeder alten Quittung fortgeschrieben. Würde er
+    // den Eintrag neu bauen, fielen die ausdrücklichen Kennungen still weg —
+    // und die Häkchen zurück auf „gesendet".
+    merkePartnerKennungen(MID, 'gelesen', ['u-a'])
+    merkePartnerQuittung(MID, 'gelesen', 358)
+    expect([...partnerKennungen(MID).gelesen]).toEqual(['u-a'])
+    expect(partnerstand(MID).gelesen).toBe(358)
+  })
+
+  it('übernimmt keine doppelten oder unbrauchbaren Werte', () => {
+    merkePartnerKennungen(MID, 'zugestellt', [
+      'u-a',
+      'u-a',
+      '',
+      'mit leerzeichen',
+      'x'.repeat(200),
+      42 as unknown as string,
+    ])
+    expect([...partnerKennungen(MID).zugestellt]).toEqual(['u-a'])
+  })
+
+  it('hält höchstens fünfhundert Kennungen und vergisst die ältesten', () => {
+    const ids = Array.from({ length: 600 }, (_, i) => `u-${String(i).padStart(4, '0')}`)
+    merkePartnerKennungen(MID, 'gelesen', ids)
+    const gemerkt = [...partnerKennungen(MID).gelesen]
+    expect(gemerkt).toHaveLength(500)
+    expect(gemerkt[0]).toBe('u-0100')
+    expect(gemerkt[499]).toBe('u-0599')
+  })
+
+  it('bleibt bei kaputtem Inhalt und leerer Kennung ruhig', () => {
+    localStorage.setItem('msm:chat_partnerstand', '{"mb-1":{"gelesenIds":"keine liste"}}')
+    expect(partnerKennungen(MID).gelesen.size).toBe(0)
+    merkePartnerKennungen('', 'gelesen', ['u-a'])
+    merkePartnerKennungen(MID, 'gelesen', [])
+    expect(partnerKennungen('').gelesen.size).toBe(0)
   })
 })

@@ -70,6 +70,65 @@ describe('hakenFuer', () => {
     })
   })
 
+  it('nimmt eine ausdrückliche Kennung ohne jede Zahlenobergrenze', () => {
+    // Seit 23.10.2026 nennt eine Quittung die Nachricht selbst. Die Zahl
+    // daneben zählte auch Kopien für andere Geräte mit; hier ist sie 0.
+    expect(
+      hakenFuer(
+        { id: 358, isSelf: true, clientUuid: 'u-358' },
+        { maxPartnerReadId: 0, maxPartnerDeliveredId: 0, gelesenIds: new Set(['u-358']) },
+      ),
+    ).toEqual({ isRead: true, isDelivered: true, status: 'read' })
+
+    expect(
+      hakenFuer(
+        { id: 359, isSelf: true, clientUuid: 'u-359' },
+        { maxPartnerReadId: 0, maxPartnerDeliveredId: 0, zugestelltIds: new Set(['u-359']) },
+      ),
+    ).toEqual({ isRead: false, isDelivered: true, status: 'delivered' })
+  })
+
+  it('gibt einer Nachricht nichts, die nicht ausdrücklich genannt ist', () => {
+    // Der Kern der Umstellung: eine hohe Zahl aus einer Quittung über andere
+    // Umschläge darf diese Zeile nicht mitreißen.
+    expect(
+      hakenFuer(
+        { id: 400, isSelf: true, clientUuid: 'u-400' },
+        { maxPartnerReadId: 0, maxPartnerDeliveredId: 0, gelesenIds: new Set(['u-399']) },
+      ),
+    ).toEqual({ isRead: false, isDelivered: false, status: 'sent' })
+  })
+
+  it('trifft eine Zeile ohne Kennung nicht über die Liste', () => {
+    expect(
+      hakenFuer(
+        { id: 400, isSelf: true },
+        { maxPartnerReadId: 0, maxPartnerDeliveredId: 0, gelesenIds: new Set(['']) },
+      ),
+    ).toEqual({ isRead: false, isDelivered: false, status: 'sent' })
+  })
+
+  it('wendet eine alte Zahlenquittung nicht auf eine Postfach-Zeile an', () => {
+    // Am 23.10.2026 in der Laufzeitprobe: eine Lesequittung über Umschlag 748
+    // aus der alten Mailbox markierte die neue Nachricht mit Annahmenummer 2
+    // als gelesen, obwohl sie niemand geöffnet hatte. Die beiden Folgen sind
+    // nicht vergleichbar; für Postfach-Zeilen gilt nur die ausdrückliche
+    // Kennung.
+    expect(
+      hakenFuer(
+        { id: 2, isSelf: true, viaInbox: true, clientUuid: 'u-2' },
+        { maxPartnerReadId: 748, maxPartnerDeliveredId: 748 },
+      ),
+    ).toEqual({ isRead: false, isDelivered: false, status: 'sent' })
+
+    expect(
+      hakenFuer(
+        { id: 2, isSelf: true, viaInbox: true, clientUuid: 'u-2' },
+        { maxPartnerReadId: 748, maxPartnerDeliveredId: 748, gelesenIds: new Set(['u-2']) },
+      ),
+    ).toEqual({ isRead: true, isDelivered: true, status: 'read' })
+  })
+
   it('rührt fremde Nachrichten nicht an', () => {
     // Quittungen gelten für die eigenen Zeilen; was der Partner geschrieben
     // hat, bekommt kein Häkchen.

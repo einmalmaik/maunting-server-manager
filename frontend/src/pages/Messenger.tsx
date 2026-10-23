@@ -116,7 +116,7 @@ import {
   tilgeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
-import { quittungsstand } from '@/services/quittungsstand'
+import { partnerKennungen, quittungsstand } from '@/services/quittungsstand'
 import {
   binIchGemeint,
   offeneErwaehnung,
@@ -1370,12 +1370,17 @@ function MessengerSeite() {
       const client_uuid = logischeUuid(detail.client_uuid) ?? detail.client_uuid
 
       if (confirmedMid === blindMailboxId) {
+        const bestaetigt = partnerKennungen(confirmedMid)
         setMessages((prev) =>
           sortMessagesChronologically(
             prev.map((m) => {
               if (m.clientUuid === client_uuid) {
-                const isRead = maxPartnerReadIdRef.current >= envelope_id
-                const isDelivered = isRead || maxPartnerDeliveredIdRef.current >= envelope_id
+                const perIdRead = bestaetigt.gelesen.has(client_uuid)
+                const isRead = perIdRead || maxPartnerReadIdRef.current >= envelope_id
+                const isDelivered =
+                  isRead ||
+                  bestaetigt.zugestellt.has(client_uuid) ||
+                  maxPartnerDeliveredIdRef.current >= envelope_id
                 const status: 'queued' | 'sent' | 'delivered' | 'read' = isRead ? 'read' : isDelivered ? 'delivered' : 'sent'
                 return {
                   ...m,

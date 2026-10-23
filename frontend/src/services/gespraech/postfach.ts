@@ -28,11 +28,19 @@
 
 import type { BlindEnvelopeItem, ChatGroupItem } from '@/api/social'
 import { decryptE2eeHybridWithKeyring } from '@/services/e2eeCrypto'
+import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import { eigeneInboxAdresse, holeZustellungen, quittiereZustellungen } from '@/services/e2eeZustellung'
+import { sendeSteuerpaket } from '@/services/gespraech/steuerung'
 import { ablage } from '@/services/gruppen/gruppenAblage'
 import { GRUPPE_PREFIX, type GruppenKontext } from '@/services/gruppenSchluessel'
 import { lieseGruppenKopf } from '@/services/gruppen/typen'
-import { merkePartnerQuittung, partnerstand } from '@/services/quittungsstand'
+import {
+  merkePartnerKennungen,
+  merkePartnerQuittung,
+  merkeQuittungKennungen,
+  partnerstand,
+  quittungsKennungen,
+} from '@/services/quittungsstand'
 import { DR_PREFIX, drUrheber, type DrKontext } from '@/services/ratchetSitzung'
 
 import { verarbeiteGespraech } from './verarbeitung'
@@ -56,6 +64,8 @@ export interface PostfachLauf {
   t: (schluessel: string, werte?: Record<string, unknown>) => string
   markAsRead: (mailbox: string) => void
   setVerfallSekunden: (sekunden: number) => void
+  /** Fuer die Zustellquittung an den Absender; ohne sie bleibt sie aus. */
+  identitaet?: E2eeIdentity | null
 }
 
 /** Hoechstens so viele Eintraege holt ein Lauf (die Grenze des Servers). */
@@ -197,6 +207,8 @@ export async function verarbeitePostfach(
         maxPartnerDeliveredId: stand.zugestellt,
         quittiertGelesen: (bis) => merkePartnerQuittung(gespraech.mailbox, 'gelesen', bis),
         quittiertZugestellt: (bis) => merkePartnerQuittung(gespraech.mailbox, 'zugestellt', bis),
+        quittiertGelesenIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'gelesen', ids),
+        quittiertZugestelltIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'zugestellt', ids),
         markAsRead: lauf.markAsRead,
         setVerfallSekunden: lauf.setVerfallSekunden,
         // Eine Systemzeile im Verlauf braucht die Oberflaeche; im Hintergrund
@@ -207,6 +219,57 @@ export async function verarbeitePostfach(
     )
     if (!uebernahme) continue
     verarbeitet += uebernahme.processedList.length
+
+    /*
+     * Die Zustellquittung an den Absender — auch ohne offenen Chat.
+     *
+     * Bis 23.10.2026 entstand sie nur im offenen Gespraech. Eine Nachricht,
+     * die im Hintergrund ankam, blieb beim Absender auf „gesendet", bis jemand
+     * den Chat öffnete — obwohl sie längst entschlüsselt und gespeichert war.
+     * Genau das ist die Zusage „zugestellt": ein vertrauenswürdiges Gerät der
+     * Gegenstelle hat sie lokal abgelegt.
+     *
+     * Gelesen ist sie damit nicht. Eine Lesequittung gibt es erst, wenn die
+     * Nachricht wirklich auf einem Schirm stand.
+     */
+    if (!gespraech.group && gespraech.drKontext && lauf.identitaet) {
+      /*
+       * Nur wirklich **neue** Zeilen. Blieb das Transport-ACK liegen, kommt
+       * derselbe Auftrag beim nächsten Lauf wieder — und mit ihm dieselbe
+       * Nachricht. Ohne diesen Vergleich ginge alle zehn Sekunden eine
+       * Zustellquittung hinaus, bis der Auftrag verfällt.
+       */
+      const bekannt = new Set(
+        uebernahme.lokalerVerlauf
+          .map((m) => m.clientUuid)
+          .filter((id): id is string => Boolean(id)),
+      )
+      const neue = uebernahme.processedList
+        .filter((m) => !m.isSelf && Boolean(m.clientUuid) && !bekannt.has(m.clientUuid as string))
+        .map((m) => m.clientUuid as string)
+      if (neue.length > 0) {
+        const ids = Array.from(
+          new Set([...quittungsKennungen(gespraech.mailbox, 'zugestellt'), ...neue]),
+        ).slice(-100)
+        merkeQuittungKennungen(gespraech.mailbox, 'zugestellt', ids)
+        await sendeSteuerpaket(
+          {
+            eigeneId: lauf.eigeneId,
+            mailbox: gespraech.mailbox,
+            drKontext: gespraech.drKontext,
+            gruppenKontext: null,
+            identitaet: lauf.identitaet,
+          },
+          {
+            type: 'delivery_receipt',
+            delivered_ids: ids,
+            receiver_id: lauf.eigeneId,
+            timestamp: new Date().toISOString(),
+          },
+          crypto.randomUUID(),
+        ).catch(() => null)
+      }
+    }
 
     // **Nach dem Commit.** Was hier quittiert wird, ist entschluesselt und
     // gespeichert; ein Fehler beim Quittieren kostet nur eine Wiederholung.

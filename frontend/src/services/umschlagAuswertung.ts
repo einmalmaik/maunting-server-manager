@@ -48,10 +48,14 @@ export interface Auswertungskontext {
   /** Was ein Konto in der offenen Gruppe darf; aus `wirksameGruppenrechte`. */
   gruppenrechteVon: (konto: number) => Set<string>
   t: (schluessel: string, werte?: Record<string, unknown>) => string
-  /** Die Gegenseite hat bis zu dieser Umschlagkennung gelesen. */
+  /** Die Gegenseite hat bis zu dieser Umschlagkennung gelesen (Altweg). */
   quittiertGelesen: (bis: number) => void
-  /** Die Gegenseite hat bis zu dieser Umschlagkennung empfangen. */
+  /** Die Gegenseite hat bis zu dieser Umschlagkennung empfangen (Altweg). */
   quittiertZugestellt: (bis: number) => void
+  /** Die Gegenseite hat genau diese logischen Nachrichten gelesen. */
+  quittiertGelesenIds?: (ids: string[]) => void
+  /** Die Gegenseite hat genau diese logischen Nachrichten empfangen. */
+  quittiertZugestelltIds?: (ids: string[]) => void
   /** Ein eigenes anderes Gerät hat diese Mailbox gelesen. */
   markAsRead: (mailbox: string) => void
   setVerfallSekunden: (sekunden: number) => void
@@ -89,6 +93,8 @@ export async function werteUmschlaegeAus(
     t,
     quittiertGelesen,
     quittiertZugestellt,
+    quittiertGelesenIds,
+    quittiertZugestelltIds,
     markAsRead,
     setVerfallSekunden,
     zeigeSystemzeile,
@@ -256,6 +262,8 @@ export async function werteUmschlaegeAus(
             quittiertGelesen,
             quittiertZugestellt,
             markAsRead,
+            quittiertGelesenIds,
+            quittiertZugestelltIds,
           )
         ) {
           continue

@@ -20,11 +20,13 @@ const zustellung = vi.hoisted(() => ({
 }))
 const verarbeitung = vi.hoisted(() => ({ verarbeiteGespraech: vi.fn() }))
 const uebernahme = vi.hoisted(() => ({ uebernimmLesungen: vi.fn() }))
+const steuerung = vi.hoisted(() => ({ sendeSteuerpaket: vi.fn() }))
 const reihenfolge: string[] = []
 
 vi.mock('@/services/e2eeZustellung', () => zustellung)
 vi.mock('./verarbeitung', () => verarbeitung)
 vi.mock('./uebernahme', () => uebernahme)
+vi.mock('./steuerung', () => steuerung)
 vi.mock('@/services/e2eeCrypto', () => ({
   decryptE2eeHybridWithKeyring: vi.fn(async (umschlag: string) => umschlag),
 }))
@@ -48,6 +50,9 @@ vi.mock('@/services/gruppen/gruppenAblage', () => ({
 vi.mock('@/services/quittungsstand', () => ({
   partnerstand: () => ({ gelesen: 0, zugestellt: 0 }),
   merkePartnerQuittung: vi.fn(),
+  merkePartnerKennungen: vi.fn(),
+  merkeQuittungKennungen: vi.fn(),
+  quittungsKennungen: () => [],
 }))
 
 import { verarbeitePostfach, type PostfachGespraech } from './postfach'
@@ -148,6 +153,91 @@ describe('verarbeitePostfach', () => {
       (c) => (c[0] as { mailbox: string }).mailbox,
     )
     expect(mailboxen.sort()).toEqual(['m-dm', 'm-gruppe'])
+  })
+
+  it('schickt die Zustellquittung an den Absender, vor dem Transport-ACK', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
+      naechste_seq: 1,
+    })
+    uebernahme.uebernimmLesungen.mockImplementation(async () => {
+      reihenfolge.push('commit')
+      return {
+        processedList: [
+          { id: -1, clientUuid: 'u-neu', isSelf: false },
+          { id: -2, clientUuid: 'u-eigen', isSelf: true },
+          { id: -3, clientUuid: '', isSelf: false },
+        ],
+        lokalerVerlauf: [],
+        combined: [],
+        verlaufsArt: 'direkt',
+        mailbox: 'm-dm',
+        maxIncomingId: 1,
+        unlesbar: 0,
+      }
+    })
+    steuerung.sendeSteuerpaket.mockImplementation(
+      async (_kontext: unknown, payload: { delivered_ids?: string[] }) => {
+        reihenfolge.push(`an-sender:${(payload.delivered_ids ?? []).join(',')}`)
+        return 'ctrl-1'
+      },
+    )
+
+    await verarbeitePostfach({ ...lauf, identitaet: { state: 'ready' } as never })
+
+    expect(steuerung.sendeSteuerpaket).toHaveBeenCalledTimes(1)
+    const [kontext, payload] = steuerung.sendeSteuerpaket.mock.calls[0]
+    expect((kontext as { mailbox: string }).mailbox).toBe('m-dm')
+    expect(payload).toMatchObject({
+      type: 'delivery_receipt',
+      delivered_ids: ['u-neu'],
+      receiver_id: 1,
+    })
+    // Der Absender erfaehrt „zugestellt", der Auftrag ist danach weg.
+    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'an-sender:u-neu', 'quittung:d-1'])
+  })
+
+  it('quittiert nicht alle zehn Sekunden erneut, wenn das ACK liegen bleibt', async () => {
+    // Derselbe Auftrag kommt wieder, die Nachricht liegt aber schon im
+    // Verlauf. Eine erneute Zustellquittung waere Laerm im Hundert-Fenster.
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
+      naechste_seq: 1,
+    })
+    uebernahme.uebernimmLesungen.mockResolvedValue({
+      processedList: [{ id: -1, clientUuid: 'u-schon-da', isSelf: false }],
+      lokalerVerlauf: [{ id: -1, clientUuid: 'u-schon-da', isSelf: false }],
+      combined: [],
+      verlaufsArt: 'direkt',
+      mailbox: 'm-dm',
+      maxIncomingId: 1,
+      unlesbar: 0,
+    })
+
+    await verarbeitePostfach({ ...lauf, identitaet: { state: 'ready' } as never })
+
+    expect(steuerung.sendeSteuerpaket).not.toHaveBeenCalled()
+  })
+
+  it('schickt in der Gruppe keine Quittung an den Absender', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')],
+      naechste_seq: 1,
+    })
+    uebernahme.uebernimmLesungen.mockResolvedValue({
+      processedList: [{ id: -1, clientUuid: 'u-gruppe', isSelf: false }],
+      lokalerVerlauf: [],
+      combined: [],
+      verlaufsArt: 'gruppe',
+      mailbox: 'm-gruppe',
+      maxIncomingId: 1,
+      unlesbar: 0,
+    })
+
+    await verarbeitePostfach({ ...lauf, identitaet: { state: 'ready' } as never })
+
+    expect(steuerung.sendeSteuerpaket).not.toHaveBeenCalled()
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalled()
   })
 
   it('laesst liegen, was keinem Gespraech gehoert', async () => {

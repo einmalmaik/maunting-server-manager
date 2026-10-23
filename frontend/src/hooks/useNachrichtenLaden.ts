@@ -27,7 +27,13 @@ import type { Konversation } from '@/hooks/useKonversation'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import { vergissEigeneWirkungen } from '@/services/eigeneWirkungen'
 import { anheftung } from '@/services/nachrichtAnheftung'
-import { merkePartnerQuittung, merkeQuittung } from '@/services/quittungsstand'
+import {
+  merkePartnerKennungen,
+  merkePartnerQuittung,
+  merkeQuittung,
+  merkeQuittungKennungen,
+  quittungsKennungen,
+} from '@/services/quittungsstand'
 import { anzeigeVerlauf, uebernimmLesungen } from '@/services/gespraech/uebernahme'
 
 export interface NachrichtenLadenOptionen {
@@ -146,6 +152,8 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
             maxPartnerDeliveredIdRef.current = Math.max(maxPartnerDeliveredIdRef.current, bis)
             merkePartnerQuittung(currentMid, 'zugestellt', bis)
           },
+          quittiertGelesenIds: (ids) => merkePartnerKennungen(currentMid, 'gelesen', ids),
+          quittiertZugestelltIds: (ids) => merkePartnerKennungen(currentMid, 'zugestellt', ids),
           markAsRead,
           setVerfallSekunden,
           zeigeSystemzeile,
@@ -235,6 +243,33 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
       const istGruppe = Boolean(activeGroup)
       const isDocVisible = typeof document === 'undefined' || document.visibilityState === 'visible'
 
+      /*
+       * Die Nachrichten selbst, nicht nur eine Obergrenze.
+       *
+       * Eine Zahl über Umschlagkennungen zählte auch Kopien für andere Geräte
+       * und Steuerpakete mit: der Absender konnte „gelesen“ sehen, ohne dass
+       * diese Nachricht je auf einem Schirm war. Die Quittung nennt deshalb
+       * die logischen Kennungen der Zeilen, die dieser Durchlauf abgelegt hat
+       * — höchstens hundert, das deckt ein Mailboxfenster.
+       */
+      const eingehendeKennungen = Array.from(
+        new Set(
+          processedList
+            .filter((m) => !m.isSelf && Boolean(m.clientUuid))
+            .map((m) => m.clientUuid as string),
+        ),
+      )
+      // Die zuletzt quittierten gehen mit: eine verlorene Quittung holt damit
+      // die nächste nach, ohne dass eine hohe Zahl fremde Zeilen mitnimmt.
+      const frueherZugestellt = quittungsKennungen(currentMid, 'zugestellt')
+      const frueherGelesen = quittungsKennungen(currentMid, 'gelesen')
+      const zugestelltIds = Array.from(
+        new Set([...frueherZugestellt, ...eingehendeKennungen]),
+      ).slice(-100)
+      const gelesenIds = Array.from(
+        new Set([...frueherGelesen, ...eingehendeKennungen]),
+      ).slice(-100)
+
       // Sende Zustellbestätigung (delivery_receipt), sobald neue Nachrichten empfangen wurden
       const needsDelivery =
         !istGruppe &&
@@ -263,9 +298,12 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
           idToDeliver,
         )
         merkeQuittung(currentMid, 'zugestellt', idToDeliver)
+        merkeQuittungKennungen(currentMid, 'zugestellt', zugestelltIds)
         sendE2eeControlMessage({
           type: 'delivery_receipt',
           delivered_up_to_id: idToDeliver,
+          // Der genaue Weg; `delivered_up_to_id` bleibt für ältere Clients.
+          delivered_ids: zugestelltIds,
           receiver_id: currentUserId,
           timestamp: new Date().toISOString(),
         }).catch(() => {})
@@ -289,10 +327,14 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
           idToAck,
         )
         merkeQuittung(currentMid, 'gelesen', idToAck)
+        merkeQuittungKennungen(currentMid, 'gelesen', gelesenIds)
+        // Gelesen schließt zugestellt ein; die Zustellliste zieht mit.
+        merkeQuittungKennungen(currentMid, 'zugestellt', gelesenIds)
         const dispatchReadReceipt = () => {
           sendE2eeControlMessage({
             type: 'read_receipt',
             read_up_to_id: idToAck,
+            read_ids: gelesenIds,
             reader_id: currentUserId,
             timestamp: new Date().toISOString(),
           }).catch(() => {})

@@ -15,6 +15,16 @@ export const QUITTUNG_PRAEFIX = 'deliv-'
 export interface QuittungsZustand {
   maxPartnerReadId: number
   maxPartnerDeliveredId: number
+  /**
+   * Was der Partner ausdrücklich als gelesen bzw. zugestellt genannt hat.
+   *
+   * Die Zahlen daneben bleiben für Quittungen älterer Clients und für den
+   * gespeicherten Stand. Eine ausdrückliche Kennung gilt ohne Rücksicht auf
+   * die Zahlen: sie beweist genau diese eine Nachricht, keine Lücke und
+   * keine Kopie für ein anderes Gerät dazwischen.
+   */
+  gelesenIds?: ReadonlySet<string>
+  zugestelltIds?: ReadonlySet<string>
 }
 
 /** Was ein Häkchen an einer Zeile bedeuten kann. */
@@ -23,6 +33,10 @@ export type HakenStatus = 'queued' | 'failed' | 'sent' | 'delivered' | 'read'
 export interface HakenZeile {
   id: number
   isSelf: boolean
+  /** Die logische Nachrichtenkennung; Quittungen nennen genau diese. */
+  clientUuid?: string
+  /** Über das Gerätepostfach zugestellt: `id` ist eine Annahmenummer. */
+  viaInbox?: boolean
   isRead?: boolean
   isDelivered?: boolean
   status?: HakenStatus
@@ -67,10 +81,24 @@ export function hakenFuer(
    * `0 >= 0` machte aus einer Nachricht, die noch in der Warteschlange steht,
    * eine gelesene. Sie kommt aus einem Umschlag — dann ist ihre Kennung positiv.
    */
-  const gelesen = (zeile.id > 0 && quittung.maxPartnerReadId >= zeile.id) || vorher === 'read'
+  const ausdruecklichGelesen = Boolean(
+    zeile.clientUuid && quittung.gelesenIds?.has(zeile.clientUuid),
+  )
+  const ausdruecklichZugestellt = Boolean(
+    zeile.clientUuid && quittung.zugestelltIds?.has(zeile.clientUuid),
+  )
+  // Alte Zahlenquittungen gehören zum Umschlagraum der geteilten Mailbox. Eine
+  // Zeile aus dem Gerätepostfach trägt dagegen eine Annahmenummer; die beiden
+  // Folgen sind nicht vergleichbar.
+  const zahlenGelten = !zeile.viaInbox
+  const gelesen =
+    ausdruecklichGelesen ||
+    (zahlenGelten && zeile.id > 0 && quittung.maxPartnerReadId >= zeile.id) ||
+    vorher === 'read'
   const angekommen =
     gelesen ||
-    (zeile.id > 0 && quittung.maxPartnerDeliveredId >= zeile.id) ||
+    ausdruecklichZugestellt ||
+    (zahlenGelten && zeile.id > 0 && quittung.maxPartnerDeliveredId >= zeile.id) ||
     vorher === 'delivered'
   return {
     isRead: gelesen,
@@ -98,18 +126,33 @@ export function verarbeiteQuittung(
   quittiertGelesen: (bis: number) => void,
   quittiertZugestellt: (bis: number) => void,
   markAsRead: (mailbox: string) => void,
+  quittiertGelesenIds?: (ids: string[]) => void,
+  quittiertZugestelltIds?: (ids: string[]) => void,
 ): boolean {
   if (parsed.type === 'read_receipt') {
-    const readUpTo = Number(parsed.read_up_to_id || 0)
     const readerId = Number(parsed.reader_id || 0)
     if (Number(readerId) !== Number(currentUserId)) {
-      if (readUpTo > zustand.maxPartnerReadId) {
-        zustand.maxPartnerReadId = readUpTo
-        quittiertGelesen(readUpTo)
-      }
-      if (readUpTo > zustand.maxPartnerDeliveredId) {
-        zustand.maxPartnerDeliveredId = readUpTo
-        quittiertZugestellt(readUpTo)
+      const ids = kennungenAus(parsed.read_ids)
+      if (ids.length > 0) {
+        /*
+         * Ausdrückliche Kennungen schlagen die Obergrenze.
+         *
+         * Die Zahl daneben zählte früher auch Kopien für andere Geräte und
+         * Steuerpakete mit; sie darf hier nicht mehr gelten, sonst machte
+         * eine hohe Zahl aus einer ungeöffneten Nachricht eine gelesene.
+         */
+        quittiertGelesenIds?.(ids)
+        quittiertZugestelltIds?.(ids)
+      } else {
+        const readUpTo = Number(parsed.read_up_to_id || 0)
+        if (readUpTo > zustand.maxPartnerReadId) {
+          zustand.maxPartnerReadId = readUpTo
+          quittiertGelesen(readUpTo)
+        }
+        if (readUpTo > zustand.maxPartnerDeliveredId) {
+          zustand.maxPartnerDeliveredId = readUpTo
+          quittiertZugestellt(readUpTo)
+        }
       }
     } else {
       // Multi-Device: Vom aktuellen Benutzer auf anderem Gerät gelesen
@@ -119,18 +162,37 @@ export function verarbeiteQuittung(
   }
 
   if (parsed.type === 'delivery_receipt') {
-    const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
     const receiverId = Number(parsed.receiver_id || 0)
-    if (
-      Number(receiverId) !== Number(currentUserId) &&
-      deliveredUpTo > zustand.maxPartnerDeliveredId
-    ) {
-      zustand.maxPartnerDeliveredId = deliveredUpTo
-      quittiertZugestellt(deliveredUpTo)
+    if (Number(receiverId) !== Number(currentUserId)) {
+      const ids = kennungenAus(parsed.delivered_ids)
+      if (ids.length > 0) {
+        quittiertZugestelltIds?.(ids)
+      } else {
+        const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
+        if (deliveredUpTo > zustand.maxPartnerDeliveredId) {
+          zustand.maxPartnerDeliveredId = deliveredUpTo
+          quittiertZugestellt(deliveredUpTo)
+        }
+      }
     }
     return true
   }
 
   void umschlag
   return false
+}
+
+/** Höchstens 200 brauchbare Kennungen aus einer Quittung. */
+function kennungenAus(wert: unknown): string[] {
+  if (!Array.isArray(wert)) return []
+  const gesehen = new Set<string>()
+  const liste: string[] = []
+  for (const eintrag of wert) {
+    if (typeof eintrag !== 'string' || !/^[A-Za-z0-9._:#-]{1,80}$/.test(eintrag)) continue
+    if (gesehen.has(eintrag)) continue
+    gesehen.add(eintrag)
+    liste.push(eintrag)
+    if (liste.length >= 200) break
+  }
+  return liste
 }

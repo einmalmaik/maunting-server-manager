@@ -49,9 +49,22 @@ export interface Quittungsstand {
   gelesen: number
 }
 
+/** Wie viele ausdrückliche Kennungen je Chat gemerkt werden. */
+const KENNUNGEN_GRENZE = 500
+const KENNUNG_MUSTER = /^[A-Za-z0-9._:#-]{1,80}$/
+
 const LEER: Quittungsstand = { zugestellt: 0, gelesen: 0 }
 
-function lies(schluessel: string = SCHLUESSEL): Record<string, Quittungsstand> {
+/**
+ * Ein gespeicherter Eintrag. Neben den beiden Zählern stehen die ausdrücklich
+ * bestätigten Kennungen; ältere Einträge haben sie nicht.
+ */
+interface Eintrag extends Quittungsstand {
+  zugestelltIds?: string[]
+  gelesenIds?: string[]
+}
+
+function lies(schluessel: string = SCHLUESSEL): Record<string, Eintrag> {
   try {
     const roh = localStorage.getItem(schluessel)
     const gelesen = roh ? JSON.parse(roh) : {}
@@ -61,10 +74,15 @@ function lies(schluessel: string = SCHLUESSEL): Record<string, Quittungsstand> {
   }
 }
 
-function standAus(schluessel: string, blindMailboxId: string): Quittungsstand {
-  if (!blindMailboxId) return { ...LEER }
+function eintragAus(schluessel: string, blindMailboxId: string): Eintrag | null {
+  if (!blindMailboxId) return null
   const eintrag = lies(schluessel)[blindMailboxId]
-  if (!eintrag || typeof eintrag !== 'object') return { ...LEER }
+  return eintrag && typeof eintrag === 'object' ? eintrag : null
+}
+
+function standAus(schluessel: string, blindMailboxId: string): Quittungsstand {
+  const eintrag = eintragAus(schluessel, blindMailboxId)
+  if (!eintrag) return { ...LEER }
   return { zugestellt: zahl(eintrag.zugestellt), gelesen: zahl(eintrag.gelesen) }
 }
 
@@ -76,8 +94,9 @@ function merke(
 ): void {
   if (!blindMailboxId || zahl(bisId) === 0) return
   const alle = lies(schluessel)
-  const bisher = alle[blindMailboxId]
-  const stand: Quittungsstand = {
+  const bisher = eintragAus(schluessel, blindMailboxId)
+  const stand: Eintrag = {
+    ...(bisher ?? {}),
     zugestellt: zahl(bisher?.zugestellt),
     gelesen: zahl(bisher?.gelesen),
   }
@@ -89,6 +108,26 @@ function merke(
   } catch {
     // Ohne localStorage gilt der Stand eben nur für diese Sitzung.
   }
+}
+
+/**
+ * Kennungen aus der Ablage — nur brauchbare Zeichenketten.
+ *
+ * Der Eintrag ist Nutzerdatenbank: ein manipulierter oder halb geschriebener
+ * Wert darf hier weder werfen noch eine Riesenzahl an Zeilen in den Speicher
+ * ziehen. Doppelte fallen weg, die Reihenfolge bleibt.
+ */
+function kennungenAus(wert: unknown): string[] {
+  if (!Array.isArray(wert)) return []
+  const gesehen = new Set<string>()
+  const liste: string[] = []
+  for (const eintrag of wert) {
+    if (typeof eintrag !== 'string' || !KENNUNG_MUSTER.test(eintrag) || gesehen.has(eintrag)) continue
+    gesehen.add(eintrag)
+    liste.push(eintrag)
+    if (liste.length >= KENNUNGEN_GRENZE) break
+  }
+  return liste
 }
 
 /**
@@ -150,4 +189,114 @@ export function merkePartnerQuittung(
   bisId: number,
 ): void {
   merke(SCHLUESSEL_PARTNER, blindMailboxId, art, bisId)
+}
+
+/**
+ * Die Kennungen, die dieses Gerät schon quittiert hat.
+ *
+ * Sie gehen in jede neue Quittung mit hinein (bis zur Grenze). Geht eine
+ * Quittung unterwegs verloren, deckt die nächste denselben Bereich wieder ab —
+ * dieselbe Selbstheilung, die vorher die Obergrenze leistete, jetzt ohne
+ * fremde Umschläge mitzuzählen.
+ */
+export function quittungsKennungen(
+  blindMailboxId: string,
+  art: keyof Quittungsstand,
+): string[] {
+  const eintrag = eintragAus(SCHLUESSEL, blindMailboxId)
+  return kennungenAus(art === 'gelesen' ? eintrag?.gelesenIds : eintrag?.zugestelltIds)
+}
+
+/** Eigene quittierte Kennungen fortschreiben; nur die jüngsten bleiben. */
+export function merkeQuittungKennungen(
+  blindMailboxId: string,
+  art: keyof Quittungsstand,
+  ids: readonly string[],
+): void {
+  if (!blindMailboxId || ids.length === 0) return
+  const alle = lies(SCHLUESSEL)
+  const bisher = eintragAus(SCHLUESSEL, blindMailboxId)
+  const feld = art === 'gelesen' ? 'gelesenIds' : 'zugestelltIds'
+  const alt = kennungenAus(bisher?.[feld])
+  const vorhanden = [...alt]
+  const gesehen = new Set(alt)
+  for (const id of ids) {
+    if (typeof id !== 'string' || !KENNUNG_MUSTER.test(id) || gesehen.has(id)) continue
+    gesehen.add(id)
+    vorhanden.push(id)
+  }
+  const gekuerzt = vorhanden.slice(-KENNUNGEN_GRENZE)
+  if (alt.length === gekuerzt.length && alt.every((id, i) => id === gekuerzt[i])) return
+  alle[blindMailboxId] = {
+    ...(bisher ?? { zugestellt: 0, gelesen: 0 }),
+    [feld]: gekuerzt,
+  }
+  try {
+    localStorage.setItem(SCHLUESSEL, JSON.stringify(alle))
+  } catch {
+    // Ohne Ablage gilt der Stand nur für diese Sitzung.
+  }
+}
+
+/**
+ * Die logischen Kennungen, die der Partner ausdrücklich bestätigt hat.
+ *
+ * Seit 23.10.2026 nennt eine Quittung die Nachrichten selbst, nicht mehr nur
+ * eine Obergrenze über Umschlagkennungen. Die Obergrenze zählte auch Kopien
+ * für andere Geräte und Steuerpakete mit; eine Nachricht konnte damit
+ * „zugestellt“ aussehen, ohne dass sie jemand geöffnet hatte.
+ *
+ * Fehlt eine Kennung (alte Quittung, Eintrag verfallen), entscheidet weiter
+ * der gespeicherte Zahlenstand. Beides zusammen ist die Untergrenze, nie ein
+ * Rückschritt: was einmal in der Zeile steht, bleibt stehen (`hakenFuer`).
+ */
+export interface PartnerKennungen {
+  gelesen: Set<string>
+  zugestellt: Set<string>
+}
+
+export function partnerKennungen(blindMailboxId: string): PartnerKennungen {
+  const eintrag = eintragAus(SCHLUESSEL_PARTNER, blindMailboxId)
+  return {
+    gelesen: new Set(kennungenAus(eintrag?.gelesenIds)),
+    zugestellt: new Set(kennungenAus(eintrag?.zugestelltIds)),
+  }
+}
+
+/**
+ * Bestätigte Kennungen festhalten.
+ *
+ * Nur die jüngsten `KENNUNGEN_GRENZE` bleiben: ältere Zeilen tragen ihren
+ * Stand ohnehin schon selbst (`isRead`/`isDelivered` in der Ablage), und ein
+ * unbegrenztes Wachstum in `localStorage` wäre die nächste volle Ablage.
+ */
+export function merkePartnerKennungen(
+  blindMailboxId: string,
+  art: keyof Quittungsstand,
+  ids: readonly string[],
+): void {
+  if (!blindMailboxId || ids.length === 0) return
+  const alle = lies(SCHLUESSEL_PARTNER)
+  const bisher = eintragAus(SCHLUESSEL_PARTNER, blindMailboxId)
+  const feld = art === 'gelesen' ? 'gelesenIds' : 'zugestelltIds'
+  const alt = kennungenAus(bisher?.[feld])
+  const vorhanden = [...alt]
+  const gesehen = new Set(alt)
+  for (const id of ids) {
+    if (typeof id !== 'string' || !KENNUNG_MUSTER.test(id) || gesehen.has(id)) continue
+    gesehen.add(id)
+    vorhanden.push(id)
+  }
+  const gekuerzt = vorhanden.slice(-KENNUNGEN_GRENZE)
+  // Nichts Neues — dieser Aufruf kommt bei jedem Lesedurchlauf.
+  if (alt.length === gekuerzt.length && alt.every((id, i) => id === gekuerzt[i])) return
+  alle[blindMailboxId] = {
+    ...(bisher ?? { zugestellt: 0, gelesen: 0 }),
+    [feld]: gekuerzt,
+  }
+  try {
+    localStorage.setItem(SCHLUESSEL_PARTNER, JSON.stringify(alle))
+  } catch {
+    // Ohne Ablage gilt der Stand nur für diese Sitzung.
+  }
 }
