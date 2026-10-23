@@ -12,7 +12,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
-  Bot,
   ClipboardPaste,
   Code,
   Copy,
@@ -33,7 +32,6 @@ import { Kontextmenue } from '@/Singra/UI'
 import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 
 import { useAnsicht } from '../entwickler/werkzeuge'
-import { useAnSingra } from '../services/anSingra'
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { kopiereSauberenLink } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
@@ -71,7 +69,6 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const maschine = useWirksameSuche()
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
-  const anSingra = useAnSingra(tab)
   const uebersetzen = useUebersetzen(tab)
   // In der geteilten Ansicht darf das Menü die Seite daneben nicht
   // verdecken: Es bleibt auf die halbe Höhe begrenzt und durchscheinend.
@@ -153,7 +150,6 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
     items.push(...nativEintrag('back', items.length > 0), ...nativEintrag('forward'), ...nativEintrag('reload'), ...nativEintrag('saveAs'))
     items.push(eigen('drucken', t('browser.menue.drucken'), <Printer />, () => void nativ.tabDrucken(tab.id)))
     if (uebersetzen) items.push(eigen('uebersetzen', t('browser.menue.uebersetzen'), <Languages />, uebersetzen))
-    if (anSingra) items.push(eigen('singra', t('browser.menue.anSingra'), <Bot />, anSingra))
   }
   // Entwicklerwerkzeuge gibt es auf Android nicht.
   if (!istAndroid()) items.push(
