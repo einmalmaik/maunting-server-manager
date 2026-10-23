@@ -94,6 +94,8 @@ const BEFEHLE: &[&str] = &[
     "update_pruefen",
     "update_herunterladen",
     "update_installieren",
+    "detect_installed_browsers",
+    "import_browser_data",
 ];
 
 fn main() {

@@ -7,6 +7,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { ablage, passend } from './ablage'
+import { schnellzugriffeZusammenfuehren } from './importDaten'
+import type { ImportTopSite } from './nativ'
 import { wirksameSuche, type SuchmaschinenId } from './searchEngines'
 import { istGekoppelt, useSitzung } from './sitzung'
 
@@ -159,8 +161,10 @@ interface EinstellungenZustand {
   /** Seiten bevorzugt dunkel rendern (Design → Darstellung der Seiten). */
   seitenDunkel: boolean
 
-  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
+  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten' | 'schnellzugriffeImportieren'>>) => void
   umschalten: (was: Ausblendbar) => void
+  /** Top-Sites eines Browserimports; die Standardkacheln weichen nur, wenn sie unverändert sind. */
+  schnellzugriffeImportieren: (neu: ImportTopSite[]) => number
 }
 
 /**
@@ -222,6 +226,21 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
         set((s) => ({
           ausgeblendet: s.ausgeblendet.includes(was) ? s.ausgeblendet.filter((m) => m !== was) : [...s.ausgeblendet, was],
         })),
+
+      schnellzugriffeImportieren: (neu) => {
+        let uebernommen = 0
+        set((s) => {
+          const ergebnis = schnellzugriffeZusammenfuehren(
+            s.schnellzugriffe,
+            neu,
+            VORGABE_SCHNELLZUGRIFFE,
+            SCHNELLZUGRIFFE_MAX,
+          )
+          uebernommen = ergebnis.uebernommen
+          return { schnellzugriffe: ergebnis.schnellzugriffe }
+        })
+        return uebernommen
+      },
     }),
     // Neue Felder brauchen keine neue Version: was der gespeicherte Stand
     // nicht kennt, kommt aus den Vorgaben oben (flaches Zusammenführen).

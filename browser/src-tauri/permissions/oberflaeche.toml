@@ -91,4 +91,6 @@ permissions = [
   "allow-update-pruefen",
   "allow-update-herunterladen",
   "allow-update-installieren",
+  "allow-detect-installed-browsers",
+  "allow-import-browser-data",
 ]

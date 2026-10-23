@@ -296,6 +296,10 @@ export const nativ = {
   updateHerunterladen: () => rufen('update_herunterladen'),
   /** Wendet das vorbereitete Update an und startet den Browser neu. */
   updateInstallieren: () => rufen('update_installieren'),
+  /** Unter Windows: Browser mit einem lesbaren Profil (`browserimport/`). */
+  browserProfile: () => rufen<BrowserProfil[]>('detect_installed_browsers'),
+  /** Liest das gewählte Profil; nur die ID geht an Rust, nie ein Pfad. */
+  browserDatenImportieren: (profilId: string) => rufen<ImportErgebnis>('import_browser_data', { profilId }),
 }
 
 export interface FensterStartInfo {
@@ -350,6 +354,63 @@ export interface SchutzStand {
 export async function schutzEreignisse(rueckruf: () => void): Promise<() => void> {
   if (!istTauri()) return () => {}
   return listen('msb:schutz', () => rueckruf())
+}
+
+/** Ein installiertes Browserprofil (`browserimport/profile.rs`). */
+export interface BrowserProfil {
+  id: string
+  browser: string
+  name: string
+  verlauf: boolean
+  lesezeichen: boolean
+}
+
+export interface ImportLesezeichen {
+  url: string
+  titel: string
+  ordner: string[]
+  zeit: number
+}
+
+export interface ImportVerlauf {
+  url: string
+  titel: string
+  zeit: number
+  anzahl: number
+}
+
+export interface ImportTopSite {
+  url: string
+  titel: string
+}
+
+/** Ein Symbol als `data:image/png;base64,…`, geschlüsselt nach Herkunft. */
+export interface ImportBild {
+  herkunft: string
+  daten: string
+}
+
+export interface ImportZahlen {
+  lesezeichen: number
+  verlauf: number
+  top_sites: number
+  bilder: number
+}
+
+export interface ImportWarnung {
+  code: string
+}
+
+export interface ImportErgebnis {
+  browser: string
+  profil: string
+  dauer_ms: number
+  lesezeichen: ImportLesezeichen[]
+  verlauf: ImportVerlauf[]
+  top_sites: ImportTopSite[]
+  bilder: ImportBild[]
+  zahlen: ImportZahlen
+  warnungen: ImportWarnung[]
 }
 
 /** Die Felder der Gerätekonfiguration (`konfig.rs`). */

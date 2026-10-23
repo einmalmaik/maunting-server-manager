@@ -8,6 +8,7 @@
 
 pub mod aktualisieren;
 pub mod browserdaten;
+pub mod browserimport;
 pub mod cookies;
 pub mod datei;
 pub mod downloads;
@@ -119,6 +120,7 @@ pub fn run() {
                 }
             }
             browserdaten::beim_start(handle, konfig.vergessen_beim_schliessen);
+            browserimport::beim_start(handle);
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
@@ -253,6 +255,8 @@ pub fn run() {
             erweiterungen::erweiterung_popup,
             erweiterungen::erweiterung_popup_schliessen,
             erweiterungen::erweiterung_optionen,
+            browserimport::detect_installed_browsers,
+            browserimport::import_browser_data,
         ])
         .on_window_event(move |fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann

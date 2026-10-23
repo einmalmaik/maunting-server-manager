@@ -57,4 +57,45 @@ describe('Verlauf', () => {
     expect(treffer.map((t) => t.titel)).toEqual(['L', 'Beispiel'])
     expect(vorschlaege('  ', [e('https://a.example/', 'a')], [])).toEqual([])
   })
+
+  it('übernimmt einen Browserimport in einem Schritt', () => {
+    useVerlaufStore.setState({
+      verlauf: [{ url: 'https://alt.example/', titel: 'Alt', zeit: 100 }],
+      lesezeichen: [{ url: 'https://alt.example/', titel: 'Alt', zeit: 1 }],
+    })
+    const ergebnis = useVerlaufStore.getState().importieren({
+      lesezeichen: [
+        { url: 'https://neu.example/', titel: 'Neu', ordner: ['Lesezeichenleiste', 'Dev'], zeit: 20 },
+        { url: 'https://alt.example/', titel: 'Alt doppelt', ordner: [], zeit: 10 },
+      ],
+      verlauf: [{ url: 'https://alt.example/', titel: 'Alt neu', zeit: 123, anzahl: 5 }],
+    })
+    expect(ergebnis).toEqual({ lesezeichen: 1, verlauf: 1, lesezeichenGekuerzt: false, verlaufGekuerzt: false })
+    expect(useVerlaufStore.getState().lesezeichen.map((e) => [e.url, e.ordner])).toEqual([
+      ['https://neu.example/', ['Lesezeichenleiste', 'Dev']],
+      ['https://alt.example/', undefined],
+    ])
+    expect(useVerlaufStore.getState().verlauf[0]).toMatchObject({
+      url: 'https://alt.example/',
+      titel: 'Alt neu',
+      zeit: 123,
+      anzahl: 5,
+    })
+  })
+
+  it('entfernt und benennt Lesezeichen ordnerbezogen um, alte Aufrufe gelten für alle', () => {
+    useVerlaufStore.setState({
+      lesezeichen: [
+        { url: 'https://a.example/', titel: 'Leiste', zeit: 1, ordner: ['Lesezeichenleiste'] },
+        { url: 'https://a.example/', titel: 'Andere', zeit: 2, ordner: ['Weitere Lesezeichen'] },
+      ],
+    })
+    const v = useVerlaufStore.getState()
+    v.lesezeichenUmbenennen('https://a.example/', 'Neu', ['Weitere Lesezeichen'])
+    expect(useVerlaufStore.getState().lesezeichen.map((e) => e.titel)).toEqual(['Leiste', 'Neu'])
+    v.lesezeichenEntfernen('https://a.example/', ['Lesezeichenleiste'])
+    expect(useVerlaufStore.getState().lesezeichen.map((e) => e.titel)).toEqual(['Neu'])
+    v.lesezeichenEntfernen('https://a.example/')
+    expect(useVerlaufStore.getState().lesezeichen).toEqual([])
+  })
 })
