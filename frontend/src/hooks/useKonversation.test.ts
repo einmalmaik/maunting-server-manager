@@ -99,6 +99,15 @@ vi.mock('@/services/messengerLocalStore', () => ({
   speichereUmschlagKlartext: vi.fn(async (_mid: string, envId: number, text: string) => {
     abgelegt.set(envId, text)
   }),
+  // Der Sendepfad der Wirkungen (`services/steuerOutbox.ts`) hängt an derselben
+  // Ablage. Hier ist er nicht der Gegenstand; die Outbox hat ihren eigenen Test.
+  loadLocalMessages: vi.fn(async () => []),
+  updateMessageInLocalStore: vi.fn(async () => {}),
+  legeSteuerAuftragAn: vi.fn(async () => true),
+  schreibeSteuerAuftrag: vi.fn(async () => {}),
+  ladeSteuerAuftraege: vi.fn(async () => []),
+  loescheSteuerAuftrag: vi.fn(async () => {}),
+  loescheSteuerAuftraegeFuerZiel: vi.fn(async () => 0),
 }))
 
 vi.mock('@/services/gruppenSchluessel', () => ({

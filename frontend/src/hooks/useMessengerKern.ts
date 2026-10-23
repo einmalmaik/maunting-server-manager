@@ -23,9 +23,13 @@ import {
 } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { holeOffeneMedien } from '@/services/medienNachholen'
+import { anheftung } from '@/services/nachrichtAnheftung'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
-import { verfallsfrist } from '@/services/nachrichtVerfall'
+import { verfallsfrist, verfallStand } from '@/services/nachrichtVerfall'
+import { setzeSteuerOutboxMelder, stosseSteuerOutboxAn } from '@/services/steuerOutboxLauf'
+import type { SteuerAuftrag } from '@/services/steuerOutboxTypen'
+import { toast } from '@/stores/toastStore'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { verarbeitePostfach, type PostfachGespraech } from '@/services/gespraech/postfach'
@@ -286,6 +290,100 @@ export function useMessengerKern({
       document.removeEventListener('visibilitychange', lauf)
     }
   }, [currentUserId, identity, messengerGesperrt])
+
+  /**
+   * Die Outbox der Steuerwirkungen abarbeiten.
+   *
+   * Dieselben drei Anlässe wie beim Medien-Nachholen — Start (Identität da,
+   * nicht gesperrt), `online` und die Rückkehr der App nach vorn. Das
+   * Entsperren löst diesen Effekt über `messengerGesperrt` ebenfalls aus.
+   * Ein vierter Anlass steht im Sendepfad: nach jedem erfolgreichen Senden
+   * (`sendeWirkung` in `useKonversation`).
+   *
+   * Der Auftrag liegt in der Ablage; hier wird nur gelesen, was fällig ist.
+   * Kein Timer, kein Dauerfeuer.
+   */
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready') return
+    let aktiv = true
+    const lauf = () => {
+      if (!aktiv) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void stosseSteuerOutboxAn().catch(() => {})
+    }
+    lauf()
+    window.addEventListener('online', lauf)
+    document.addEventListener('visibilitychange', lauf)
+    return () => {
+      aktiv = false
+      window.removeEventListener('online', lauf)
+      document.removeEventListener('visibilitychange', lauf)
+    }
+  }, [currentUserId, identity.state, messengerGesperrt])
+
+  /**
+   * Was die Outbox aufgibt, wird gesagt — und im offenen Gespräch nachgezogen.
+   *
+   * Ein Auftrag fällt nur aus zwei Gründen heraus: der Server hat ihn endgültig
+   * abgelehnt, oder die Versuche sind erschöpft. In beiden Fällen wurde die
+   * lokale Wirkung schon zurückgenommen (`nimmWirkungZurueck`); hier wird sie
+   * sichtbar — als Systemzeile, und die betroffenen Zeilen kommen aus der
+   * Ablage neu. Eine stille Lücke gibt es nicht (Punkt 168 des Regelwerks).
+   */
+  useEffect(() => {
+    return setzeSteuerOutboxMelder((auftrag: SteuerAuftrag, grund) => {
+      const ohneRuecknahme = auftrag.ruecknahme?.art === 'keine'
+      const schluessel = ohneRuecknahme
+        ? grund === 'abgelehnt'
+          ? 'messenger.deleteRejected'
+          : 'messenger.deleteUndelivered'
+        : grund === 'abgelehnt'
+          ? 'messenger.actionRejected'
+          : 'messenger.actionUndelivered'
+      // Die Systemzeile gehört in das Gespräch, um das es geht. Ist ein anderes
+      // offen, sagt es ein Toast — eine Zeile über einen fremden Chat wäre im
+      // falschen Verlauf.
+      if (auftrag.mailbox === activeMailboxIdRef.current) {
+        zeigeSystemzeile(t(schluessel), `steuer-${auftrag.id}`)
+      } else {
+        toast.info(t(schluessel))
+      }
+
+      if (auftrag.mailbox !== activeMailboxIdRef.current) return
+      const art = auftrag.ruecknahme?.art
+      if (art === 'anheftung') {
+        if (!anheftung(auftrag.mailbox).clientUuid) setAngeheftet(null)
+        return
+      }
+      if (art === 'verfall') {
+        setVerfallSekunden(verfallStand(auftrag.mailbox).sekunden)
+        return
+      }
+      if (art !== 'reaktion' && art !== 'bearbeitung') return
+      // Den geänderten Stand aus der Ablage holen, statt ihn zu raten.
+      void loadLocalMessages(auftrag.mailbox)
+        .then((zeilen) => {
+          setMessages((vorher) =>
+            vorher.map((m) => {
+              const frisch = zeilen.find(
+                (z) => (m.clientUuid && z.clientUuid === m.clientUuid) || z.id === m.id,
+              )
+              if (!frisch) return m
+              return {
+                ...m,
+                text: frisch.text,
+                isEdited: frisch.isEdited,
+                editedAt: frisch.editedAt,
+                originalText: frisch.originalText,
+                reaktionen: frisch.reaktionen,
+              }
+            }),
+          )
+        })
+        .catch(() => {})
+    })
+  }, [t, zeigeSystemzeile, setAngeheftet, setVerfallSekunden])
 
   /**
    * Das Gerätepostfach im Hintergrund leeren.
@@ -615,7 +713,8 @@ export function useMessengerKern({
   return {
     messages, setMessages, loadingMessages, setLoadingMessages, sending, setSending,
     identity, setIdentity, identityRef, geraetWartet, gespraechsZiel, blindMailboxId,
-    konversation, sendE2eeControlMessage, loadMessages, zeigeSystemzeile,
+    konversation, sendE2eeControlMessage, sendeWirkung: konversation.sendeWirkung,
+    loadMessages, zeigeSystemzeile,
     gespraechsZielRef, entwurfGeholtRef, eingabeBeruehrtRef, activeMailboxIdRef,
     currentLoadSeqRef, highestIncomingIdAcknowledgedRef, highestIncomingIdDeliveredRef,
     maxPartnerReadIdRef, maxPartnerDeliveredIdRef,

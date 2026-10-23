@@ -5,7 +5,7 @@
  * browser refreshes (F5) and app restarts (Web, Desktop, Mobile) without
  * re-entering recovery keys or waiting for network round-trips.
  *
- * Database: `msm_messenger_local:konto:<id>` (v4)
+ * Database: `msm_messenger_local:konto:<id>` (v8)
  * Object Stores:
  *  - `messages`: keyed by `[blindMailboxId, id]`, indexed by `blindMailboxId`, `createdAt`, `clientUuid`
  *  - `mailboxes`: keyed by `blindMailboxId`, tracks `lastSyncedEnvelopeId` and `updatedAt`
@@ -42,6 +42,10 @@ import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { entsiegleZeile, entsiegleZeilen, versiegleZeile } from './lokaleVersiegelung'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { istSteuerzeile } from './nachrichtBezug'
+import {
+  MAX_AUFTRAEGE,
+  type SteuerAuftrag,
+} from './steuerOutboxTypen'
 
 export interface LocalStoredMessage {
   blindMailboxId?: string
@@ -113,7 +117,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 7
+const DB_VERSION = 8
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -131,6 +135,8 @@ const STORE_MEDIEN_TEILE = 'medien_teile'
 const STORE_MEDIEN_AUFTRAEGE = 'medien_auftraege'
 /** Inhaltslose Marken geloeschter Medienkennungen. */
 const STORE_MEDIEN_GRABSTEINE = 'medien_grabsteine'
+/** Wirkungen, die noch nicht hinaus sind (Bearbeiten, Loeschen, Reaktion, ...). */
+const STORE_STEUER_AUFTRAEGE = 'steuer_auftraege'
 
 /**
  * So viele Grabsteine bleiben.
@@ -342,6 +348,26 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE_MEDIEN_GRABSTEINE)) {
         const grabsteine = db.createObjectStore(STORE_MEDIEN_GRABSTEINE, { keyPath: 'mediaId' })
         grabsteine.createIndex('by_geloescht', 'geloeschtAm', { unique: false })
+      }
+      /*
+       * Version 8: die Outbox der Steuerwirkungen.
+       *
+       * Bearbeiten, Loeschen, Reaktion, Anheften und Verfall reisten bis 10/2026
+       * als ein einziger Relay-Aufruf; ein Netzfehler nahm die Wirkung lokal
+       * zurueck und die Gegenseite erfuhr nie davon. Der Auftrag liegt hier und
+       * nicht im localStorage: er traegt den Inhalt der Nutzlast und die
+       * Mitgliederliste, also dieselben Angaben wie der Verlauf daneben. Hier
+       * gilt das Siegel des Messengers, und die Ablage gehoert einem Konto —
+       * beim Abmelden faellt die Outbox mit ihr (`clearLocalMessengerStore`).
+       *
+       * Lesbar bleiben nur die Felder, die einen Index brauchen: Kennung,
+       * Mailbox, Typ, Ziel, Termin. Was die Wirkung sagt, steht versiegelt.
+       */
+      if (!db.objectStoreNames.contains(STORE_STEUER_AUFTRAEGE)) {
+        const steuer = db.createObjectStore(STORE_STEUER_AUFTRAEGE, { keyPath: 'id' })
+        steuer.createIndex('by_faellig', 'naechsterVersuch', { unique: false })
+        steuer.createIndex('by_angelegt', 'angelegtAm', { unique: false })
+        steuer.createIndex('by_ziel', 'ziel', { unique: false })
       }
       // Die vorhandene Tabelle aus Version 6 bekommt ihren Index nach. In
       // einer frisch angelegten steht er schon oben.
@@ -1219,6 +1245,181 @@ export async function loescheMedienAuftrag(id: string): Promise<void> {
   })
 }
 
+// ==========================================
+// Die Outbox der Steuerwirkungen
+// ==========================================
+
+/**
+ * Bindet einen Auftrag an seine Kennung.
+ *
+ * Die Kennung ist zugleich `client_uuid` des Steuerpakets; sie steht im
+ * Klartext, weil sie den Index bildet. Sie ist eine Zufallskennung ohne Bezug
+ * zum Inhalt — dieselbe Abwägung wie bei `clientUuid` einer Nachricht.
+ */
+function steuerAuftragAad(id: string): string {
+  return `msm-steuerauftrag:${id}`
+}
+
+/** Lesbar bleiben nur die Felder, die einen Index tragen oder den Termin. */
+const STEUER_KLARFELDER = [
+  'id',
+  'mailbox',
+  'typ',
+  'ziel',
+  'zielId',
+  'naechsterVersuch',
+  'angelegtAm',
+] as const
+
+/**
+ * Legt einen Auftrag an — und weist ab, wenn die Warteschlange voll ist.
+ *
+ * **Nicht** idempotent gedacht: die Kennung entsteht beim Einreihen und wird
+ * danach nie wiederverwendet. Ein zweiter Anlauf desselben Auftrags schreibt
+ * über `schreibeSteuerAuftrag`, damit Versuche und Termin nicht zurückspringen.
+ *
+ * Gibt `false` zurück, wenn die Grenze erreicht ist. Der Aufrufer nimmt dann
+ * seine lokale Wirkung zurück und sagt es — ältere Aufträge still zu verdrängen
+ * wäre genau das stille Aufgeben, gegen das diese Outbox geschrieben ist.
+ */
+export async function legeSteuerAuftragAn(auftrag: SteuerAuftrag): Promise<boolean> {
+  if (!auftrag?.id || !auftrag.mailbox) return false
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(auftrag, STEUER_KLARFELDER, steuerAuftragAad(auftrag.id))
+  return await new Promise<boolean>((resolve, reject) => {
+    const tx = db.transaction(STORE_STEUER_AUFTRAEGE, 'readwrite')
+    const store = tx.objectStore(STORE_STEUER_AUFTRAEGE)
+    let angenommen = true
+    const vorhanden = store.get(auftrag.id)
+    vorhanden.onsuccess = () => {
+      if (vorhanden.result != null) return
+      const zahl = store.count()
+      zahl.onsuccess = () => {
+        if (zahl.result >= MAX_AUFTRAEGE) {
+          angenommen = false
+          return
+        }
+        store.put(zeile)
+      }
+      zahl.onerror = () => reject(zahl.error)
+    }
+    vorhanden.onerror = () => reject(vorhanden.error)
+    tx.oncomplete = () => resolve(angenommen)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Schreibt den fortgeschriebenen Stand (Versuche, nächster Termin). */
+export async function schreibeSteuerAuftrag(auftrag: SteuerAuftrag): Promise<void> {
+  if (!auftrag?.id) return
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(auftrag, STEUER_KLARFELDER, steuerAuftragAad(auftrag.id))
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_STEUER_AUFTRAEGE, 'readwrite')
+    tx.objectStore(STORE_STEUER_AUFTRAEGE).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Alle Aufträge dieses Kontos, älteste zuerst.
+ *
+ * Ein Lesefehler ist hier kein Fehler: gesperrt oder Ablage weg heißt „es gibt
+ * gerade nichts abzuarbeiten", und der nächste Anlass liest wieder. Was nicht
+ * aufgeht (fremder Schlüssel, verbogene Zeile), bleibt ebenfalls liegen.
+ */
+export async function ladeSteuerAuftraege(): Promise<SteuerAuftrag[]> {
+  try {
+    const db = await openLocalDatabase()
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_STEUER_AUFTRAEGE, 'readonly')
+      const req = tx.objectStore(STORE_STEUER_AUFTRAEGE).getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    const offen = await entsiegleZeilen<SteuerAuftrag>(rohzeilen, (z) =>
+      steuerAuftragAad(String(z.id)),
+    )
+    return offen
+      .filter(
+        (a) =>
+          typeof a?.id === 'string' &&
+          typeof a.mailbox === 'string' &&
+          typeof a.typ === 'string' &&
+          Number.isInteger(a.versuche) &&
+          Number.isFinite(a.naechsterVersuch) &&
+          (a.art === 'direkt' || a.art === 'gruppe'),
+      )
+      .sort((a, b) => a.angelegtAm - b.angelegtAm)
+  } catch {
+    return []
+  }
+}
+
+export async function loescheSteuerAuftrag(id: string): Promise<void> {
+  if (!id) return
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_STEUER_AUFTRAEGE, 'readwrite')
+    tx.objectStore(STORE_STEUER_AUFTRAEGE).delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Räumt ausstehende Wirkungen zu einer gelöschten Nachricht ab.
+ *
+ * Eine Bearbeitung oder Reaktion, die noch in der Warteschlange steht, würde
+ * eine inzwischen gelöschte Nachricht bei der Gegenseite wieder aufleben
+ * lassen: sie trägt deren Kennung und käme nach der Löschung an. Deshalb fällt
+ * beim lokalen Löschen alles weg, was sich auf diese Nachricht bezieht —
+ * **außer** einer Löschung selbst. Die muss weitergehen, auch wenn sie noch
+ * nicht hinaus ist.
+ *
+ * Ein Fehler hier ist kein Fehler des Löschens: die Nachricht ist lokal weg,
+ * und ein liegengebliebener Auftrag scheitert später an einer Nachricht, die
+ * es nicht mehr gibt.
+ */
+export async function loescheSteuerAuftraegeFuerZiel(
+  mailbox: string,
+  kennung: { clientUuid?: string; id?: number },
+): Promise<number> {
+  if (!mailbox) return 0
+  if (!kennung.clientUuid && typeof kennung.id !== 'number') return 0
+  try {
+    const db = await openLocalDatabase()
+    return await new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(STORE_STEUER_AUFTRAEGE, 'readwrite')
+      const store = tx.objectStore(STORE_STEUER_AUFTRAEGE)
+      let entfernt = 0
+      const req = store.getAll()
+      req.onsuccess = () => {
+        for (const zeile of (req.result || []) as Record<string, any>[]) {
+          if (zeile?.mailbox !== mailbox) continue
+          if (zeile?.typ === 'delete_message') continue
+          const trifft =
+            (kennung.clientUuid !== undefined && zeile?.ziel === kennung.clientUuid) ||
+            (typeof kennung.id === 'number' && zeile?.zielId === kennung.id)
+          if (!trifft) continue
+          store.delete(zeile.id)
+          entfernt++
+        }
+      }
+      req.onerror = () => reject(req.error)
+      tx.oncomplete = () => resolve(entfernt)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  } catch {
+    return 0
+  }
+}
+
 /**
  * Alle abgelegten Anhänge — für den Datenexport.
  *
@@ -1954,6 +2155,11 @@ export async function clearLocalMessengerStore(): Promise<void> {
           // spaeter Anhaenge zu Nachrichten, die es hier nicht mehr gibt.
           STORE_MEDIEN_AUFTRAEGE,
           STORE_MEDIEN_GRABSTEINE,
+          // Die Outbox der Steuerwirkungen ebenso: ein Auftrag nennt Mailbox,
+          // Mitglieder und Inhalt einer Wirkung. Nach dem Abmelden darf davon
+          // nichts liegen bleiben — und mit der Sitzung des naechsten Kontos
+          // ginge er sonst hinaus (Punkt 50 des Regelwerks).
+          STORE_STEUER_AUFTRAEGE,
         ],
         'readwrite'
       )
@@ -1963,6 +2169,7 @@ export async function clearLocalMessengerStore(): Promise<void> {
       tx.objectStore(STORE_FUNKEN).clear()
       tx.objectStore(STORE_MEDIEN_AUFTRAEGE).clear()
       tx.objectStore(STORE_MEDIEN_GRABSTEINE).clear()
+      tx.objectStore(STORE_STEUER_AUFTRAEGE).clear()
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })

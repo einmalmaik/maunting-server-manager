@@ -129,6 +129,7 @@ import {
   type Weiterleitungsziel,
 } from '@/services/nachrichtWeiterleiten'
 import { vergissMailbox, type Treffer } from '@/services/verlaufSuche'
+import { istAbweisung } from '@/services/steuerOutbox'
 import {
   faelligeZeilen,
   raeumeAlleChats,
@@ -491,7 +492,7 @@ function MessengerSeite() {
   const {
     messages, setMessages, loadingMessages, sending, setSending,
     identity, setIdentity, identityRef, geraetWartet, blindMailboxId, konversation,
-    sendE2eeControlMessage, loadMessages, zeigeSystemzeile,
+    sendeWirkung, loadMessages, zeigeSystemzeile,
     eingabeBeruehrtRef, highestIncomingIdAcknowledgedRef, highestIncomingIdDeliveredRef,
     maxPartnerReadIdRef, maxPartnerDeliveredIdRef,
   } = kern
@@ -977,7 +978,7 @@ function MessengerSeite() {
     entwuerfe,
     konversation,
     loadMessages,
-    sendE2eeControlMessage,
+    sendeWirkung,
     getOutbox,
     setOutbox,
   })
@@ -1116,7 +1117,7 @@ function MessengerSeite() {
       setWlFortschritt,
       beendeAuswahl,
       setMessages,
-      sendE2eeControlMessage,
+      sendeWirkung,
       handleSendMessage,
     })
 
@@ -1163,11 +1164,23 @@ function MessengerSeite() {
     setzeVerfallsfrist(blindMailboxId, sekunden, jetzt)
     setVerfallOffen(false)
     try {
-      await sendE2eeControlMessage({
-        type: 'retention',
-        dauer: sekunden,
-        actor_id: currentUserId,
-        zeitpunkt: jetzt,
+      // Seit 10/2026 als dauerhafte Wirkung: ohne Netz wartet sie in der
+      // Outbox, statt die Umstellung hier zurückzunehmen. Zurückgenommen wird
+      // nur, was der Server endgültig abgelehnt hat.
+      await sendeWirkung({
+        typ: 'retention',
+        felder: {
+          type: 'retention',
+          dauer: sekunden,
+          actor_id: currentUserId,
+          zeitpunkt: jetzt,
+        },
+        ruecknahme: {
+          art: 'verfall',
+          mailbox: blindMailboxId,
+          vorher: { sekunden: vorher.sekunden, stand: vorher.stand },
+          nachher: { sekunden, stand: jetzt },
+        },
       })
       zeigeSystemzeile(
         sekunden > 0
@@ -1177,10 +1190,11 @@ function MessengerSeite() {
             })
           : t('messenger.retentionOffSelf', { name: t('messenger.retentionYou') }),
       )
-    } catch {
+    } catch (fehler) {
+      if (!istAbweisung(fehler)) return
       setVerfallSekunden(vorher.sekunden)
       setzeVerfallsfrist(blindMailboxId, vorher.sekunden, vorher.stand || jetzt)
-      toast.error(t('messenger.retentionChangeFailed'))
+      toast.error(t('messenger.actionRejected'))
     }
   }
 

@@ -4,8 +4,13 @@
  *
  * Der Block stand bis 10/2026 mitten in `Messenger.tsx`. Herausgelöst ist er
  * **unverändert**: dieselbe sofortige lokale Wirkung, dieselbe Rücknahme bei
- * einem gescheiterten Steuerumschlag, dieselbe Reihenfolge beim Weiterleiten.
- * Die Seite reicht Zustand und den fertigen Sendeweg hinein.
+ * einer endgültigen Ablehnung, dieselbe Reihenfolge beim Weiterleiten. Die
+ * Seite reicht Zustand und den fertigen Sendeweg hinein.
+ *
+ * Seit 10/2026 geht der Sendeweg über die dauerhafte Outbox
+ * (`services/steuerOutbox.ts`): ein Netzfehler nimmt die Wirkung **nicht** mehr
+ * zurück, sie wartet und geht später hinaus. Zurückgenommen wird nur, was der
+ * Server endgültig abgelehnt hat.
  */
 
 import type { Dispatch, SetStateAction } from 'react'
@@ -33,6 +38,9 @@ import { schalteReaktion } from '@/services/reaktionen'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { vergissMailbox } from '@/services/verlaufSuche'
 import { updateMessageInLocalStore } from '@/services/messengerLocalStore'
+import type { SteuerAusgang } from '@/services/steuerOutbox'
+import { istAbweisung } from '@/services/steuerOutbox'
+import type { SteuerEintrag } from '@/services/steuerOutboxTypen'
 import { toast } from '@/stores/toastStore'
 
 interface Optionen {
@@ -48,7 +56,8 @@ interface Optionen {
   setWlFortschritt: Dispatch<SetStateAction<{ gesamt: number; fertig: number } | null>>
   beendeAuswahl: () => void
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>
-  sendE2eeControlMessage: (payload: Record<string, unknown>) => Promise<void>
+  /** Einreihen mit Sofortversuch; wirft nur bei endgültiger Ablehnung. */
+  sendeWirkung: (eintrag: SteuerEintrag) => Promise<SteuerAusgang>
   /** `false` heißt: ein Riegel hat gegriffen, es wurde nichts angelegt. */
   handleSendMessage: (auftrag?: SendeAuftrag) => Promise<boolean>
 }
@@ -67,7 +76,7 @@ export function useMessengerInteraktionen(optionen: Optionen) {
     setWlFortschritt,
     beendeAuswahl,
     setMessages,
-    sendE2eeControlMessage,
+    sendeWirkung,
     handleSendMessage,
   } = optionen
 
@@ -81,6 +90,7 @@ export function useMessengerInteraktionen(optionen: Optionen) {
    */
   const handleReaktion = async (msg: ChatMessage, emoji: string) => {
     if (!currentUserId || !blindMailboxId || msg.isDeleted) return
+    const vorher = msg.reaktionen ?? {}
     const { reaktionen: neu, aktion } = schalteReaktion(msg.reaktionen, emoji, currentUserId)
 
     setMessages((prev) => {
@@ -96,17 +106,34 @@ export function useMessengerInteraktionen(optionen: Optionen) {
     vergissMailbox(blindMailboxId)
 
     try {
-      await sendE2eeControlMessage({
-        type: 'reaction',
-        ...bezugFelder(msg),
-        emoji,
-        aktion,
-        actor_id: currentUserId,
-        zeitpunkt: new Date().toISOString(),
+      await sendeWirkung({
+        typ: 'reaction',
+        felder: {
+          type: 'reaction',
+          ...bezugFelder(msg),
+          emoji,
+          aktion,
+          actor_id: currentUserId,
+          zeitpunkt: new Date().toISOString(),
+        },
+        ziel: msg.clientUuid ?? null,
+        zielId: msg.id,
+        // Was diese Wirkung gesetzt hat, steht hier: nimmt der Lauf sie später
+        // zurück, greift er nur, solange lokal noch genau das steht.
+        ruecknahme: {
+          art: 'reaktion',
+          mailbox: blindMailboxId,
+          ziel: msg.clientUuid ?? null,
+          zielId: msg.id,
+          vorher,
+          nachher: neu,
+        },
       })
-    } catch {
-      // Eine Reaktion, die lokal steht und nie ankommt, ist eine Lüge — also
-      // wird sie zurückgenommen und gesagt, dass es nicht geklappt hat.
+    } catch (fehler) {
+      // Nur eine endgültige Ablehnung nimmt die Reaktion zurück. Ein Netzfehler
+      // heißt „wartet in der Outbox" — die Reaktion bleibt stehen und geht
+      // später hinaus.
+      if (!istAbweisung(fehler)) return
       const zurueck = schalteReaktion(neu, emoji, currentUserId).reaktionen
       setMessages((prev) =>
         prev.map((m) =>
@@ -116,7 +143,7 @@ export function useMessengerInteraktionen(optionen: Optionen) {
         ),
       )
       void updateMessageInLocalStore(blindMailboxId, msg.id, { reaktionen: zurueck }).catch(() => {})
-      toast.error(t('messenger.reactionFailed'))
+      toast.error(t('messenger.actionRejected'))
     }
   }
 
@@ -139,21 +166,29 @@ export function useMessengerInteraktionen(optionen: Optionen) {
     // Ein Zeitpunkt für beides. Mit zwei knapp verschiedenen käme der eigene
     // Umschlag beim nächsten Abruf als „neuer" zurück.
     const jetzt = new Date().toISOString()
+    const nachher = { clientUuid: loesen ? '' : msg.clientUuid, stand: jetzt }
     setAngeheftet(loesen ? null : msg)
-    setzeAnheftung(blindMailboxId, loesen ? '' : msg.clientUuid, jetzt)
+    setzeAnheftung(blindMailboxId, nachher.clientUuid, jetzt)
     try {
-      await sendE2eeControlMessage({
-        type: 'pin_message',
-        ...bezugFelder(msg),
-        aktion: loesen ? 'loesen' : 'anheften',
-        actor_id: currentUserId,
-        zeitpunkt: jetzt,
+      await sendeWirkung({
+        typ: 'pin_message',
+        felder: {
+          type: 'pin_message',
+          ...bezugFelder(msg),
+          aktion: loesen ? 'loesen' : 'anheften',
+          actor_id: currentUserId,
+          zeitpunkt: jetzt,
+        },
+        ziel: msg.clientUuid,
+        zielId: msg.id,
+        ruecknahme: { art: 'anheftung', mailbox: blindMailboxId, vorher, nachher },
       })
       toast.success(loesen ? t('messenger.unpinned') : t('messenger.pinned'))
-    } catch {
+    } catch (fehler) {
+      if (!istAbweisung(fehler)) return
       setAngeheftet(loesen ? msg : null)
       setzeAnheftung(blindMailboxId, vorher.clientUuid, vorher.stand || jetzt)
-      toast.error(t('messenger.pinFailed'))
+      toast.error(t('messenger.actionRejected'))
     }
   }
 

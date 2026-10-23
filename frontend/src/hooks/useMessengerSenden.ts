@@ -66,6 +66,8 @@ import { vergissMailbox } from '@/services/verlaufSuche'
 import { findeErwaehnungen } from '@/services/erwaehnungen'
 import { verfaelltAm as berechneVerfall } from '@/services/nachrichtVerfall'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu } from '@/services/nachrichtVersand'
+import { istAbweisung, type SteuerAusgang } from '@/services/steuerOutbox'
+import type { SteuerEintrag } from '@/services/steuerOutboxTypen'
 import {
   baueAugenblickNutzlast,
   baueWiederherstellungNutzlast,
@@ -162,7 +164,8 @@ interface Optionen {
   entwuerfe: { verwirf: (mailboxId: string) => void }
   konversation: Konversation
   loadMessages: (isInitial?: boolean) => Promise<void>
-  sendE2eeControlMessage: (payload: Record<string, unknown>) => Promise<void>
+  /** Einreihen mit Sofortversuch; wirft nur bei endgültiger Ablehnung. */
+  sendeWirkung: (eintrag: SteuerEintrag) => Promise<SteuerAusgang>
   getOutbox: typeof getOutbox
   setOutbox: (items: ReturnType<typeof getOutbox>) => void
 }
@@ -213,7 +216,7 @@ export function useMessengerSenden(optionen: Optionen) {
     entwuerfe,
     konversation,
     loadMessages,
-    sendE2eeControlMessage,
+    sendeWirkung,
     getOutbox,
     setOutbox,
   } = optionen
@@ -254,63 +257,93 @@ export function useMessengerSenden(optionen: Optionen) {
       return
     }
     const bearbeitetAm = new Date().toISOString()
-    try {
-      await sendE2eeControlMessage({
-        type: 'edit_message',
-        target_id: msg.id,
-        target_client_uuid: msg.clientUuid,
-        new_text: cleanText,
-        edited_at: bearbeitetAm,
-      })
-
-      /**
-       * Die Änderung auch hier anwenden — und zwar selbst, nicht über den
-       * Umschlag.
-       *
-       * Der Steuerumschlag ist gegen die Geräte der Gegenseite versiegelt. Wer
-       * mit dem Double Ratchet verschlüsselt, kann sein eigenes Erzeugnis nicht
-       * wieder öffnen; beim nächsten `loadMessages` liegt für dieses Gerät
-       * nichts vor, was es in `editMap` eintragen könnte. Die Gegenseite sah die
-       * Änderung also, der Absender nie — die Nachricht stand unverändert da,
-       * obwohl die Meldung „Nachricht bearbeitet" erschien.
-       *
-       * Der eigene Verlauf ist die einzige Fassung, die dieses Gerät je hat.
-       * Also wird sie hier geändert, vor dem Neuladen: `loadMessages` liest sie
-       * von dort und würde eine spätere Änderung sonst wieder überschreiben.
-       */
-      await updateMessageInLocalStore(blindMailboxId, msg.id, {
-        text: cleanText,
-        isEdited: true,
-        editedAt: bearbeitetAm,
-      }).catch(() => {})
-
-      setMessages((prev) => {
-        const geaendert = prev.map((m) =>
-          m.id === msg.id
-            ? { ...m, text: cleanText, isEdited: true, editedAt: bearbeitetAm, originalText: m.text }
-            : m,
-        )
-        sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
-        return geaendert
-      })
-
-      toast.success(t('messenger.messageEdited'))
-      setEditingMessage(null)
-      setInputText('')
-      /**
-       * Der Entwurf muss mit weg — wie beim Senden.
-       *
-       * `setInputText('')` leert nur das Feld. Der Text lag zusätzlich als
-       * Entwurf in der Ablage, und die entprellte Übernahme schrieb ihn dort
-       * sogar noch einmal hin. Sichtbar wurde das in der Chatliste als
-       * „Entwurf: …" zu einem Chat mit leerer Eingabe, und beim nächsten
-       * Öffnen stand der bearbeitete Satz wieder im Feld.
-       */
-      entwuerfe.verwirf(blindMailboxId)
-      await loadMessages(false)
-    } catch {
-      toast.error(t('messenger.messageEditFailed'))
+    const vorher = {
+      text: msg.text,
+      isEdited: Boolean(msg.isEdited),
+      editedAt: msg.editedAt,
+      originalText: msg.originalText,
     }
+    const nachher = { text: cleanText, isEdited: true, editedAt: bearbeitetAm }
+
+    /**
+     * Die Änderung auch hier anwenden — und zwar selbst, nicht über den
+     * Umschlag.
+     *
+     * Der Steuerumschlag ist gegen die Geräte der Gegenseite versiegelt. Wer
+     * mit dem Double Ratchet verschlüsselt, kann sein eigenes Erzeugnis nicht
+     * wieder öffnen; beim nächsten `loadMessages` liegt für dieses Gerät
+     * nichts vor, was es in `editMap` eintragen könnte. Die Gegenseite sah die
+     * Änderung also, der Absender nie — die Nachricht stand unverändert da,
+     * obwohl die Meldung „Nachricht bearbeitet" erschien.
+     *
+     * Der eigene Verlauf ist die einzige Fassung, die dieses Gerät je hat.
+     * Also wird sie hier geändert. **Vor** dem Senden, seit 10/2026: die
+     * Wirkung hängt an der dauerhaften Outbox, und was wartet, muss auch hier
+     * schon stehen. Geht sie endgültig nicht hinaus, nimmt der Fangzweig sie
+     * zurück.
+     */
+    await updateMessageInLocalStore(blindMailboxId, msg.id, nachher).catch(() => {})
+
+    setMessages((prev) => {
+      const geaendert = prev.map((m) =>
+        m.id === msg.id
+          ? { ...m, text: cleanText, isEdited: true, editedAt: bearbeitetAm, originalText: m.text }
+          : m,
+      )
+      sessionChatCache.set(blindMailboxId, geaendert.slice(-80))
+      return geaendert
+    })
+
+    try {
+      await sendeWirkung({
+        typ: 'edit_message',
+        felder: {
+          type: 'edit_message',
+          target_id: msg.id,
+          target_client_uuid: msg.clientUuid,
+          new_text: cleanText,
+          edited_at: bearbeitetAm,
+        },
+        ziel: msg.clientUuid ?? null,
+        zielId: msg.id,
+        ruecknahme: {
+          art: 'bearbeitung',
+          mailbox: blindMailboxId,
+          ziel: msg.clientUuid ?? null,
+          zielId: msg.id,
+          vorher,
+          nachher: { ...nachher, originalText: msg.text },
+        },
+      })
+    } catch (fehler) {
+      // Nur eine endgültige Ablehnung nimmt die Bearbeitung zurück. Ein
+      // Netzfehler heißt „wartet in der Outbox" — die Änderung bleibt stehen.
+      if (istAbweisung(fehler)) {
+        await updateMessageInLocalStore(blindMailboxId, msg.id, vorher).catch(() => {})
+        setMessages((prev) => {
+          const zurueck = prev.map((m) => (m.id === msg.id ? { ...m, ...vorher } : m))
+          sessionChatCache.set(blindMailboxId, zurueck.slice(-80))
+          return zurueck
+        })
+        toast.error(t('messenger.actionRejected'))
+      }
+      return
+    }
+
+    toast.success(t('messenger.messageEdited'))
+    setEditingMessage(null)
+    setInputText('')
+    /**
+     * Der Entwurf muss mit weg — wie beim Senden.
+     *
+     * `setInputText('')` leert nur das Feld. Der Text lag zusätzlich als
+     * Entwurf in der Ablage, und die entprellte Übernahme schrieb ihn dort
+     * sogar noch einmal hin. Sichtbar wurde das in der Chatliste als
+     * „Entwurf: …" zu einem Chat mit leerer Eingabe, und beim nächsten
+     * Öffnen stand der bearbeitete Satz wieder im Feld.
+     */
+    entwuerfe.verwirf(blindMailboxId)
+    await loadMessages(false)
   }
 
 
@@ -373,26 +406,30 @@ export function useMessengerSenden(optionen: Optionen) {
     try {
       // 1. Die Gegenseite erfährt es. Steht am Anfang, weil nur dieser Schritt
       //    ein fremdes Gerät erreicht; was danach kommt, kann man wiederholen.
-      await sendE2eeControlMessage({
-        type: 'delete_message',
-        target_id: msg.id,
-        target_client_uuid: msg.clientUuid,
-        deleted_at: geloeschtAm,
+      //    Seit 10/2026 als dauerhafte Wirkung: ohne Netz wartet sie in der
+      //    Outbox, statt die Löschung hier abzubrechen. Der Schritt ist auch
+      //    für die eigene Löschung nötig — sonst bliebe sie auf den anderen
+      //    Geräten stehen.
+      await sendeWirkung({
+        typ: 'delete_message',
+        felder: {
+          type: 'delete_message',
+          target_id: msg.id,
+          target_client_uuid: msg.clientUuid,
+          deleted_at: geloeschtAm,
+        },
+        ziel: msg.clientUuid ?? null,
+        zielId: msg.id,
+        // Eine Löschung ist nicht umkehrbar; es gibt nichts zurückzunehmen.
+        ruecknahme: { art: 'keine' },
       })
 
-      // 2. Chiffretext und Anhänge vom Server nehmen — vor dem lokalen Tilgen.
-      //    Die Medienkennungen stehen ausschließlich in dieser Zeile; ist sie
-      //    erst ein Grabstein, findet kein zweiter Versuch die Blobs mehr.
-      let medienGeblieben = 0
-      if (fremd) {
-        ;({ medienGeblieben } = await tilgeFremdeNachrichtBeimServer(blindMailboxId, msg))
-      } else {
-        await tilgeNachrichtBeimServer(blindMailboxId, msg)
-      }
-
-      // 3. Und zuletzt dieses Gerät. Der eigene Löschbefehl kommt hier nie an:
-      //    eine Ratchet-Nachricht kann ihr Absender nicht öffnen, `deleteMap`
-      //    bliebe für diese Nachricht auf immer leer.
+      // 2. Dieses Gerät — **vor** dem Serverteil, und ohne von ihm abzuhängen.
+      //    Seit die Wirkung in der Outbox liegt, ist die Löschung auch ohne
+      //    Netz unterwegs; bliebe sie hier stehen, löschte die Gegenseite und
+      //    wir behielten sie. Der Löschbefehl des eigenen Umschlags kommt hier
+      //    nie an: eine Ratchet-Nachricht kann ihr Absender nicht öffnen,
+      //    `deleteMap` bliebe für diese Nachricht auf immer leer.
       await tilgeNachrichtLokal(blindMailboxId, msg, geloeschtAm)
 
       setMessages((prev) => {
@@ -405,6 +442,21 @@ export function useMessengerSenden(optionen: Optionen) {
         return geaendert
       })
 
+      // 3. Chiffretext und Anhänge vom Server nehmen — best effort, mit dem
+      //    `msg`-Objekt von eben. Die Medienkennungen stehen ausschließlich in
+      //    dieser Zeile; ein Fehlschlag wird gesagt, nicht verschluckt.
+      let medienGeblieben = 0
+      let serverRest = false
+      try {
+        if (fremd) {
+          ;({ medienGeblieben } = await tilgeFremdeNachrichtBeimServer(blindMailboxId, msg))
+        } else {
+          await tilgeNachrichtBeimServer(blindMailboxId, msg)
+        }
+      } catch {
+        serverRest = true
+      }
+
       if (!fremd) {
         toast.success(t('messenger.messageDeletedForAll'))
       } else if (medienGeblieben > 0) {
@@ -413,9 +465,18 @@ export function useMessengerSenden(optionen: Optionen) {
       } else {
         toast.success(t('messenger.messageRemovedByModeration'))
       }
+      if (serverRest) {
+        // Hier ist sie weg; die Serverkopie bleibt bis zum Ablauf ihrer Frist.
+        // Das zu sagen ist besser, als „für alle gelöscht" zu behaupten.
+        toast.info(t('messenger.messageServerCopyRemains'))
+      }
       await loadMessages(false)
-    } catch {
-      toast.error(t('messenger.messageDeleteFailed'))
+    } catch (fehler) {
+      toast.error(
+        istAbweisung(fehler)
+          ? t('messenger.deleteRejected')
+          : t('messenger.messageDeleteFailed'),
+      )
     }
   }
 

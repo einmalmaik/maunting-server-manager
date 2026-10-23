@@ -27,6 +27,7 @@ import { chatMediaBlobCache } from './klartextSpeicher'
 import {
   leereUmschlagKlartext,
   loescheMedium,
+  loescheSteuerAuftraegeFuerZiel,
   updateMessageInLocalStore,
 } from './messengerLocalStore'
 
@@ -136,6 +137,23 @@ export async function tilgeNachrichtLokal(
   if (msg.id > 0) {
     await leereUmschlagKlartext(blindMailboxId, msg.id)
   }
+
+  /*
+   * Und die ausstehenden Wirkungen zu dieser Nachricht.
+   *
+   * Eine Bearbeitung oder Reaktion, die noch in der Outbox steht, trägt die
+   * Kennung dieser Nachricht. Ginge sie nach der Löschung hinaus, lebte die
+   * Nachricht bei der Gegenseite wieder auf — genau das, was eine Löschung
+   * verhindern soll. Die Löschung selbst bleibt in der Warteschlange; sie muss
+   * weitergehen, auch wenn sie noch nicht draußen ist.
+   *
+   * Ein Fehler dabei ist keiner: die Nachricht ist lokal weg, und ein
+   * liegengebliebener Auftrag scheitert später an ihr.
+   */
+  await loescheSteuerAuftraegeFuerZiel(blindMailboxId, {
+    clientUuid: msg.clientUuid,
+    id: msg.id,
+  })
 
   /*
    * Und der Anhang selbst.

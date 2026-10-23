@@ -22,6 +22,10 @@ const ablage = {
   updateMessageInLocalStore: vi.fn(async () => {}),
   leereUmschlagKlartext: vi.fn(async () => {}),
   loescheMedium: vi.fn(async () => {}),
+  // Seit 10/2026 hängt an jedem lokalen Löschen das Aufräumen der Outbox:
+  // eine ausstehende Bearbeitung darf die Nachricht nicht wieder aufleben
+  // lassen. Was das tut, prüft `steuerOutbox.test.ts`.
+  loescheSteuerAuftraegeFuerZiel: vi.fn(async () => 0),
 }
 vi.mock('./messengerLocalStore', () => ablage)
 

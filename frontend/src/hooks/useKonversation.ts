@@ -47,6 +47,12 @@ import {
   sendeSteuerpaket as sendeSteuerpaketDienst,
   type SteuerKontext,
 } from '@/services/gespraech/steuerung'
+import {
+  sendeWirkung as sendeWirkungDienst,
+  type SteuerAusgang,
+} from '@/services/steuerOutbox'
+import { stosseSteuerOutboxAn } from '@/services/steuerOutboxLauf'
+import type { SteuerEintrag } from '@/services/steuerOutboxTypen'
 
 /** Mit wem oder was gesprochen wird. */
 export type GespraechsZiel =
@@ -158,8 +164,21 @@ export interface Konversation {
    * Derselbe Weg wie `baueSteuerversand`, nur vollständig: der Aufrufer
    * liefert den Inhalt, die Kennung entsteht hier. Der Hintergrundlauf des
    * Gerätepostfachs nimmt ihn für Zustellquittungen ohne offenen Chat.
+   *
+   * **Quittungen bleiben hier draußen.** Sie sind kumulativ, klein und häufig;
+   * ein Stau in einer Warteschlange würde genau das kaputt machen, was sie
+   * belegen. Eine verlorene Quittung kostet ein Häkchen.
    */
   sendeSteuerpaket: (payloadObj: Record<string, unknown>) => Promise<string | null>
+  /**
+   * Eine Wirkung auf eine bestehende Nachricht (Bearbeiten, Löschen, Reaktion,
+   * Anheften, Verfall) — mit dauerhafter Outbox.
+   *
+   * Scheitert der Sofortversuch am Netz, liegt die Wirkung in der Ablage und
+   * geht später hinaus; der Aufrufer behält seine lokale Wirkung. Eine
+   * endgültige Ablehnung wirft, und der Aufrufer nimmt zurück.
+   */
+  sendeWirkung: (eintrag: SteuerEintrag) => Promise<SteuerAusgang>
 }
 
 /**
@@ -512,6 +531,19 @@ export function useKonversation({
     [steuerKontext],
   )
 
+  /**
+   * Wirkungen gehen über die Outbox; nach einem erfolgreichen Senden wird
+   * angestoßen, was ältere Aufträge noch offen hat.
+   */
+  const sendeWirkung = useCallback(
+    async (eintrag: SteuerEintrag): Promise<SteuerAusgang> => {
+      const ausgang = await sendeWirkungDienst(steuerKontext(), eintrag)
+      if (ausgang === 'gesendet') void stosseSteuerOutboxAn().catch(() => {})
+      return ausgang
+    },
+    [steuerKontext],
+  )
+
   return {
     blindMailboxId,
     leseMailboxen,
@@ -521,5 +553,6 @@ export function useKonversation({
     baueVersand,
     baueSteuerversand,
     sendeSteuerpaket,
+    sendeWirkung,
   }
 }
