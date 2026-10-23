@@ -177,7 +177,7 @@ function Wetterwahl() {
         </p>
       )}
       {fehler && (
-        <p role="alert" className="flex items-center gap-2 text-label-sm text-status-error">
+        <p role="alert" className="flex items-center gap-2 text-label-sm text-status-destructive">
           {t('browser.einstellungen.wetterSucheFehler')}
           <button type="button" className="underline" onClick={() => setVersuch((n) => n + 1)}>
             {t('browser.einstellungen.wetterErneut')}
