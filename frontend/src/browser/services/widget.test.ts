@@ -40,12 +40,25 @@ describe('Such-Widget', () => {
     widgetAusfuehren({ art: 'link', url: 'https://example.com/artikel?id=3' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'javascript:alert(1)' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'file:///sdcard/Download/a.html' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'data:text/html,<b>x</b>' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'blob:https://example.org/x' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'ftp://example.org/a' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: 'mailto:hilfe@example.org' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: '' }, adresszeile)
+    widgetAusfuehren({ art: 'link', url: '   ' }, adresszeile)
     widgetAusfuehren({ art: 'link', url: 'pontis://einstellungen' }, adresszeile)
     expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual([
       'https://example.com/artikel?id=3',
       'pontis://einstellungen',
     ])
     expect(adresszeile).not.toHaveBeenCalled()
+  })
+
+  it('öffnet eine gefährliche Adresse auch als privaten Link nicht', () => {
+    widgetAusfuehren({ art: 'link', url: 'javascript:alert(1)', privat: true }, adresszeile)
+
+    const tab = useTabsStore.getState().tabs[0]
+    expect(tab).toMatchObject({ url: '', privat: true })
   })
 
   it('öffnet Link im vorhandenen einzelnen leeren Tab oder erzeugt privaten Tab', () => {

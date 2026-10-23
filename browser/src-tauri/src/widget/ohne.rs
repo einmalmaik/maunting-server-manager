@@ -164,9 +164,31 @@ mod tests {
     fn nimmt_nur_webadressen_von_aussen() {
         assert_eq!(link_aus("https://example.org/a?b=1").as_deref(), Some("https://example.org/a?b=1"));
         assert_eq!(link_aus("http://example.org").as_deref(), Some("http://example.org/"));
-        for fremd in ["--remote-debugging-port=1", "file:///C:/Windows/win.ini", "javascript:alert(1)", "C:\\a.html", "ms-settings:"] {
+        // Beide eigenen Schemata dürfen von außen kommen; `msb` bleibt für
+        // bestehende Verknüpfungen lesbar, `pontis` ist der neue Name.
+        assert!(link_aus("pontis://einstellungen/suche").is_some());
+        assert!(link_aus("msb://einstellungen").is_some());
+        // Groß-/Kleinschreibung des Schemas ist für URLs unerheblich.
+        assert_eq!(link_aus("HTTPS://Example.ORG/A").as_deref(), Some("https://example.org/A"));
+        for fremd in [
+            "--remote-debugging-port=1",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "ftp://example.org/a",
+            "mailto:hilfe@example.org",
+            "tel:+4930123456",
+            "//example.org/ohne-schema",
+            "https://",
+            "C:\\a.html",
+            "ms-settings:",
+        ] {
             assert_eq!(link_aus(fremd), None, "{fremd}");
         }
         assert_eq!(link_aus(&format!("https://example.org/{}", "a".repeat(9000))), None);
+        // Genau an der Grenze bleibt die Adresse erhalten.
+        let grenze = format!("https://example.org/{}", "a".repeat(super::LINK_MAX - "https://example.org/".len()));
+        assert_eq!(grenze.len(), super::LINK_MAX);
+        assert!(link_aus(&grenze).is_some());
     }
 }

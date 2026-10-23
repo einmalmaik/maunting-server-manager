@@ -317,6 +317,30 @@ mod tests {
         );
     }
 
+    /// Jeder Wert wird genau einmal geschrieben, und kein Wert zeigt mehr auf
+    /// den früheren Clientnamen. Doppelte Einträge würden sich beim Anlegen
+    /// gegenseitig überschreiben; der alte Zweig bliebe als Leiche stehen.
+    #[test]
+    fn die_anmeldung_ist_eindeutig_und_ohne_alten_client() {
+        let liste = anmeldung(r"C:\Program Files\Maunting Pontis\MauntingPontis.exe");
+        let mut gesehen = std::collections::HashSet::new();
+        for wert in &liste {
+            assert!(
+                gesehen.insert((wert.zweig.clone(), wert.name)),
+                "doppelter Wert: {} {:?}",
+                wert.zweig,
+                wert.name
+            );
+            assert!(!wert.zweig.starts_with(CLIENT_ALT), "alter Client: {}", wert.zweig);
+        }
+        // Der Anwendungszweig wird auch bei Schrägstrichen richtig benannt.
+        let vorwaerts = anmeldung("C:/Program Files/Maunting Pontis/MauntingPontis.exe");
+        assert_eq!(
+            wert(&vorwaerts, r"Software\Classes\Applications\MauntingPontis.exe", None),
+            Some(NAME)
+        );
+    }
+
     /// Die Befehle nennen den Pfad in Anführungszeichen (ein Leerzeichen im
     /// Programmpfad zerlegte ihn sonst) und die Dateizuordnung gibt `%1` weiter.
     #[test]

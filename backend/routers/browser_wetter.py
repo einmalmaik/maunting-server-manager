@@ -8,11 +8,12 @@ Oberfläche zeigt dann „nicht eingerichtet“ statt eines leeren Kastens.
 
 from __future__ import annotations
 
+import math
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from limits import parse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from dependencies import get_current_user, get_db, verify_csrf
@@ -28,10 +29,23 @@ _token_grenze = parse("10/minute")
 
 
 class WetterAnfrage(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # `NaN` und `Infinity` sind in JSON nicht vorgesehen, kommen aber als
+    # Python-Literale durch den Parser; ohne die Sperre umgingen sie die
+    # Bereichsprüfung.
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     lat: Annotated[float, Field(ge=-90, le=90)]
     lon: Annotated[float, Field(ge=-180, le=180)]
+
+    @field_validator("lat", "lon", mode="before")
+    @classmethod
+    def _endlich(cls, wert: object) -> object:
+        # `NaN` und `Infinity` nimmt der JSON-Parser an, obwohl sie kein JSON
+        # sind. Ein einfacher Fehlerwert verhindert, dass die Fehlerantwort
+        # selbst wieder ein nicht serialisierbares `NaN` enthält.
+        if isinstance(wert, float) and not math.isfinite(wert):
+            return "ungueltig"
+        return wert
 
 
 def _mit_code(status_code: int, code: str) -> HTTPException:

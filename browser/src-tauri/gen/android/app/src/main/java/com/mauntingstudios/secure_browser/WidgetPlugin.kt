@@ -176,9 +176,7 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
     val a = invoke.parseArgs(WetterSetzenArgs::class.java)
     aufUi(activity, invoke) {
       val basis = a.basis.trim().trimEnd('/')
-      require(
-        basis.startsWith("https://") || basis.startsWith("http://127.0.0.1") || basis.startsWith("http://localhost"),
-      ) { "Ungültige MSM-Adresse" }
+      require(wetterBasisErlaubt(basis)) { "Ungültige MSM-Adresse" }
       val cipher = Schluesselfach.cipherZumAblegen("widget_wetter_token")
       Schluesselfach.legeAb(activity, "widget_wetter_token", cipher, a.token)
       val anzeigeOrt = listOf(a.ort, a.land).filter { it.isNotBlank() }.joinToString(", ")

@@ -371,6 +371,33 @@ mod tests {
         }
     }
 
+    /// Links aus anderen Apps kommen nur als http/https in den Browser. Das
+    /// Manifest darf dafür keine lokalen Dateien oder beliebige Schemata öffnen.
+    #[test]
+    fn android_nimmt_nur_web_links_an() {
+        let manifest = include_str!("../gen/android/app/src/main/AndroidManifest.xml");
+        for teil in [
+            "android.intent.action.VIEW",
+            "android.intent.category.DEFAULT",
+            "android.intent.category.BROWSABLE",
+            "android:scheme=\"http\"",
+            "android:scheme=\"https\"",
+            "android:launchMode=\"singleTask\"",
+            "android:name=\".WetterWidget\"",
+            "android:name=\".SuchWidget\"",
+        ] {
+            assert!(manifest.contains(teil), "fehlt: {teil}");
+        }
+        for fremd in [
+            "android:scheme=\"file\"",
+            "android:scheme=\"content\"",
+            "android:scheme=\"*\"",
+            "android:scheme=\"data\"",
+        ] {
+            assert!(!manifest.contains(fremd), "zu weit: {fremd}");
+        }
+    }
+
     /// Das Schlüsselfach unter Android ist in MSS und MSB dieselbe Datei; nur das
     /// Paket unterscheidet sich. Eine Kopie, die still veraltet, träfe Keystore
     /// und Biometrie.

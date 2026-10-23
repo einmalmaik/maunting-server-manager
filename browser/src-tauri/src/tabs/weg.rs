@@ -325,6 +325,18 @@ mod tests {
     }
 
     #[test]
+    fn eigene_und_kaputte_adressen_gehen_nie_ans_system() {
+        for ziel in ["pontis://einstellungen", "msb://suche?q=x", "PONTIS://EINSTELLUNGEN"] {
+            assert_eq!(externes_protokoll(ziel), None, "{ziel}");
+            assert_eq!(weg(ziel, false), Weg::Verboten, "{ziel}");
+        }
+        for kaputt in ["", "   ", "https://", "://example.org/", "kaputt"] {
+            assert_eq!(externes_protokoll(kaputt), None, "{kaputt}");
+            assert_eq!(weg(kaputt, false), Weg::Verboten, "{kaputt}");
+        }
+    }
+
+    #[test]
     fn die_oberflaeche_oeffnet_nur_webseiten() {
         assert!(ziel_pruefen("https://www.google.com/search?q=x").is_ok());
         assert!(ziel_pruefen("about:blank").is_err());

@@ -78,7 +78,14 @@ export const tabsSpeichern: PersistOptions<TabsZustand, unknown> = {
             t
           ),
         }
-        return { ...geladen, url: aufPontis(geladen.url) }
+        return {
+          ...geladen,
+          url: aufPontis(geladen.url),
+          // `passend` lässt bei einer Vorgabe `null` jeden einfachen Wert zu;
+          // diese beiden Felder sind aber nie Zahlen oder Wahrheitswerte.
+          favicon: typeof geladen.favicon === 'string' ? geladen.favicon : null,
+          elternId: typeof geladen.elternId === 'string' ? geladen.elternId : null,
+        }
       })
     const aktivId = tabs.find((t) => t.id === g.aktivId)?.id
     return aktivId ? { ...aktuell, tabs, aktivId } : aktuell

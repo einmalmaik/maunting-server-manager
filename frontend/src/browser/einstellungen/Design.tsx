@@ -19,6 +19,7 @@ import {
   EIGENES_BILD_MAX_BYTES,
   KNOEPFE,
   NACHRICHTEN_THEMEN,
+  istWetterOrt,
   useEinstellungenStore,
   type Hintergrund,
   type Leistenort,
@@ -121,7 +122,7 @@ function Wetterwahl() {
     const timer = window.setTimeout(() => {
       api<{ orte: WetterOrt[] }>(`/browser/wetter/orte?q=${encodeURIComponent(q)}`).then(
         (antwort) => {
-          if (!weg) setTreffer(Array.isArray(antwort.orte) ? antwort.orte : [])
+          if (!weg) setTreffer(Array.isArray(antwort.orte) ? antwort.orte.filter(istWetterOrt) : [])
         },
         () => {
           if (!weg) setTreffer([])

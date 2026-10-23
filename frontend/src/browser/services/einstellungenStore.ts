@@ -74,6 +74,24 @@ export interface WetterOrt {
   lon: number
 }
 
+/** Ein gespeicherter oder gelieferter Ort muss vollständig und endlich sein. */
+export function istWetterOrt(wert: unknown): wert is WetterOrt {
+  if (!wert || typeof wert !== 'object') return false
+  const ort = wert as Record<string, unknown>
+  return (
+    typeof ort.name === 'string' &&
+    typeof ort.land === 'string' &&
+    typeof ort.lat === 'number' &&
+    Number.isFinite(ort.lat) &&
+    ort.lat >= -90 &&
+    ort.lat <= 90 &&
+    typeof ort.lon === 'number' &&
+    Number.isFinite(ort.lon) &&
+    ort.lon >= -180 &&
+    ort.lon <= 180
+  )
+}
+
 /** Themen der Nachrichten; die Suchbegriffe dazu stehen im Backend (`browser_nachrichten_service.THEMEN`). */
 export type NachrichtenThema = 'technik' | 'gaming' | 'politik' | 'wirtschaft' | 'wissenschaft' | 'sport'
 export const NACHRICHTEN_THEMEN: NachrichtenThema[] = ['technik', 'gaming', 'politik', 'wirtschaft', 'wissenschaft', 'sport']
@@ -228,6 +246,12 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       },
       merge: (gespeichert, aktuell) => {
         const g = passend(aktuell, gespeichert)
+        // `passend` nimmt bei einer Vorgabe `null` keine Objekte an; der Ort
+        // ist aber genau das. Deshalb ausdrücklich prüfen und übernehmen.
+        const ort = (gespeichert as { wetterOrt?: unknown } | null)?.wetterOrt
+        if (istWetterOrt(ort)) g.wetterOrt = ort
+        else delete g.wetterOrt
+        if (g.wetterEinheit !== 'celsius' && g.wetterEinheit !== 'fahrenheit') delete g.wetterEinheit
         return { ...aktuell, ...g, schnellzugriffe: g.schnellzugriffe ?? bisherigeKacheln() ?? aktuell.schnellzugriffe }
       },
     },

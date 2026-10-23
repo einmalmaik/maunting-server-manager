@@ -37,9 +37,7 @@ class WetterWorker(appContext: Context, params: WorkerParameters) : CoroutineWor
     val lat = ablage.getFloat("lat", Float.NaN)
     val lon = ablage.getFloat("lon", Float.NaN)
     if (basis.isNullOrBlank() || lat.isNaN() || lon.isNaN()) return@withContext Result.success()
-    if (!basis.startsWith("https://") && !basis.startsWith("http://127.0.0.1") && !basis.startsWith("http://localhost")) {
-      return@withContext Result.success()
-    }
+    if (!wetterBasisErlaubt(basis)) return@withContext Result.success()
     val token = try {
       val cipher = Schluesselfach.cipherZumLesen(applicationContext, "widget_wetter_token")
       cipher?.let { Schluesselfach.lies(applicationContext, "widget_wetter_token", it) }

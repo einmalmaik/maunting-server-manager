@@ -30,6 +30,14 @@ describe('intern', () => {
     expect(interneSeite('https://einstellungen')).toBeNull()
   })
 
+  it('erkennt nur das exakte eigene Schema, nicht eine andere Schreibweise', () => {
+    expect(istIntern('MSB://einstellungen')).toBe(false)
+    expect(aufPontis('MSB://einstellungen')).toBe('MSB://einstellungen')
+    expect(istIntern('pontis://')).toBe(true)
+    expect(interneSeite('pontis://')).toBeNull()
+    expect(interneSeite('pontis://einstellungen/')).toEqual({ seite: 'einstellungen', teil: null })
+  })
+
   it('trägt den Suchbegriff in seiner Schreibweise in der Adresse', () => {
     const adresse = msmSucheAdresse('  C++ & Rust? #1  ')
     expect(adresse.startsWith('pontis://suche?q=')).toBe(true)

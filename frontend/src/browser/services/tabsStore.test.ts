@@ -408,6 +408,21 @@ describe('zurueckGehen und Verlauf', () => {
     delete antworten.fenster_start_info
   })
 
+  it('öffnet beim Kaltstart keine gefährliche Adresse aus einem fremden Programm', async () => {
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite.example/' }],
+      aktivId: 'alt-1',
+    })
+
+    for (const start_url of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'data:text/html,<b>x</b>', 'ftp://example.org/']) {
+      antworten.fenster_start_info = { ist_neues_fenster: false, start_url, privat: false }
+      await useTabsStore.getState().hochfahren()
+      expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual(['https://alte-seite.example/'])
+    }
+
+    delete antworten.fenster_start_info
+  })
+
   it('hochfahren im Hauptfenster öffnet einen privaten Link in einem privaten Tab', async () => {
     antworten.fenster_start_info = {
       ist_neues_fenster: false,
