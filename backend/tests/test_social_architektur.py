@@ -125,7 +125,7 @@ def test_social_service_setzt_alle_domaenen_zusammen() -> None:
     assert not fehlend, f"SocialService erreicht nicht: {fehlend}"
 
 
-def test_sozialrouter_behaelt_allen_66_vertraegen() -> None:
+def test_sozialrouter_behaelt_allen_vertraegen() -> None:
     assert social_router.prefix == "/api/social"
 
     vertraege: list[tuple[str, str]] = []
@@ -135,7 +135,7 @@ def test_sozialrouter_behaelt_allen_66_vertraegen() -> None:
         else:
             vertraege.append(("WEBSOCKET", route.path))
 
-    assert len(vertraege) == 66, f"Erwartet 66 Social-Routen, gefunden {len(vertraege)}"
+    assert len(vertraege) == 69, f"Erwartet 69 Social-Routen, gefunden {len(vertraege)}"
     doppelt = sorted({v for v in vertraege if vertraege.count(v) > 1})
     assert not doppelt, f"Doppelte Route-Verträge: {doppelt}"
 
@@ -144,6 +144,8 @@ def test_sozialrouter_behaelt_allen_66_vertraegen() -> None:
         "/api/social/friends",
         "/api/social/profile/{target_user_id}",
         "/api/social/e2ee/relay",
+        "/api/social/e2ee/deliveries",
+        "/api/social/e2ee/deliveries/ack",
         "/api/social/media/upload",
         "/api/social/groups",
         "/api/social/stories",
