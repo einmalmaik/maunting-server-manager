@@ -4,19 +4,22 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const nativ = vi.hoisted(() => ({ sprachdatenLaden: vi.fn() }))
+const plattform = vi.hoisted(() => ({ android: false }))
 vi.mock('../services/nativ', () => ({ nativ }))
+vi.mock('../services/plattform', () => ({ istAndroid: () => plattform.android }))
 
-import { CDN, fehlendeGroesse, holen, quellen, spracheVon, weg, type Datei } from './modelle'
+import { CDN, dateienVon, entfernen, fehlendeGroesse, geladen, holen, quellen, spracheVon, weg, type Datei } from './modelle'
 
 describe('Wege zwischen Sprachen', () => {
   it('nimmt das direkte Modell oder geht über Englisch', () => {
     expect(weg('de', 'en')).toEqual(['de-en'])
     expect(weg('en', 'de')).toEqual(['en-de'])
     expect(weg('fr', 'de')).toEqual(['fr-en', 'en-de'])
+    expect(weg('ja', 'de')).toEqual(['ja-en', 'en-de'])
     expect(weg('de', 'de')).toBeNull()
     expect(weg('', 'de')).toBeNull()
     expect(weg('xx', 'en')).toBeNull()
-    expect(quellen('de')).toContain('fr')
+    expect(quellen('de')).toEqual(expect.arrayContaining(['fr', 'ja', 'ko', 'zh-Hans']))
     expect(quellen('de')).not.toContain('de')
   })
 
@@ -24,10 +27,23 @@ describe('Wege zwischen Sprachen', () => {
     expect(spracheVon('de-DE')).toBe('de')
     expect(spracheVon('EN_us')).toBe('en')
     expect(spracheVon('zh-TW')).toBe('zh-Hant')
-    expect(spracheVon('zh-CN')).toBe('')
+    expect(spracheVon('zh-Hant')).toBe('zh-Hant')
+    expect(spracheVon('zh-CN')).toBe('zh-Hans')
+    expect(spracheVon('zh')).toBe('zh-Hans')
+    expect(spracheVon('zh-SG')).toBe('zh-Hans')
+    expect(spracheVon('ja-JP')).toBe('ja')
+    expect(spracheVon('ko-KR')).toBe('ko')
     expect(spracheVon('no')).toBe('nb')
     expect(spracheVon('tlh')).toBe('')
     expect(spracheVon('')).toBe('')
+  })
+
+  it('nimmt auf Android die dort angebotene, kleinere Fassung', () => {
+    plattform.android = false
+    expect(dateienVon('ja-en').dateien.model?.groesse).toBe(59_504_955)
+    plattform.android = true
+    expect(dateienVon('ja-en').dateien.model?.groesse).toBe(43_977_787)
+    plattform.android = false
   })
 })
 
@@ -56,11 +72,13 @@ describe('Laden und Prüfen', () => {
         match: async (url: string) => ablage.get(url)?.clone(),
         put: async (url: string, r: Response) => void ablage.set(url, r),
         delete: async (url: string) => ablage.delete(url),
+        keys: async () => [...ablage.keys()].map((url) => ({ url })),
       }),
     })
   })
   afterEach(() => {
     vi.unstubAllGlobals()
+    plattform.android = false
     nativ.sprachdatenLaden.mockReset()
   })
 
@@ -105,5 +123,16 @@ describe('Laden und Prüfen', () => {
   it('zählt, was noch fehlt', async () => {
     const gesamt = await fehlendeGroesse(['de-en'])
     expect(gesamt).toBeGreaterThan(30_000_000)
+  })
+
+  it('zählt und entfernt auf Android die Android-Fassung', async () => {
+    plattform.android = true
+    const { dateien } = dateienVon('ja-en')
+    for (const d of Object.values(dateien)) ablage.set(CDN + d.ort, new Response(''))
+    const groesse = Object.values(dateien).reduce((n, d) => n + d.groesse, 0)
+    expect(await geladen()).toContainEqual({ paar: 'ja-en', groesse })
+    await entfernen('ja-en')
+    expect(ablage.size).toBe(0)
+    plattform.android = false
   })
 })

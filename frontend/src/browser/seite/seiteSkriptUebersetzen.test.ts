@@ -25,6 +25,7 @@ beforeAll(() => {
 
 const schritt = (nr: number, schritt: string, texte?: string[]) => empfangen({ data: { t: 'uebersetzen', nr, schritt, texte } })
 const zuletzt = () => gesendet[gesendet.length - 1]
+const metaWeg = () => document.head.querySelectorAll('meta[http-equiv], meta[name], meta[property]').forEach((m) => m.remove())
 
 const SEITE = `
   <h1>Willkommen</h1>
@@ -43,9 +44,39 @@ const SEITE = `
 describe('Übersetzen in der Seite', () => {
   beforeEach(() => {
     document.documentElement.setAttribute('lang', 'de-DE')
+    metaWeg()
     document.body.innerHTML = SEITE
     schritt(0, 'original')
     gesendet.length = 0
+  })
+
+  it('nimmt die Sprache aus einer Meta-Angabe, wenn lang fehlt', () => {
+    document.documentElement.removeAttribute('lang')
+    document.head.insertAdjacentHTML('beforeend', '<meta http-equiv="Content-Language" content="ja-JP, en">')
+    document.body.innerHTML = '<p>こんにちは</p>'
+    schritt(1, 'start')
+    expect(zuletzt().sprache).toBe('ja-JP')
+  })
+
+  it('nimmt die Sprache aus og:locale, wenn lang und Meta fehlen', () => {
+    document.documentElement.removeAttribute('lang')
+    document.head.insertAdjacentHTML('beforeend', '<meta property="og:locale" content="fr_FR">')
+    document.body.innerHTML = '<p>Bonjour</p>'
+    schritt(1, 'start')
+    expect(zuletzt().sprache).toBe('fr_FR')
+  })
+
+  it('nimmt lang an einem Rahmen, wenn das Dokument keine Sprache nennt', () => {
+    document.documentElement.removeAttribute('lang')
+    document.body.innerHTML = '<div lang="ja"><p>こんにちは</p></div>'
+    schritt(1, 'start')
+    expect(zuletzt().sprache).toBe('ja')
+  })
+
+  it('lässt lang am Dokument vor Meta-Angaben gelten', () => {
+    document.head.insertAdjacentHTML('beforeend', '<meta name="language" content="ja">')
+    schritt(1, 'start')
+    expect(zuletzt().sprache).toBe('de-DE')
   })
 
   it('schickt nichts ohne Anfrage und nimmt kein „weiter“ ohne Start', () => {

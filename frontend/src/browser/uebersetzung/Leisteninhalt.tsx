@@ -19,7 +19,14 @@ export function Leisteninhalt({ tab, e }: { tab: string; e: Eintrag }) {
   const { t, i18n } = useTranslation()
   const { waehlen, starten, original, schliessen } = useUebersetzung.getState()
   const namen = new Intl.DisplayNames([i18n.language], { type: 'language' })
-  const name = (s: string) => (s ? (namen.of(s) ?? s) : '')
+  const name = (s: string) => {
+    if (!s) return ''
+    try {
+      return namen.of(s) ?? s
+    } catch {
+      return s
+    }
+  }
   const leiste = (text: string, kinder?: React.ReactNode) => (
     <Leiste
       text={text}
@@ -60,10 +67,14 @@ export function Leisteninhalt({ tab, e }: { tab: string; e: Eintrag }) {
         </Button>,
       )
     case 'wahl': {
-      const { fehlt } = e.stand
+      const { fehlt, seitenSprache } = e.stand
       const moeglich = !!weg(e.von, e.nach)
       const text = !moeglich
-        ? t('browser.uebersetzung.waehlen')
+        ? seitenSprache
+          ? t('browser.uebersetzung.spracheNichtVerfuegbar', { sprache: name(seitenSprache) || seitenSprache })
+          : e.von
+            ? t('browser.uebersetzung.zielGleich')
+            : t('browser.uebersetzung.spracheNichtErkannt')
         : fehlt
           ? t('browser.uebersetzung.zustimmung', { groesse: formatBytes(fehlt) })
           : t('browser.uebersetzung.bereit')
