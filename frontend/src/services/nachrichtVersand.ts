@@ -35,7 +35,11 @@ import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
 import { sendeZustellungen, type ZustellEintrag, type ZustellPayload } from './e2eeZustellung'
 import { speichereMedium } from './messengerLocalStore'
-
+import {
+  entferneZustellung,
+  hatZustellung,
+  merkeZustellstand,
+} from './ratchetSpeicher'
 /**
  * Legt den Anhang zusätzlich dauerhaft ab.
  *
@@ -296,6 +300,25 @@ export function baueNutzlast(angaben: Nutzlastangaben): Record<string, unknown> 
   return payloadObj
 }
 
+/** Der HTTP-Status eines Fehlers, sofern er einen trägt. */
+function statusVon(fehler: unknown): number | null {
+  const status = (fehler as { status?: unknown } | null)?.status
+  return typeof status === 'number' ? status : null
+}
+
+/**
+ * Die Absichtsfragen dürfen den Versand nicht aufhalten.
+ *
+ * Fehlt die Ratchet-Ablage (Tests, ein Browser ohne IndexedDB), gibt es eben
+ * keine Absichten — dann trägt die Offline-Outbox wie bisher. Ein Fehler beim
+ * Merken ist dagegen ernst: er bedeutet, dass ein Absturz den Umschlag
+ * verlieren könnte. Deshalb wird er hier nicht verschluckt, sondern nur die
+ * Frage „gibt es eine Absicht?" mit Nein beantwortet.
+ */
+async function hatAbsicht(clientUuid: string): Promise<boolean> {
+  return hatZustellung(clientUuid).catch(() => false)
+}
+
 /**
  * Stellt die Umschläge einer Nachricht zu, oder reiht sie für später ein.
  */
@@ -334,13 +357,13 @@ export async function stelleZu(
   }
 
   for (const [mailbox, gruppe] of nachInbox) {
-    const jeKennung = new Map<string, Versandauftrag>()
+    const jeKennung = new Map<string, { auftrag: Versandauftrag; payloadId: string }>()
     const payloads: ZustellPayload[] = []
     const eintraege: ZustellEintrag[] = []
     for (const auftrag of gruppe) {
       const payloadId = crypto.randomUUID()
       const deliveryId = crypto.randomUUID()
-      jeKennung.set(deliveryId, auftrag)
+      jeKennung.set(deliveryId, { auftrag, payloadId })
       payloads.push({
         id: payloadId,
         ciphertext: auftrag.ciphertext_envelope,
@@ -352,26 +375,69 @@ export async function stelleZu(
         inbox_hash: String(auftrag.ziel_inbox),
       })
     }
+    /*
+     * Die Kennungen stehen **vor** dem HTTP-Aufruf in der Absicht.
+     *
+     * Ging die Antwort verloren — Absturz, Netz weg, Zeitüberschreitung —,
+     * wiederholt der nächste Lauf den Auftrag mit genau diesen Kennungen. Der
+     * Server gibt dann den angenommenen Auftrag zurück, statt einen zweiten
+     * anzulegen; die Gegenstelle sieht die Nachricht einmal.
+     */
+    for (const [deliveryId, eintrag] of jeKennung) {
+      await merkeZustellstand(eintrag.auftrag.client_uuid, {
+        zustellung: { payloadId: eintrag.payloadId, deliveryId },
+      }).catch(() => {})
+    }
     try {
       const antwort = await sendeZustellungen(mailbox, payloads, eintraege)
       for (const an of antwort.angenommen) {
-        const auftrag = jeKennung.get(an.delivery_id)
+        const eintrag = jeKennung.get(an.delivery_id)
+        if (!eintrag) continue
+        // Angenommen heißt erledigt — die Absicht fällt.
+        await entferneZustellung(eintrag.auftrag.client_uuid).catch(() => {})
+        const auftrag = eintrag.auftrag
         // Die Annahmenummer ist global; die kleinste der Auffaecherung gilt
         // als Kennung dieser Nachricht — genau wie beim alten Weg.
-        if (!auftrag || auftrag.is_control || !(an.seq > 0)) continue
+        if (auftrag.is_control || !(an.seq > 0)) continue
         if (niedrigsteId === 0 || an.seq < niedrigsteId) {
           niedrigsteId = an.seq
           idQuelle = 'inbox'
         }
       }
       for (const ab of antwort.abgelehnt) {
-        const auftrag = jeKennung.get(ab.delivery_id)
-        if (!auftrag) continue
-        ueberMailbox.push(auftrag)
+        const eintrag = jeKennung.get(ab.delivery_id)
+        if (!eintrag) continue
+        // Dieses Gerät nimmt den neuen Weg nicht (mehr). Der Umschlag bleibt
+        // gültig; die Absicht merkt sich, dass nur noch die Mailbox zählt.
+        await merkeZustellstand(eintrag.auftrag.client_uuid, {
+          zustellung: null,
+          nurMailbox: true,
+        }).catch(() => {})
+        ueberMailbox.push(eintrag.auftrag)
       }
-    } catch {
-      // Kein Netz oder ein Server ohne den neuen Weg: der alte traegt es.
-      ueberMailbox.push(...gruppe)
+    } catch (fehler) {
+      /*
+       * Ein Netzfehler ist **kein** Grund, auf den anderen Weg zu wechseln:
+       * die Annahme kann beim Server längst stehen. Die Absicht bleibt mit
+       * ihren Kennungen liegen und wird bytegleich wiederholt. Nur ein harter
+       * Fehler (der Server kennt diesen Weg nicht) stellt um.
+       */
+      const status = statusVon(fehler)
+      const hart = status === 400 || status === 404
+      for (const [, eintrag] of jeKennung) {
+        const absichtOffen = await hatAbsicht(eintrag.auftrag.client_uuid)
+        if (absichtOffen && !hart) {
+          verbindungsfehler = true
+          continue
+        }
+        if (absichtOffen) {
+          await merkeZustellstand(eintrag.auftrag.client_uuid, {
+            zustellung: null,
+            nurMailbox: true,
+          }).catch(() => {})
+        }
+        ueberMailbox.push(eintrag.auftrag)
+      }
     }
   }
 
@@ -391,13 +457,18 @@ export async function stelleZu(
       Boolean(geraetKey && gescheiterteGeraete.has(geraetKey))
 
     if (mussUeberspringen) {
-      enqueueMessageMutation(auftrag)
+      // Liegt eine dauerhafte Absicht, wiederholt der nächste Lauf sie
+      // zusammen mit dem Aufbau. Sie zusätzlich in die Offline-Outbox zu
+      // legen liesse beide Wege dasselbe senden.
+      if (!(await hatAbsicht(auftrag.client_uuid))) enqueueMessageMutation(auftrag)
       ueberspringeNaechsteNachricht = false
       continue
     }
 
     try {
       const r = await relayE2eeEnvelope(auftrag)
+      // Angenommen: die Absicht hat ihren Zweck erfüllt.
+      await entferneZustellung(auftrag.client_uuid).catch(() => {})
       if (!auftrag.is_control && r && typeof r.id === 'number') {
         if (niedrigsteId === 0 || r.id < niedrigsteId) {
           niedrigsteId = r.id
@@ -411,7 +482,12 @@ export async function stelleZu(
       if (auftrag.is_control && auftrag.control_type === 'dr-init') {
         ueberspringeNaechsteNachricht = true
       }
-      enqueueMessageMutation(auftrag)
+      /*
+       * Eine dauerhafte Absicht ist die bessere Warteschlange: sie trägt den
+       * exakten Umschlag und wird ohne Zutun wiederholt. Nur was keine hat
+       * (Gruppenumschläge), geht in die Offline-Outbox.
+       */
+      if (!(await hatAbsicht(auftrag.client_uuid))) enqueueMessageMutation(auftrag)
       verbindungsfehler = true
     }
   }

@@ -239,6 +239,22 @@ export async function sichereDauerhafteAblage(): Promise<boolean> {
   }
 }
 
+/**
+ * Schliesst die Verbindung — nur für Tests.
+ *
+ * Ein Absturztest braucht einen echten Neustart: die offene Verbindung zu,
+ * alle Modulmerker zurück, und der nächste Zugriff öffnet dieselbe Datenbank
+ * neu. Im Betrieb gibt es dafür keinen Grund; ein Kontowechsel schliesst die
+ * alte Verbindung von selbst.
+ */
+export function schliesseLokaleAblageFuerTest(): void {
+  const offen = dbPromise
+  dbPromise = null
+  offenesKonto = null
+  altbestandGeraeumt = false
+  if (offen) void offen.then((db) => db.close()).catch(() => {})
+}
+
 function openLocalDatabase(): Promise<IDBDatabase> {
   const konto = angemeldetesKonto()
   if (konto === null) {
@@ -1627,6 +1643,32 @@ export async function saveLocalMessages(
   messages: LocalStoredMessage[],
   art: VerlaufsArt = 'direkt',
 ): Promise<void> {
+  await speichereNachrichten(blindMailboxId, messages, art, false)
+}
+
+/**
+ * Wie `saveLocalMessages`, aber ein Schreibfehler wird **geworfen**.
+ *
+ * Gebraucht an zwei Stellen, an denen ein stiller Fehlschlag eine Nachricht
+ * kostet: die optimistische Zeile vor dem Versand (sonst geht eine Nachricht
+ * hinaus, die der Absender nie wieder sieht) und der Empfangsweg vor dem
+ * Transport-ACK (sonst löscht der Server den Auftrag, und der Klartext liegt
+ * nur noch in einem Zwischenspeicher, den niemand mehr anzeigt).
+ */
+export async function saveLocalMessagesStrict(
+  blindMailboxId: string,
+  messages: LocalStoredMessage[],
+  art: VerlaufsArt = 'direkt',
+): Promise<void> {
+  await speichereNachrichten(blindMailboxId, messages, art, true)
+}
+
+async function speichereNachrichten(
+  blindMailboxId: string,
+  messages: LocalStoredMessage[],
+  art: VerlaufsArt,
+  streng: boolean,
+): Promise<void> {
   if (!blindMailboxId || !messages || messages.length === 0) return
   try {
     const db = await openLocalDatabase()
@@ -1740,8 +1782,10 @@ export async function saveLocalMessages(
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
-  } catch {
-    // Non-fatal if IndexedDB write fails
+  } catch (fehler) {
+    // Non-fatal if IndexedDB write fails — außer der Aufrufer braucht die
+    // Gewissheit, dass die Zeile liegt (`saveLocalMessagesStrict`).
+    if (streng) throw fehler
   }
 }
 

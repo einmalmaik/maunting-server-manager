@@ -278,7 +278,7 @@ export async function baueVersandFuer(
     // Umschlag. Schlägt das fehl, geht die Nachricht nicht raus — früher fiel
     // sie hier auf einen Schlüssel zurück, den das Backend aus den beiden
     // Benutzerkennungen selbst bilden kann.
-    const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
+    const zustellungen = await baueZustellungen(drKontext, payload, clientUuid, mid)
     // Wie bei der Gruppe: adressiert wird die Kennung aus dem Chatgeheimnis,
     // `mid` bleibt die Kennung des Gesprächs. `erzeuge` steht nur hier — der
     // Versand ist der Augenblick, in dem ein Gespräch wirklich beginnt, und

@@ -50,7 +50,7 @@ import { meldeErrungenschaft } from '@/lib/errungenschaft'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import {
   entferneLokaleNachricht,
-  saveLocalMessages,
+  saveLocalMessagesStrict,
   sortMessagesChronologically,
   updateMessageInLocalStore,
 } from '@/services/messengerLocalStore'
@@ -698,18 +698,18 @@ export function useMessengerSenden(optionen: Optionen) {
       // Der offene Verlauf bleibt unberührt — die Nachricht gehört woandershin.
       // Sie muss trotzdem lokal landen: den eigenen Ratchet-Umschlag kann
       // dieses Gerät nie wieder öffnen, die Ablage ist die einzige Fassung.
-      ablageBereit = saveLocalMessages(targetBlindMailboxId, [optimisticMessage])
+      ablageBereit = saveLocalMessagesStrict(targetBlindMailboxId, [optimisticMessage])
         .then(() => vergissMailbox(targetBlindMailboxId))
-        .catch(() => {
-          // Ohne lokale Zeile ist die Nachricht draußen, aber hier unsichtbar.
-        })
     } else {
       setMessages((prev) => {
         const updated = [...prev, optimisticMessage]
         sessionChatCache.set(targetBlindMailboxId, updated.slice(-80))
         return updated
       })
-      ablageBereit = saveLocalMessages(targetBlindMailboxId, [optimisticMessage]).catch(() => {})
+      // **Streng**: scheitert die Ablage, geht die Nachricht nicht hinaus.
+      // Sonst stünde beim Empfänger eine Nachricht, die der Absender selbst nie
+      // wieder sieht — sein Umschlag ist für ihn unlesbar.
+      ablageBereit = saveLocalMessagesStrict(targetBlindMailboxId, [optimisticMessage])
       // Was im offenen Chat getippt steht, bleibt bei einem fremden Ziel stehen.
       setInputText('')
       setSelectedImage(null)
@@ -717,6 +717,11 @@ export function useMessengerSenden(optionen: Optionen) {
       setAntwortAuf(null)
       setErwaehnungsVorschlaege([])
     }
+    // Ein früherer Abbruch (gesperrter Schlüssel, kein Gerät) verlässt die
+    // Funktion, ohne das Versprechen erneut zu beobachten. Der Fehler ist
+    // bereits sichtbar geworden — ein zweiter „unhandled rejection" wäre nur
+    // Rauschen und verdeckte den echten Grund.
+    void ablageBereit.catch(() => {})
     // Der Entwurf ist verschickt, also keiner mehr.
     entwuerfe.verwirf(targetBlindMailboxId)
     justSentRef.current = true
@@ -808,6 +813,15 @@ export function useMessengerSenden(optionen: Optionen) {
       if (!currentGroupId && !aktiveIdentitaet.sendPair) {
         throw new Error(t('messenger.deviceKeyNotReady'))
       }
+      /*
+       * **Die Zeile liegt, bevor der Ratchet-Schritt läuft.**
+       *
+       * Der Schritt verbraucht eine Kettenposition und legt den Umschlag in
+       * derselben Transaktion ab. Bräche die App davor ab und die Zeile fehlte,
+       * ginge die Nachricht beim Wiederaufnehmen hinaus, ohne dass der Absender
+       * sie je sähe — den eigenen Ratchet-Umschlag kann er nicht öffnen.
+       */
+      await ablageBereit
       const auftraege = fremdesZiel
         ? await baueVersandFuer(
             // Für eine fremde Gruppe braucht der Schlüssel ihre Mitglieder;
@@ -930,7 +944,9 @@ export function useMessengerSenden(optionen: Optionen) {
         // Auch aus der Ablage: sonst holte der nächste Abgleich die Zeile
         // zurück, und mit ihr den Augenblick.
         if (funkenEreignis) {
-          void ablageBereit.then(() => entferneLokaleNachricht(targetBlindMailboxId, { clientUuid }))
+          void ablageBereit
+            .then(() => entferneLokaleNachricht(targetBlindMailboxId, { clientUuid }))
+            .catch(() => {})
         }
 
         if (err instanceof AugenblickNichtHochgeladenError) {

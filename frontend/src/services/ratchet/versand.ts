@@ -16,7 +16,7 @@ import {
   verlangeGeraeteVon,
   verzeichnisVon,
 } from '../e2eeGeraet'
-import { leseBindung, schritt, sitzungsId } from '../ratchetSpeicher'
+import { leseBindung, schritt, sitzungsId, type AusstehendeZustellung } from '../ratchetSpeicher'
 import { beginneSitzung } from './aufbau'
 import {
   DrGeraetNichtEingetragenError,
@@ -31,6 +31,14 @@ export async function baueZustellungen(
   kontext: DrKontext,
   klartext: string,
   basisUuid: string,
+  /**
+   * Die Mailbox des Gesprächs, für die Versandabsichten.
+   *
+   * Fehlt sie (etwa in engen Tests), entstehen keine Absichten — der Aufrufer
+   * bekäme dann Umschläge ohne Wiederaufnahme. Im Messenger reicht
+   * `baueVersandFuer` sie immer durch.
+   */
+  mailbox = '',
 ): Promise<DrZustellung[]> {
   const meins = await geraetVeroeffentlichen()
   const eigene = (
@@ -115,19 +123,59 @@ export async function baueZustellungen(
           // `schritt` räumt nur den geladenen ab.
           if (selbstErzeugt) destroyRatchetState(arbeitszustand)
 
+          const clientUuid = `${basisUuid}#${zielGeraet.slice(0, KENNUNG_KURZ)}`
+          const bootstrapClientUuid = `${basisUuid}#i${zielGeraet.slice(0, KENNUNG_KURZ)}`
+          const umschlag = baueUmschlag({
+            vonKonto: kontext.eigeneId,
+            vonGeraet: meins.kennung,
+            fuerGeraet: zielGeraet,
+            rumpf: bytesToBase64(utf8ToBytes(serializeRatchetMessage(message))),
+          })
+          const zielInbox = ziel.geraet.inbox_hash || null
+          /*
+           * **Beide Bytes und die Sitzung gehören in eine Transaktion.**
+           *
+           * Bis 10/2026 entstand der Umschlag nur im Arbeitsspeicher: brach
+           * die App zwischen dem Schreiben des Nachfolgers und dem Absenden
+           * ab, war die Kettenposition verbraucht und der Umschlag weg — eine
+           * Nachricht, die niemand mehr senden kann. Jetzt liegt er, bevor
+           * irgendetwas hinausgeht, unter `versand:<clientUuid>`.
+           */
+          const versand: AusstehendeZustellung[] = []
+          const angelegtAm = new Date().toISOString()
+          if (bootstrap && mailbox) {
+            versand.push({
+              clientUuid: bootstrapClientUuid,
+              eigeneId: kontext.eigeneId,
+              peerId: kontext.peerId,
+              mailbox,
+              ciphertext: bootstrap,
+              isControl: true,
+              controlType: 'dr-init',
+              zielInbox,
+              angelegtAm,
+              reihenfolge: 0,
+            })
+          }
+          if (mailbox) {
+            versand.push({
+              clientUuid,
+              eigeneId: kontext.eigeneId,
+              peerId: kontext.peerId,
+              mailbox,
+              ciphertext: umschlag,
+              zielInbox,
+              angelegtAm,
+              reihenfolge: 1,
+            })
+          }
+
           return {
             naechster: nextState,
             // Die Bindung gehört zum Zustand, in derselben Transaktion.
             bindung,
-            ergebnis: {
-              bootstrap,
-              nachricht: baueUmschlag({
-                vonKonto: kontext.eigeneId,
-                vonGeraet: meins.kennung,
-                fuerGeraet: zielGeraet,
-                rumpf: bytesToBase64(utf8ToBytes(serializeRatchetMessage(message))),
-              }),
-            },
+            versand,
+            ergebnis: { bootstrap, nachricht: umschlag },
           }
         },
       )

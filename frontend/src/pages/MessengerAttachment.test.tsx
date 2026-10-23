@@ -129,7 +129,13 @@ vi.mock('@/services/messengerLocalStore', async () => {
   return {
     ...echt,
     loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    // Der strenge Weg liest und schreibt dieselbe Ablage: der Empfangsweg
+    // quittiert erst, wenn die Zeile wirklich liegt (`uebernimmLesungen`).
+    loadLocalMessagesStrict: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    saveLocalMessagesStrict: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
     updateMessageInLocalStore: vi.fn(async () => {}),
@@ -156,6 +162,7 @@ vi.mock('@/services/ratchetSitzung', () => {
   const einpacken = (t: string) => PREFIX + '1.testgeraet.zielgeraet.' + btoa(unescape(encodeURIComponent(t)))
   const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
   return {
+    sendeAusstehendeZustellungen: vi.fn(async () => ({ gesendet: 0, offen: 0 })),
     DR_PREFIX: PREFIX,
     DR_INIT_TYP: 'dr-init',
     baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [

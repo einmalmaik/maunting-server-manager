@@ -160,122 +160,141 @@ export async function verarbeitePostfach(
   let verarbeitet = 0
   let quittiert = 0
   for (const [gespraech, eintraege] of proGespraech) {
-    const umschlaege: BlindEnvelopeItem[] = eintraege.map((e) => ({
-      // Stabil und negativ: derselbe Auftrag bekommt bei jedem Abruf dieselbe
-      // Kennung. Der Klartext-Speicher merkt sich damit, was schon geoeffnet
-      // ist — sonst liefe ein Ratchet-Schritt ein zweites Mal.
-      id: -e.seq,
-      blind_mailbox_id: gespraech.mailbox,
-      ciphertext_envelope: e.ciphertext,
-      client_uuid: e.delivery_id,
-      created_at: e.angenommen_am,
-      // Die globale Nummer: an ihr misst der Absender seine Haekchen.
-      annahme_seq: e.seq,
-    }))
-
-    const stand = partnerstand(gespraech.mailbox)
-    const ergebnis = await verarbeiteGespraech(
-      {
-        mailbox: gespraech.mailbox,
-        eigeneId: lauf.eigeneId,
-        drKontext: gespraech.drKontext,
-        gruppenKontext: gespraech.gruppenKontext,
-        decryptionKeys: lauf.decryptionKeys,
-        nurPostfach: true,
-      },
-      {
-        // Kein Lesestand: das Postfach kennt keinen Cursor, das Quittung ist
-        // der Fortschritt.
-        lesestand: new Map(),
-        istAktuell: () => true,
-        meldeSitzungsbruch: () => {},
-        meldeAufbauAbgelehnt: () => {},
-      },
-      umschlaege,
-    )
-    if (!ergebnis) continue
-
-    const uebernahme = await uebernimmLesungen(
-      {
-        mailbox: gespraech.mailbox,
-        eigeneId: lauf.eigeneId,
-        contact: gespraech.contact,
-        group: gespraech.group,
-        gruppenrechteVon: lauf.gruppenrechteVon,
-        t: lauf.t,
-        maxPartnerReadId: stand.gelesen,
-        maxPartnerDeliveredId: stand.zugestellt,
-        quittiertGelesen: (bis) => merkePartnerQuittung(gespraech.mailbox, 'gelesen', bis),
-        quittiertZugestellt: (bis) => merkePartnerQuittung(gespraech.mailbox, 'zugestellt', bis),
-        quittiertGelesenIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'gelesen', ids),
-        quittiertZugestelltIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'zugestellt', ids),
-        markAsRead: lauf.markAsRead,
-        setVerfallSekunden: lauf.setVerfallSekunden,
-        // Eine Systemzeile im Verlauf braucht die Oberflaeche; im Hintergrund
-        // gibt es sie nicht, und der naechste offene Chat meldet es selbst.
-        zeigeSystemzeile: () => {},
-      },
-      ergebnis.lesungen,
-    )
-    if (!uebernahme) continue
-    verarbeitet += uebernahme.processedList.length
-
     /*
-     * Die Zustellquittung an den Absender — auch ohne offenen Chat.
-     *
-     * Bis 23.10.2026 entstand sie nur im offenen Gespraech. Eine Nachricht,
-     * die im Hintergrund ankam, blieb beim Absender auf „gesendet", bis jemand
-     * den Chat öffnete — obwohl sie längst entschlüsselt und gespeichert war.
-     * Genau das ist die Zusage „zugestellt": ein vertrauenswürdiges Gerät der
-     * Gegenstelle hat sie lokal abgelegt.
-     *
-     * Gelesen ist sie damit nicht. Eine Lesequittung gibt es erst, wenn die
-     * Nachricht wirklich auf einem Schirm stand.
+     * Ein Gespraech, dessen Ablage streikt, haelt die uebrigen nicht auf.
+     * Nichts davon wird quittiert; der naechste Lauf sieht dieselben Auftraege
+     * wieder. Nur so ist „ein Fehler kostet einen Versuch" wahr.
      */
-    if (!gespraech.group && gespraech.drKontext && lauf.identitaet) {
-      /*
-       * Nur wirklich **neue** Zeilen. Blieb das Transport-ACK liegen, kommt
-       * derselbe Auftrag beim nächsten Lauf wieder — und mit ihm dieselbe
-       * Nachricht. Ohne diesen Vergleich ginge alle zehn Sekunden eine
-       * Zustellquittung hinaus, bis der Auftrag verfällt.
-       */
-      const bekannt = new Set(
-        uebernahme.lokalerVerlauf
-          .map((m) => m.clientUuid)
-          .filter((id): id is string => Boolean(id)),
-      )
-      const neue = uebernahme.processedList
-        .filter((m) => !m.isSelf && Boolean(m.clientUuid) && !bekannt.has(m.clientUuid as string))
-        .map((m) => m.clientUuid as string)
-      if (neue.length > 0) {
-        const ids = Array.from(
-          new Set([...quittungsKennungen(gespraech.mailbox, 'zugestellt'), ...neue]),
-        ).slice(-100)
-        merkeQuittungKennungen(gespraech.mailbox, 'zugestellt', ids)
-        await sendeSteuerpaket(
-          {
-            eigeneId: lauf.eigeneId,
-            mailbox: gespraech.mailbox,
-            drKontext: gespraech.drKontext,
-            gruppenKontext: null,
-            identitaet: lauf.identitaet,
-          },
-          {
-            type: 'delivery_receipt',
-            delivered_ids: ids,
-            receiver_id: lauf.eigeneId,
-            timestamp: new Date().toISOString(),
-          },
-          crypto.randomUUID(),
-        ).catch(() => null)
-      }
-    }
+    try {
+      const umschlaege: BlindEnvelopeItem[] = eintraege.map((e) => ({
+        // Stabil und negativ: derselbe Auftrag bekommt bei jedem Abruf dieselbe
+        // Kennung. Der Klartext-Speicher merkt sich damit, was schon geoeffnet
+        // ist — sonst liefe ein Ratchet-Schritt ein zweites Mal.
+        id: -e.seq,
+        blind_mailbox_id: gespraech.mailbox,
+        ciphertext_envelope: e.ciphertext,
+        client_uuid: e.delivery_id,
+        created_at: e.angenommen_am,
+        // Die globale Nummer: an ihr misst der Absender seine Haekchen.
+        annahme_seq: e.seq,
+      }))
 
-    // **Nach dem Commit.** Was hier quittiert wird, ist entschluesselt und
-    // gespeichert; ein Fehler beim Quittieren kostet nur eine Wiederholung.
-    const ids = eintraege.map((e) => e.delivery_id)
-    const antwort = await quittiereZustellungen(inbox, ids).catch(() => null)
-    if (antwort) quittiert += antwort.quittiert
+      const stand = partnerstand(gespraech.mailbox)
+      const ergebnis = await verarbeiteGespraech(
+        {
+          mailbox: gespraech.mailbox,
+          eigeneId: lauf.eigeneId,
+          drKontext: gespraech.drKontext,
+          gruppenKontext: gespraech.gruppenKontext,
+          decryptionKeys: lauf.decryptionKeys,
+          nurPostfach: true,
+        },
+        {
+          // Kein Lesestand: das Postfach kennt keinen Cursor, das Quittung ist
+          // der Fortschritt.
+          lesestand: new Map(),
+          istAktuell: () => true,
+          meldeSitzungsbruch: () => {},
+          meldeAufbauAbgelehnt: () => {},
+        },
+        umschlaege,
+      )
+      if (!ergebnis) continue
+
+      const uebernahme = await uebernimmLesungen(
+        {
+          mailbox: gespraech.mailbox,
+          eigeneId: lauf.eigeneId,
+          contact: gespraech.contact,
+          group: gespraech.group,
+          gruppenrechteVon: lauf.gruppenrechteVon,
+          t: lauf.t,
+          maxPartnerReadId: stand.gelesen,
+          maxPartnerDeliveredId: stand.zugestellt,
+          quittiertGelesen: (bis) => merkePartnerQuittung(gespraech.mailbox, 'gelesen', bis),
+          quittiertZugestellt: (bis) => merkePartnerQuittung(gespraech.mailbox, 'zugestellt', bis),
+          quittiertGelesenIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'gelesen', ids),
+          quittiertZugestelltIds: (ids) => merkePartnerKennungen(gespraech.mailbox, 'zugestellt', ids),
+          markAsRead: lauf.markAsRead,
+          setVerfallSekunden: lauf.setVerfallSekunden,
+          // Eine Systemzeile im Verlauf braucht die Oberflaeche; im Hintergrund
+          // gibt es sie nicht, und der naechste offene Chat meldet es selbst.
+          zeigeSystemzeile: () => {},
+        },
+        ergebnis.lesungen,
+      )
+      if (!uebernahme) continue
+      verarbeitet += uebernahme.processedList.length
+
+      /*
+       * Die Zustellquittung an den Absender — auch ohne offenen Chat.
+       *
+       * Bis 23.10.2026 entstand sie nur im offenen Gespraech. Eine Nachricht,
+       * die im Hintergrund ankam, blieb beim Absender auf „gesendet", bis jemand
+       * den Chat öffnete — obwohl sie längst entschlüsselt und gespeichert war.
+       * Genau das ist die Zusage „zugestellt": ein vertrauenswürdiges Gerät der
+       * Gegenstelle hat sie lokal abgelegt.
+       *
+       * Gelesen ist sie damit nicht. Eine Lesequittung gibt es erst, wenn die
+       * Nachricht wirklich auf einem Schirm stand.
+       */
+      if (!gespraech.group && gespraech.drKontext && lauf.identitaet) {
+        /*
+         * Nur wirklich **neue** Zeilen. Blieb das Transport-ACK liegen, kommt
+         * derselbe Auftrag beim nächsten Lauf wieder — und mit ihm dieselbe
+         * Nachricht. Ohne diesen Vergleich ginge alle zehn Sekunden eine
+         * Zustellquittung hinaus, bis der Auftrag verfällt.
+         */
+        const bekannt = new Set(
+          uebernahme.lokalerVerlauf
+            .map((m) => m.clientUuid)
+            .filter((id): id is string => Boolean(id)),
+        )
+        const neue = uebernahme.processedList
+          .filter((m) => !m.isSelf && Boolean(m.clientUuid) && !bekannt.has(m.clientUuid as string))
+          .map((m) => m.clientUuid as string)
+        if (neue.length > 0) {
+          const ids = Array.from(
+            new Set([...quittungsKennungen(gespraech.mailbox, 'zugestellt'), ...neue]),
+          ).slice(-100)
+          merkeQuittungKennungen(gespraech.mailbox, 'zugestellt', ids)
+          await sendeSteuerpaket(
+            {
+              eigeneId: lauf.eigeneId,
+              mailbox: gespraech.mailbox,
+              drKontext: gespraech.drKontext,
+              gruppenKontext: null,
+              identitaet: lauf.identitaet,
+            },
+            {
+              type: 'delivery_receipt',
+              delivered_ids: ids,
+              receiver_id: lauf.eigeneId,
+              timestamp: new Date().toISOString(),
+            },
+            crypto.randomUUID(),
+          ).catch(() => null)
+        }
+      }
+
+      // **Nach dem Commit.** Was hier quittiert wird, ist entschluesselt und
+      // gespeichert; ein Fehler beim Quittieren kostet nur eine Wiederholung.
+      //
+      // **Nicht alles.** Ein Umschlag, den dieser Lauf nicht abschliessend
+      // behandeln konnte (`offen`: keine Sitzung, Aufbau noch offen, fehlender
+      // Gruppenschluessel, Ablagefehler), bleibt beim Server liegen. Bis 10/2026
+      // wurde die ganze Gruppe quittiert — der Auftrag war damit weg, obwohl die
+      // Nachricht im naechsten Lauf geoeffnet worden waere.
+      const offen = ergebnis.offen ?? new Set<number>()
+      const ids = eintraege.filter((e) => !offen.has(-e.seq)).map((e) => e.delivery_id)
+      if (ids.length > 0) {
+        const antwort = await quittiereZustellungen(inbox, ids).catch(() => null)
+        if (antwort) quittiert += antwort.quittiert
+      }
+    } catch {
+      // Siehe oben: nichts geschrieben, nichts quittiert.
+      continue
+    }
   }
 
   return { verarbeitet, quittiert }

@@ -87,6 +87,14 @@ export interface LaufErgebnis {
   lesungen: Lesung[]
   /** Der neue Stand je Mailbox. Erst der Uebernehmende schreibt ihn. */
   stand: Map<string, number>
+  /**
+   * Umschlaege, die dieser Lauf **nicht** abschliessend behandelt hat.
+   *
+   * Sie duerfen nicht quittiert werden: keine Sitzung, Aufbau noch offen,
+   * fehlender Gruppenschluessel, Ablagefehler. Der naechste Lauf sieht sie
+   * wieder — genau dafuer bleibt der Serverauftrag stehen.
+   */
+  offen: Set<number>
 }
 
 /**
@@ -657,8 +665,8 @@ export async function verarbeiteGespraech(
     // **Nicht** schreiben. Erst wer diese Lesung übernimmt, rückt den Stand
     // vor (`uebernimmLesestand`) — ein verworfener Durchlauf darf keine
     // Umschläge mitnehmen.
-    return { lesungen: gelesen, stand }
+    return { lesungen: gelesen, stand, offen: new Set(nochEinmal) }
   }
 
-  return { lesungen: gelesen, stand: new Map<string, number>() }
+  return { lesungen: gelesen, stand: new Map<string, number>(), offen: new Set(nochEinmal) }
 }

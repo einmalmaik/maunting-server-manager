@@ -23,5 +23,7 @@ export type {
 } from './ratchet/format'
 export { verarbeiteBootstrap } from './ratchet/aufbau'
 export { baueZustellungen } from './ratchet/versand'
+export { sendeAusstehendeZustellungen } from './ratchet/nachsend'
+export type { NachsendErgebnis } from './ratchet/nachsend'
 export { liesDrUmschlag, verwirfDrSitzung } from './ratchet/lesen'
 export type { KlartextAblage } from './ratchet/lesen'

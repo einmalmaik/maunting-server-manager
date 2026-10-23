@@ -29,9 +29,9 @@ import { holeOffeneMedien } from '@/services/medienNachholen'
 import {
   entfernePlatzhalterUndDubletten,
   isOptimisticMessage,
-  loadLocalMessages,
+  loadLocalMessagesStrict,
   mischeVerlauf,
-  saveLocalMessages,
+  saveLocalMessagesStrict,
 } from '@/services/messengerLocalStore'
 import { tilgeInhalt, tilgeNachrichtLokal } from '@/services/nachrichtLoeschen'
 import { wendeReaktionenAn } from '@/services/reaktionen'
@@ -228,7 +228,7 @@ export async function uebernimmLesungen(
   await entfernePlatzhalterUndDubletten(currentMid, verlaufsArt).catch(() => ({}))
   if (!istAktuell()) return null
 
-  const rohesLokal = await loadLocalMessages(currentMid)
+  const rohesLokal = await loadLocalMessagesStrict(currentMid)
   if (!istAktuell()) return null
 
   /**
@@ -306,7 +306,12 @@ export async function uebernimmLesungen(
   // die Zusammenfuehrungsregeln und die Sortierung ist dieselbe.
   const combined = mischeVerlauf(lokalerVerlaufMitHaken, processedList, verlaufsArt) as ChatMessage[]
   sessionChatCache.set(currentMid, combined.slice(-80))
-  await saveLocalMessages(currentMid, combined.slice(-200), verlaufsArt)
+  /*
+   * **Streng.** Der Aufrufer darf erst danach den Transport quittieren. Ein
+   * stiller Fehlschlag hier hiesse: die Nachricht ist beim Server gelöscht,
+   * liegt aber nirgends im Verlauf — der teuerste Fehler dieses Pfads.
+   */
+  await saveLocalMessagesStrict(currentMid, combined.slice(-200), verlaufsArt)
 
   // Die aufbewahrten Wirkungen der eigenen Zweitgeraete fallen erst jetzt: der
   // neue Stand ist geschrieben, ein zweiter Durchlauf wendet dieselbe Wirkung

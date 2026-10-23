@@ -72,7 +72,7 @@ vi.mock('./e2eeGeraet', async (importOriginal) => {
 
 import { erzeugeSignaturPaar, signiere, type SignaturPaar } from './absenderSignatur'
 import { clearGeraeteMemory, freigabeDaten, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
-import { kennstMarke, setzeAblageFuerTest, sitzungsId, type RatchetAblage } from './ratchetSpeicher'
+import { kennstMarke, setzeAblageFuerTest, sitzungsId, ausstehendeZustellungen, type RatchetAblage } from './ratchetSpeicher'
 import { utf8ToBytes } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
@@ -903,6 +903,34 @@ describe('ratchetSitzung', () => {
     expect(logischeUuid(z.clientUuid)).toBe(basis)
     expect(logischeUuid(basis)).toBe(basis)
     expect(logischeUuid(null)).toBeUndefined()
+  })
+
+  it('legt den Umschlag mit dem Ratchet-Schritt als Versandabsicht ab', async () => {
+    const kA = kontextVon(ALICE, BOB)
+    aktiviere(alice)
+
+    const [z] = await baueZustellungen(kA, 'geht gleich raus', 'u1', 'mailbox-1')
+    const offen = await ausstehendeZustellungen(ALICE)
+
+    // Aufbau vor Nachricht, und beide Bytes exakt die, die der Versand
+    // zurueckgibt. Ein Retry verschlüsselt nichts neu.
+    expect(offen.map((o) => o.reihenfolge)).toEqual([0, 1])
+    const aufbau = offen.find((o) => o.clientUuid === z.bootstrapClientUuid)
+    expect(aufbau).toMatchObject({
+      eigeneId: ALICE,
+      peerId: BOB,
+      mailbox: 'mailbox-1',
+      ciphertext: z.bootstrap,
+      isControl: true,
+      controlType: 'dr-init',
+    })
+    const nachricht = offen.find((o) => o.clientUuid === z.clientUuid)
+    expect(nachricht).toMatchObject({
+      eigeneId: ALICE,
+      peerId: BOB,
+      mailbox: 'mailbox-1',
+      ciphertext: z.nachricht,
+    })
   })
 
   it('überlebt einen Neustart auf beiden Seiten', async () => {

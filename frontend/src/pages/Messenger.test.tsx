@@ -171,11 +171,17 @@ vi.mock('@/services/messengerLocalStore', async () => {
   return {
     ...echt,
     loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    // Der strenge Weg liest und schreibt dieselbe Ablage: der Empfangsweg
+    // quittiert erst, wenn die Zeile wirklich liegt (`uebernimmLesungen`).
+    loadLocalMessagesStrict: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
     leereMailboxLokal: vi.fn(async (mid: string) => {
       nachrichten.delete(mid)
       klartexte.delete(mid)
     }),
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    saveLocalMessagesStrict: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
     // Die Ablage verliert eine Zeile nur, wenn jemand sie herausnimmt:
@@ -228,6 +234,9 @@ vi.mock('@/services/ratchetSitzung', async (importOriginal) => {
     DR_INIT_TYP: 'dr-init',
     DrGeraetNichtEingetragenError,
     DrZustellungFehlgeschlagenError,
+    // Der Wiederaufnehmer der Versandabsichten gehoert zum Kern; hier gibt es
+    // keine offenen Absichten.
+    sendeAusstehendeZustellungen: vi.fn(async () => ({ gesendet: 0, offen: 0 })),
     einpackenDr: einpacken,
     baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
       {
@@ -1868,7 +1877,9 @@ describe('Messenger (Allround Chat)', () => {
       expect(baueZustellungen).toHaveBeenCalledWith(
         { eigeneId: 1, peerId: 205 },
         expect.stringContaining('Nachricht aus Tauri'),
-        expect.any(String)
+        expect.any(String),
+        // Die Mailbox des Gesprächs, für die dauerhafte Versandabsicht.
+        expect.any(String),
       )
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({

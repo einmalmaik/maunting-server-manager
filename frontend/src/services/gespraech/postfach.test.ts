@@ -290,6 +290,56 @@ describe('verarbeitePostfach', () => {
     expect(zustellung.quittiereZustellungen).not.toHaveBeenCalled()
   })
 
+  it('quittiert einen offenen Umschlag nicht und laesst ihn fuer den naechsten Lauf liegen', async () => {
+    // Zwei Eintraege im selben Gespraech: der erste ist offen (keine Sitzung),
+    // der zweite verarbeitet. Nur der zweite darf den Server verlassen.
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [
+        eintrag(1, 'sv-e2ee-dr-v1:2:offen'),
+        eintrag(2, 'sv-e2ee-dr-v1:2:fertig'),
+      ],
+      naechste_seq: 2,
+    })
+    verarbeitung.verarbeiteGespraech.mockImplementation(async () => ({
+      lesungen: [],
+      stand: new Map(),
+      offen: new Set([-1]),
+    }))
+
+    const ergebnis = await verarbeitePostfach(lauf)
+
+    expect(ergebnis.quittiert).toBe(1)
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+  })
+
+  it('quittiert nichts, wenn der lokale Schreibweg wirft, und macht mit dem naechsten Gespraech weiter', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [
+        eintrag(1, 'sv-e2ee-dr-v1:2:rumpf'),
+        eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
+      ],
+      naechste_seq: 2,
+    })
+    uebernahme.uebernimmLesungen
+      .mockRejectedValueOnce(new Error('Ablage voll'))
+      .mockResolvedValueOnce({
+        processedList: [],
+        lokalerVerlauf: [],
+        combined: [],
+        verlaufsArt: 'gruppe',
+        mailbox: 'm-gruppe',
+        maxIncomingId: 0,
+        unlesbar: 0,
+      })
+
+    await verarbeitePostfach(lauf)
+
+    // Der erste Umschlag bleibt beim Server (kein ACK fuer d-1); der zweite
+    // laeuft unbeeindruckt weiter.
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalledTimes(1)
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+  })
+
   it('holt nichts, solange die Schluessel fehlen', async () => {
     const ergebnis = await verarbeitePostfach({ ...lauf, decryptionKeys: [] })
     expect(ergebnis).toEqual({ verarbeitet: 0, quittiert: 0 })

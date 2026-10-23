@@ -41,7 +41,7 @@ const FASSADEN: Record<string, { datei: string; module: string[] }> = {
   },
   ratchet: {
     datei: 'ratchetSitzung.ts',
-    module: ['format', 'aufbau', 'versand', 'lesen'],
+    module: ['format', 'aufbau', 'versand', 'lesen', 'nachsend'],
   },
   auswertung: {
     datei: 'umschlagAuswertung.ts',

@@ -33,6 +33,7 @@ import { toast } from '@/stores/toastStore'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
 import { verarbeitePostfach, type PostfachGespraech } from '@/services/gespraech/postfach'
+import { sendeAusstehendeZustellungen } from '@/services/ratchetSitzung'
 import { setzeAnrufIdentitaet } from '@/stores/useCallStore'
 
 interface Optionen {
@@ -449,6 +450,13 @@ export function useMessengerKern({
       try {
         const liste = await gespraeche()
         if (!aktiv) return
+        /*
+         * Was beim letzten Mal liegen blieb, geht zuerst hinaus — mit den
+         * exakten Bytes und Kennungen aus der Absicht. Ohne diesen Aufruf
+         * hätte eine Nachricht, deren Antwort verloren ging, nie wieder einen
+         * Weg: die Kettenposition war verbraucht, der Umschlag lag nur hier.
+         */
+        await sendeAusstehendeZustellungen(currentUserId).catch(() => undefined)
         await verarbeitePostfach({
           eigeneId: currentUserId,
           decryptionKeys: identity.decryptionKeys ?? [],
