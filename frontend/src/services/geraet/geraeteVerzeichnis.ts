@@ -198,7 +198,8 @@ export async function pruefeGeraeteBeleg(
  * `frist` ist das Höchstalter der gecachten Liste. Wer eine kürzere verlangt
  * (`pruefeGeraeteBeleg` vor einem Nein), bekommt bei einem Ausfall **keine**
  * alte Liste zurück, sondern den Fehler: er fragt ja gerade, weil er der alten
- * nicht traut.
+ * nicht traut. `0` heißt „ohne Zwischenspeicher"; auch dann gibt es keinen
+ * Rückfall auf eine abgelaufene Liste.
  */
 async function holeGeraete(
   userId: number,
@@ -307,9 +308,20 @@ export class E2eeKeinGeraetError extends Error {
  * symmetrischen Notweg, dessen Schlüssel sich allein aus den beiden
  * Benutzerkennungen ergab — für den Server also nachbaubar. Lieber nicht senden
  * und es sagen, als eine Zusage brechen, die niemand nachprüfen kann.
+ *
+ * `frisch` ist für die Fähigkeitsprüfung einer Gruppe: dort muss ein gerade
+ * freigegebenes Gerät mit, und ein Netzfehler darf nicht als „alles beim
+ * Alten" durchgehen. Ohne `frisch` gilt die Fünf-Sekunden-Frist, und bei einem
+ * Ausfall trägt die letzte bekannte Liste weiter — für den laufenden Versand
+ * ist das richtig, für die Entscheidung „alle können den neuen Weg" nicht.
  */
-export async function verlangeGeraeteVon(userId: number): Promise<E2eeGeraetItem[]> {
-  const geraete = await holeGeraete(userId, SENDE_FRIST_MS, { rueckfallBeiFehler: true })
+export async function verlangeGeraeteVon(
+  userId: number,
+  { frisch = false }: { frisch?: boolean } = {},
+): Promise<E2eeGeraetItem[]> {
+  const geraete = frisch
+    ? await holeGeraete(userId, 0)
+    : await holeGeraete(userId, SENDE_FRIST_MS, { rueckfallBeiFehler: true })
   if (geraete.length === 0) throw new E2eeKeinGeraetError(userId)
   return geraete
 }

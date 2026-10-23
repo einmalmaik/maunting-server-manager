@@ -105,6 +105,12 @@ export {
 } from './gruppen/gruppenVerteilung'
 
 export {
+  gruppenTransportZiele,
+  type GruppenTransport,
+  type GruppenTransportGrund,
+} from './gruppen/gruppenTransport'
+
+export {
   entschluesseleGruppenUmschlag,
   verschluesseleFuerGruppe,
 } from './gruppen/gruppenNachricht'

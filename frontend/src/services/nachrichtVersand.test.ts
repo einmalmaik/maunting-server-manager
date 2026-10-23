@@ -22,6 +22,9 @@ vi.mock('@/lib/offlineSync', () => ({
 // Server damit tut, prueft `test_e2ee_zustellung.py`.
 const zustellung = vi.hoisted(() => ({
   sendeZustellungen: vi.fn(),
+  // Dieselbe Grenze wie der Server. Die Bündelung ist der Gegenstand der
+  // Tests unten; ohne den Wert ließe sich `nachrichtVersand` nicht laden.
+  MAX_AUFTRAEGE_JE_ANFRAGE: 50,
 }))
 vi.mock('./e2eeZustellung', () => zustellung)
 
@@ -351,7 +354,13 @@ describe('stelleZu über das Gerätepostfach', () => {
     )
     const ergebnis = await stelleZu([
       auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) }),
-      auftrag({ ziel_inbox: 'i' + 'b'.repeat(63), client_uuid: 'u#B' }),
+      // Direktchat: je Geraet ein eigener Chiffretext. Nur **gleiche** Inhalte
+      // teilen sich ein Objekt (Gruppe, eigener Test unten).
+      auftrag({
+        ziel_inbox: 'i' + 'b'.repeat(63),
+        client_uuid: 'u#B',
+        ciphertext_envelope: 'inhalt-b',
+      }),
     ])
 
     expect(relais).not.toHaveBeenCalled()
@@ -414,5 +423,155 @@ describe('stelleZu über das Gerätepostfach', () => {
     expect(inboxVersand).not.toHaveBeenCalled()
     expect(relais).toHaveBeenCalledTimes(1)
     expect(ergebnis.niedrigsteId).toBe(3)
+  })
+
+  /** Eine Zustelladresse: 64 Hexzeichen, wie der Server sie verlangt. */
+  function inbox(n: number): string {
+    return n.toString(16).padStart(64, '0')
+  }
+
+  it('legt fuer eine Gruppennachricht an mehrere Geraete ein Objekt an', async () => {
+    zustellung.sendeZustellungen.mockResolvedValue({
+      angenommen: [],
+      abgelehnt: [],
+    } as never)
+
+    await stelleZu([
+      auftrag({ ziel_inbox: inbox(1), client_uuid: 'gruppe-1' }),
+      auftrag({ ziel_inbox: inbox(2), client_uuid: 'gruppe-1' }),
+      auftrag({ ziel_inbox: inbox(3), client_uuid: 'gruppe-1' }),
+    ])
+
+    const [, payloads, eintraege] = zustellung.sendeZustellungen.mock.calls[0]
+    expect(payloads).toHaveLength(1)
+    expect(eintraege).toHaveLength(3)
+    expect(new Set(eintraege.map((e: { payload_id: string }) => e.payload_id))).toEqual(
+      new Set([payloads[0].id]),
+    )
+  })
+
+  it('teilt mehr als 50 Auftraege in Stapel und legt den Inhalt nur einmal an', async () => {
+    const aufrufe: {
+      payloads: { id: string }[]
+      eintraege: { delivery_id: string; payload_id: string; inbox_hash: string }[]
+    }[] = []
+    zustellung.sendeZustellungen.mockImplementation(
+      async (
+        _mb: string,
+        payloads: { id: string }[],
+        eintraege: { delivery_id: string; payload_id: string; inbox_hash: string }[],
+      ) => {
+        aufrufe.push({ payloads, eintraege })
+        return {
+          angenommen: eintraege.map((e, i) => ({
+            delivery_id: e.delivery_id,
+            seq: aufrufe.length * 100 + i,
+            ergebnis: 'angenommen',
+          })),
+          abgelehnt: [],
+        }
+      },
+    )
+
+    const auftraege = Array.from({ length: 51 }, (_, i) =>
+      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
+    )
+    const ergebnis = await stelleZu(auftraege)
+
+    // Zwei Anfragen, weil der Server hoechstens 50 je Anfrage annimmt.
+    expect(aufrufe.map((a) => a.eintraege.length)).toEqual([50, 1])
+    // Und derselbe Inhalt bleibt ein Objekt, auch ueber die Stapelgrenze.
+    expect(aufrufe.every((a) => a.payloads.length === 1)).toBe(true)
+    expect(new Set(aufrufe.flatMap((a) => a.payloads.map((p) => p.id))).size).toBe(1)
+    expect(relais).not.toHaveBeenCalled()
+    expect(ergebnis).toEqual({ niedrigsteId: 100, verbindungsfehler: false, ueberInbox: true })
+  })
+
+  it('laesst nur den abgelehnten Auftrag auf die Mailbox fallen', async () => {
+    zustellung.sendeZustellungen.mockImplementation(
+      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => ({
+        angenommen: [{ delivery_id: eintraege[0].delivery_id, seq: 5, ergebnis: 'angenommen' }],
+        abgelehnt: [{ delivery_id: eintraege[1].delivery_id, grund: 'inbox_voll' }],
+      }),
+    )
+    relais.mockResolvedValue({ id: 7 } as never)
+
+    const ergebnis = await stelleZu([
+      auftrag({ ziel_inbox: inbox(1), client_uuid: 'u#A' }),
+      auftrag({ ziel_inbox: inbox(2), client_uuid: 'u#B' }),
+    ])
+
+    expect(zustellung.sendeZustellungen.mock.calls[0][1]).toHaveLength(1)
+    expect(relais).toHaveBeenCalledTimes(1)
+    expect(relais.mock.calls[0][0].client_uuid).toBe('u#B')
+    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: false, ueberInbox: true })
+  })
+
+  it('faellt nur mit dem Stapel zurueck, der nicht antwortet', async () => {
+    let ruf = 0
+    zustellung.sendeZustellungen.mockImplementation(
+      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => {
+        ruf += 1
+        if (ruf === 2) throw new Error('kein Netz')
+        return {
+          angenommen: eintraege.map((e, i) => ({
+            delivery_id: e.delivery_id,
+            seq: i + 1,
+            ergebnis: 'angenommen',
+          })),
+          abgelehnt: [],
+        }
+      },
+    )
+    relais.mockResolvedValue({ id: 77 } as never)
+
+    const auftraege = Array.from({ length: 51 }, (_, i) =>
+      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
+    )
+    const ergebnis = await stelleZu(auftraege)
+
+    expect(zustellung.sendeZustellungen).toHaveBeenCalledTimes(2)
+    // Nur der zweite Stapel (der 51. Auftrag) geht den alten Weg.
+    expect(relais).toHaveBeenCalledTimes(1)
+    expect(relais.mock.calls[0][0].client_uuid).toBe('u#50')
+    expect(ergebnis).toEqual({ niedrigsteId: 1, verbindungsfehler: false, ueberInbox: true })
+  })
+
+  it('reisst einen Sitzungsaufbau nicht von seiner Nachricht', async () => {
+    // Der Aufbau und die Nachricht desselben Geraets gehoeren zusammen. Faellt
+    // der Aufbau in einen anderen Stapel und scheitert dort, waehrend die
+    // Nachricht ankommt, hat die Gegenstelle keinen Schluessel fuer sie.
+    const stapelGroessen: number[] = []
+    zustellung.sendeZustellungen.mockImplementation(
+      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => {
+        stapelGroessen.push(eintraege.length)
+        return {
+          angenommen: eintraege.map((e, i) => ({
+            delivery_id: e.delivery_id,
+            seq: i + 1,
+            ergebnis: 'angenommen',
+          })),
+          abgelehnt: [],
+        }
+      },
+    )
+
+    const auftraege = Array.from({ length: 49 }, (_, i) =>
+      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
+    )
+    auftraege.push(
+      auftrag({
+        ziel_inbox: inbox(50),
+        client_uuid: 'paar#iE',
+        is_control: true,
+        control_type: 'dr-init',
+      }),
+      auftrag({ ziel_inbox: inbox(51), client_uuid: 'paar#E' }),
+    )
+
+    await stelleZu(auftraege)
+
+    // 49 Einzelauftraege, dann das Paar — nicht 50 und ein abgerissener Rest.
+    expect(stapelGroessen).toEqual([49, 2])
   })
 })

@@ -34,6 +34,7 @@ import {
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   dmZiele,
+  gruppenTransportZiele,
   gruppenZiele,
   verschluesseleFuerGruppe,
   type GruppenKontext,
@@ -268,6 +269,27 @@ export async function baueVersandFuer(
     // Mailbox — die eine, die niemand sonst mehr liest.
     const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
     const ziele = await gruppenZiele(gruppenKontext.groupId, mid)
+
+    /*
+     * Ein Schlüssel für alle, und trotzdem je Gerät ein eigener Ort — oder
+     * eben gar keiner.
+     *
+     * Das Chiffrat ist für jedes Gerät dasselbe; verschieden ist nur der
+     * Zustellauftrag. Die Entscheidung trifft `gruppenTransportZiele` an einer
+     * Stelle: kennen **alle** Zielgeräte den neuen Weg, geht je Gerät ein
+     * Auftrag dorthin. Fehlt auch nur einem die Fähigkeit (oder ist das
+     * Verzeichnis nicht erreichbar), geht die Nachricht für die ganze Gruppe
+     * als **ein** Umschlag in die geteilte Mailbox. Keine Doppelspur.
+     */
+    const transport = await gruppenTransportZiele(gruppenKontext)
+    if (transport.art === 'inbox') {
+      return transport.inboxen.map((inbox) => ({
+        blind_mailbox_id: ziele.senden,
+        ciphertext_envelope: umschlag,
+        client_uuid: clientUuid,
+        ziel_inbox: inbox,
+      }))
+    }
     return [
       { blind_mailbox_id: ziele.senden, ciphertext_envelope: umschlag, client_uuid: clientUuid },
     ]

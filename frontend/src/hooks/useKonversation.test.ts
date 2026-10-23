@@ -22,15 +22,25 @@ import {
   merkeEigeneWirkung,
 } from '@/services/eigeneWirkungen'
 
-const { lesungen, geraete, eigeneGeraete, eigeneSteuerung, gruppenLesungen, gerufen, klartextCache, abgelegt } = vi.hoisted(() => ({
+const { lesungen, geraete, eigeneGeraete, eigeneSteuerung, gruppenLesungen, gerufen, klartextCache, abgelegt, transport } = vi.hoisted(() => ({
   lesungen: new Map<string, any>(),
-  geraete: [] as { device_id: string; public_key: string }[],
-  eigeneGeraete: [] as { device_id: string; public_key: string }[],
+  geraete: [] as { device_id: string; public_key: string; inbox_hash?: string }[],
+  eigeneGeraete: [] as { device_id: string; public_key: string; inbox_hash?: string }[],
   /** Was die eigene Geräte-Mailbox in diesem Test an Wirkungen liefert. */
   eigeneSteuerung: [] as { klartext: string; env: { id: number; created_at: string } }[],
   gruppenLesungen: new Map<string, any>(),
   /** Der dauerhafte Klartextspeicher, nach Umschlagkennung. */
   abgelegt: new Map<number, string>(),
+  /**
+   * Die Entscheidung „Postfach oder geteilte Mailbox". Sie gehoert
+   * `gruppenTransport` und wird dort geprüft (`gruppenTransport.test.ts`);
+   * hier zaehlt, was `baueVersandFuer` daraus macht.
+   */
+  transport: {
+    art: 'mailbox' as 'mailbox' | 'inbox',
+    inboxen: [] as string[],
+    aufrufe: 0,
+  },
   /**
    * Der Zwischenspeicher schon geöffneter Umschläge, nach Umschlagkennung.
    * Die ist in der Datenbank der Primärschlüssel und damit über alle Mailboxen
@@ -138,6 +148,14 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   // Wohin gesendet und woraus gelesen wird. Ohne gesetzten Umzug bleibt es bei
   // der alten Kennung — so verhalten sich alle Fälle wie vor Stufe 3d.
   gruppenZiele: vi.fn(async (_g: number, alt: string) => zieleFuer(alt)),
+  // Die Fähigkeitsprüfung selbst prüft `gruppenTransport.test.ts`. Hier wird
+  // nur ihre Entscheidung gesetzt: ein Umschlag, oder je Zielgeraet einer.
+  gruppenTransportZiele: vi.fn(async () => {
+    transport.aufrufe += 1
+    return transport.art === 'inbox'
+      ? { art: 'inbox' as const, inboxen: [...transport.inboxen] }
+      : { art: 'mailbox' as const, grund: 'unbekannt' as const }
+  }),
   // Dasselbe für den Direktchat. Der Hook fragt hier mit **beiden** Konten,
   // die Ziele hängen aber — wie beim echten Dienst — allein an der Kennung.
   dmZiele: vi.fn(async (eigeneId: number, peerId: number, alt: string) => {
@@ -284,6 +302,9 @@ describe('useKonversation', () => {
     gerufen.dmZiele.length = 0
     gerufen.gelesen.length = 0
     umzug.clear()
+    transport.art = 'mailbox'
+    transport.inboxen.length = 0
+    transport.aufrufe = 0
     proMailbox.clear()
     klartextCache.clear()
     abgelegt.clear()
@@ -986,6 +1007,38 @@ describe('useKonversation', () => {
       expect(auftraege[0].ciphertext_envelope).toBe('sv-e2ee-group-v1:7:Hallo Gruppe')
       // Kein Empfänger: die Gruppenmailbox gehört allen.
       expect('recipient_id' in auftraege[0]).toBe(false)
+    })
+
+    it('schickt eine Gruppennachricht je Zielgeraet, wenn alle den neuen Weg kennen', async () => {
+      // Ein Chiffrat fuer alle, ein Zustellauftrag je Geraet. Das eigene
+      // sendende Geraet fehlt in der Liste — es hat die Nachricht lokal.
+      const inboxen = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
+      transport.art = 'inbox'
+      transport.inboxen = inboxen
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-6')
+
+      expect(transport.aufrufe).toBe(1)
+      expect(auftraege).toHaveLength(3)
+      expect(auftraege.map((a) => a.ziel_inbox)).toEqual(inboxen)
+      // Ein Chiffrat, eine logische Kennung: nur der Ort unterscheidet sich.
+      expect(new Set(auftraege.map((a) => a.ciphertext_envelope)).size).toBe(1)
+      expect(new Set(auftraege.map((a) => a.client_uuid))).toEqual(new Set(['uuid-6']))
+      expect(auftraege.every((a) => a.blind_mailbox_id === 'gruppe-7')).toBe(true)
+    })
+
+    it('bleibt bei einem Umschlag, wenn die Faehigkeitspruefung den Altweg waehlt', async () => {
+      // Ein einziges Geraet ohne `inbox_hash` (oder ein Verzeichnisfehler)
+      // entscheidet fuer die ganze Gruppe: ein Umschlag in die geteilte
+      // Mailbox, keine halbe Zustellung.
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-7')
+
+      expect(transport.aufrufe).toBe(1)
+      expect(auftraege).toHaveLength(1)
+      expect(auftraege[0].ziel_inbox).toBeUndefined()
+      expect(auftraege[0].blind_mailbox_id).toBe('gruppe-7')
     })
 
     it('sendet nicht, solange die Mitgliederliste der Gruppe fehlt', async () => {

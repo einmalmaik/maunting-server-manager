@@ -285,7 +285,7 @@ export async function verarbeitePostfach(
       // Gruppenschluessel, Ablagefehler), bleibt beim Server liegen. Bis 10/2026
       // wurde die ganze Gruppe quittiert — der Auftrag war damit weg, obwohl die
       // Nachricht im naechsten Lauf geoeffnet worden waere.
-      const offen = ergebnis.offen ?? new Set<number>()
+      const offen = new Set(ergebnis.offen ?? [])
       const ids = eintraege.filter((e) => !offen.has(-e.seq)).map((e) => e.delivery_id)
       if (ids.length > 0) {
         const antwort = await quittiereZustellungen(inbox, ids).catch(() => null)

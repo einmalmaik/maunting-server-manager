@@ -33,7 +33,7 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
-import { sendeZustellungen, type ZustellEintrag, type ZustellPayload } from './e2eeZustellung'
+import { sendeZustellungen, MAX_AUFTRAEGE_JE_ANFRAGE, type ZustellEintrag, type ZustellPayload } from './e2eeZustellung'
 import { speichereMedium } from './messengerLocalStore'
 import {
   entferneZustellung,
@@ -319,6 +319,57 @@ async function hatAbsicht(clientUuid: string): Promise<boolean> {
   return hatZustellung(clientUuid).catch(() => false)
 }
 
+/** Ein Chiffretextobjekt: derselbe Inhalt, dieselbe Kennung im ganzen Aufruf. */
+interface Chiffretextobjekt {
+  id: string
+  ciphertext_sha256: string
+}
+
+/** Die Gerätemarke einer Kennung (`<uuid>#<geraet>`, Aufbau mit `i` davor). */
+function geraeteMarke(clientUuid: string): string {
+  const raute = clientUuid ? clientUuid.indexOf('#') : -1
+  if (raute === -1) return ''
+  const roh = clientUuid.slice(raute + 1)
+  return roh.startsWith('i') ? roh.slice(1) : roh
+}
+
+/**
+ * Teilt die Aufträge eines Aufrufs in Stapel, die der Server annimmt.
+ *
+ * Ein Sitzungsaufbau und seine Nachricht bleiben zusammen: rissen die beiden
+ * an einer Stapelgrenze auseinander, könnte der Aufbau durchfallen, während
+ * die Nachricht ankommt — die Gegenstelle hätte dann keinen Schlüssel für sie.
+ * Mehr als `MAX_AUFTRAEGE_JE_ANFRAGE` Einträge nimmt der Server nicht an.
+ */
+function teileInStapel<T extends { auftrag: Versandauftrag }>(eintraege: T[]): T[][] {
+  const einheiten: T[][] = []
+  for (let i = 0; i < eintraege.length; i += 1) {
+    const jetzt = eintraege[i]
+    const naechster = eintraege[i + 1]
+    const aufbau = jetzt.auftrag.is_control && jetzt.auftrag.control_type === 'dr-init'
+    // Dieselbe Paarung wie im Rückfall unten: ein Sitzungsaufbau und die
+    // nächste Nachricht gehören zusammen, unabhängig von ihrer Gerätemarke.
+    if (aufbau && naechster && !naechster.auftrag.is_control) {
+      einheiten.push([jetzt, naechster])
+      i += 1
+    } else {
+      einheiten.push([jetzt])
+    }
+  }
+
+  const stapel: T[][] = []
+  let aktuell: T[] = []
+  for (const einheit of einheiten) {
+    if (aktuell.length > 0 && aktuell.length + einheit.length > MAX_AUFTRAEGE_JE_ANFRAGE) {
+      stapel.push(aktuell)
+      aktuell = []
+    }
+    aktuell.push(...einheit)
+  }
+  if (aktuell.length > 0) stapel.push(aktuell)
+  return stapel
+}
+
 /**
  * Stellt die Umschläge einer Nachricht zu, oder reiht sie für später ein.
  */
@@ -356,87 +407,116 @@ export async function stelleZu(
     nachInbox.set(auftrag.blind_mailbox_id, liste)
   }
 
+  /*
+   * Ein Chiffretextobjekt je **Inhalt**, nicht je Auftrag.
+   *
+   * Eine Gruppennachricht ist fuer alle Zielgeraete derselbe Chiffretext. Ohne
+   * diese Zusammenfassung laege derselbe Inhalt einmal je Geraet beim Server —
+   * bei einer grossen Gruppe also zigmal dieselben Bytes. Der Schluessel ist
+   * der Chiffretext selbst: zwei gleiche Werte sind dasselbe Objekt, und nur
+   * innerhalb dieses Aufrufs.
+   */
+  const objekte = new Map<string, Chiffretextobjekt>()
+  const objektFuer = async (ciphertext: string): Promise<Chiffretextobjekt> => {
+    const vorhanden = objekte.get(ciphertext)
+    if (vorhanden) return vorhanden
+    const neu = {
+      id: crypto.randomUUID(),
+      ciphertext_sha256: await sha256Hex(utf8ToBytes(ciphertext)),
+    }
+    objekte.set(ciphertext, neu)
+    return neu
+  }
+
   for (const [mailbox, gruppe] of nachInbox) {
-    const jeKennung = new Map<string, { auftrag: Versandauftrag; payloadId: string }>()
-    const payloads: ZustellPayload[] = []
-    const eintraege: ZustellEintrag[] = []
+    const jeKennung = new Map<string, { auftrag: Versandauftrag; objekt: Chiffretextobjekt }>()
+    const vorbereitet: {
+      auftrag: Versandauftrag
+      deliveryId: string
+      objekt: Chiffretextobjekt
+    }[] = []
     for (const auftrag of gruppe) {
-      const payloadId = crypto.randomUUID()
       const deliveryId = crypto.randomUUID()
-      jeKennung.set(deliveryId, { auftrag, payloadId })
-      payloads.push({
-        id: payloadId,
-        ciphertext: auftrag.ciphertext_envelope,
-        ciphertext_sha256: await sha256Hex(utf8ToBytes(auftrag.ciphertext_envelope)),
-      })
-      eintraege.push({
-        delivery_id: deliveryId,
-        payload_id: payloadId,
-        inbox_hash: String(auftrag.ziel_inbox),
-      })
+      const objekt = await objektFuer(auftrag.ciphertext_envelope)
+      jeKennung.set(deliveryId, { auftrag, objekt })
+      vorbereitet.push({ auftrag, deliveryId, objekt })
     }
-    /*
-     * Die Kennungen stehen **vor** dem HTTP-Aufruf in der Absicht.
-     *
-     * Ging die Antwort verloren — Absturz, Netz weg, Zeitüberschreitung —,
-     * wiederholt der nächste Lauf den Auftrag mit genau diesen Kennungen. Der
-     * Server gibt dann den angenommenen Auftrag zurück, statt einen zweiten
-     * anzulegen; die Gegenstelle sieht die Nachricht einmal.
-     */
-    for (const [deliveryId, eintrag] of jeKennung) {
-      await merkeZustellstand(eintrag.auftrag.client_uuid, {
-        zustellung: { payloadId: eintrag.payloadId, deliveryId },
-      }).catch(() => {})
-    }
-    try {
-      const antwort = await sendeZustellungen(mailbox, payloads, eintraege)
-      for (const an of antwort.angenommen) {
-        const eintrag = jeKennung.get(an.delivery_id)
-        if (!eintrag) continue
-        // Angenommen heißt erledigt — die Absicht fällt.
-        await entferneZustellung(eintrag.auftrag.client_uuid).catch(() => {})
-        const auftrag = eintrag.auftrag
-        // Die Annahmenummer ist global; die kleinste der Auffaecherung gilt
-        // als Kennung dieser Nachricht — genau wie beim alten Weg.
-        if (auftrag.is_control || !(an.seq > 0)) continue
-        if (niedrigsteId === 0 || an.seq < niedrigsteId) {
-          niedrigsteId = an.seq
-          idQuelle = 'inbox'
-        }
-      }
-      for (const ab of antwort.abgelehnt) {
-        const eintrag = jeKennung.get(ab.delivery_id)
-        if (!eintrag) continue
-        // Dieses Gerät nimmt den neuen Weg nicht (mehr). Der Umschlag bleibt
-        // gültig; die Absicht merkt sich, dass nur noch die Mailbox zählt.
-        await merkeZustellstand(eintrag.auftrag.client_uuid, {
-          zustellung: null,
-          nurMailbox: true,
-        }).catch(() => {})
-        ueberMailbox.push(eintrag.auftrag)
-      }
-    } catch (fehler) {
+
+    for (const stapel of teileInStapel(vorbereitet)) {
       /*
-       * Ein Netzfehler ist **kein** Grund, auf den anderen Weg zu wechseln:
-       * die Annahme kann beim Server längst stehen. Die Absicht bleibt mit
-       * ihren Kennungen liegen und wird bytegleich wiederholt. Nur ein harter
-       * Fehler (der Server kennt diesen Weg nicht) stellt um.
+       * Die Kennungen stehen **vor** dem HTTP-Aufruf in der Absicht.
+       *
+       * Ging die Antwort verloren — Absturz, Netz weg, Zeitüberschreitung —,
+       * wiederholt der nächste Lauf den Auftrag mit genau diesen Kennungen.
+       * Der Server gibt dann den angenommenen Auftrag zurück, statt einen
+       * zweiten anzulegen; die Gegenstelle sieht die Nachricht einmal.
        */
-      const status = statusVon(fehler)
-      const hart = status === 400 || status === 404
-      for (const [, eintrag] of jeKennung) {
-        const absichtOffen = await hatAbsicht(eintrag.auftrag.client_uuid)
-        if (absichtOffen && !hart) {
-          verbindungsfehler = true
-          continue
+      for (const eintrag of stapel) {
+        await merkeZustellstand(eintrag.auftrag.client_uuid, {
+          zustellung: { payloadId: eintrag.objekt.id, deliveryId: eintrag.deliveryId },
+        }).catch(() => {})
+      }
+      const payloads = new Map<string, ZustellPayload>()
+      const eintraege: ZustellEintrag[] = []
+      for (const eintrag of stapel) {
+        payloads.set(eintrag.objekt.id, {
+          id: eintrag.objekt.id,
+          ciphertext: eintrag.auftrag.ciphertext_envelope,
+          ciphertext_sha256: eintrag.objekt.ciphertext_sha256,
+        })
+        eintraege.push({
+          delivery_id: eintrag.deliveryId,
+          payload_id: eintrag.objekt.id,
+          inbox_hash: String(eintrag.auftrag.ziel_inbox),
+        })
+      }
+      try {
+        const antwort = await sendeZustellungen(mailbox, [...payloads.values()], eintraege)
+        for (const an of antwort.angenommen) {
+          const eintrag = jeKennung.get(an.delivery_id)
+          if (!eintrag) continue
+          // Angenommen heißt erledigt — die Absicht fällt.
+          await entferneZustellung(eintrag.auftrag.client_uuid).catch(() => {})
+          if (eintrag.auftrag.is_control || !(an.seq > 0)) continue
+          if (niedrigsteId === 0 || an.seq < niedrigsteId) {
+            niedrigsteId = an.seq
+            idQuelle = 'inbox'
+          }
         }
-        if (absichtOffen) {
+        for (const ab of antwort.abgelehnt) {
+          const eintrag = jeKennung.get(ab.delivery_id)
+          if (!eintrag) continue
+          // Dieses Gerät nimmt den neuen Weg nicht (mehr). Der Umschlag bleibt
+          // gültig; die Absicht merkt sich, dass nur noch die Mailbox zählt.
           await merkeZustellstand(eintrag.auftrag.client_uuid, {
             zustellung: null,
             nurMailbox: true,
           }).catch(() => {})
+          ueberMailbox.push(eintrag.auftrag)
         }
-        ueberMailbox.push(eintrag.auftrag)
+      } catch (fehler) {
+        /*
+         * Ein Netzfehler ist **kein** Grund, auf den anderen Weg zu wechseln:
+         * die Annahme kann beim Server längst stehen. Die Absicht bleibt mit
+         * ihren Kennungen liegen und wird bytegleich wiederholt. Nur ein harter
+         * Fehler (der Server kennt diesen Weg nicht) stellt um.
+         */
+        const status = statusVon(fehler)
+        const hart = status === 400 || status === 404
+        for (const eintrag of stapel) {
+          const absichtOffen = await hatAbsicht(eintrag.auftrag.client_uuid)
+          if (absichtOffen && !hart) {
+            verbindungsfehler = true
+            continue
+          }
+          if (absichtOffen) {
+            await merkeZustellstand(eintrag.auftrag.client_uuid, {
+              zustellung: null,
+              nurMailbox: true,
+            }).catch(() => {})
+          }
+          ueberMailbox.push(eintrag.auftrag)
+        }
       }
     }
   }
@@ -448,9 +528,7 @@ export async function stelleZu(
     // H-6: Paarbildung im Sendepfad. Scheitert ein Auftrag (z. B. dr-init),
     // darf die zugehörige Ratchet-Nachricht desselben Zielgeräts nicht gesendet
     // werden, sondern muss ebenfalls eingereiht werden, um Sitzungsbrüche zu verhindern.
-    const raute = auftrag.client_uuid ? auftrag.client_uuid.indexOf('#') : -1
-    const rawSuffix = raute !== -1 ? auftrag.client_uuid.slice(raute + 1) : ''
-    const geraetKey = rawSuffix.startsWith('i') ? rawSuffix.slice(1) : rawSuffix
+    const geraetKey = geraeteMarke(auftrag.client_uuid)
 
     const mussUeberspringen =
       (ueberspringeNaechsteNachricht && !auftrag.is_control) ||

@@ -40,6 +40,15 @@ import { nachweisKopf } from './mailboxNachweis'
 /** Wie der Server die Zustelladresse nennt. */
 export const TRANSPORT_FAEHIGKEIT = 'geraet-v1'
 
+/**
+ * Hoechstens so viele Zustellauftraege nimmt der Server je Anfrage an.
+ *
+ * Dieselbe Zahl wie `MAX_BATCH` in `backend/services/social/zustellung.py`.
+ * Eine Gruppe mit mehr Zielgeraeten teilt der Client deshalb in mehrere
+ * Anfragen; der Chiffretext bleibt dabei **ein** Objekt.
+ */
+export const MAX_AUFTRAEGE_JE_ANFRAGE = 50
+
 /** Ein Chiffretextobjekt — ohne Ziel, ohne Absender. */
 export interface ZustellPayload {
   id: string

@@ -345,4 +345,49 @@ describe('verarbeitePostfach', () => {
     expect(ergebnis).toEqual({ verarbeitet: 0, quittiert: 0 })
     expect(zustellung.holeZustellungen).not.toHaveBeenCalled()
   })
+  it('quittiert mehrere Eintraege desselben Gespraechs erst nach dem Commit', async () => {
+    // Eine Gruppennachricht an mehrere Geraete kommt je Geraet als eigener
+    // Auftrag. Dieses Geraet sieht seine eigene Kopie einmal; kommen zwei
+    // Eintraege desselben Gespraechs an, werden sie zusammen verarbeitet und
+    // zusammen quittiert — aber erst nach dem lokalen Schreiben.
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [
+        eintrag(1, 'sv-e2ee-group-v1:k7:rumpf'),
+        eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
+      ],
+      naechste_seq: 2,
+    })
+
+    const ergebnis = await verarbeitePostfach(lauf)
+
+    expect(verarbeitung.verarbeiteGespraech).toHaveBeenCalledTimes(1)
+    expect(uebernahme.uebernimmLesungen).toHaveBeenCalledTimes(1)
+    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'quittung:d-1,d-2'])
+    expect(ergebnis.quittiert).toBe(2)
+  })
+
+  it('laesst liegen, was noch auf einen Schluessel wartet, und quittiert den Rest', async () => {
+    // Ein neues Geraet hat den Gruppenschluessel noch nicht. Wird der Auftrag
+    // trotzdem quittiert, ist die Nachricht beim Server weg, bevor sie je
+    // lesbar war. Der zweite Eintrag ist fertig und darf gehen.
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [
+        eintrag(1, 'sv-e2ee-group-v1:k7:rumpf'),
+        eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
+      ],
+      naechste_seq: 2,
+    })
+    verarbeitung.verarbeiteGespraech.mockResolvedValue({
+      lesungen: [],
+      stand: new Map(),
+      offen: new Set([-1]),
+    })
+
+    const ergebnis = await verarbeitePostfach(lauf)
+
+    expect(ergebnis.quittiert).toBe(1)
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalledTimes(1)
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+  })
+
 })

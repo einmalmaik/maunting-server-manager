@@ -32,6 +32,7 @@ const FASSADEN: Record<string, { datei: string; module: string[] }> = {
       'gruppenAblage',
       'gruppenMailbox',
       'gruppenVerteilung',
+      'gruppenTransport',
       'gruppenNachricht',
       'gruppenSteuerung',
       'dmGeheimnis',
