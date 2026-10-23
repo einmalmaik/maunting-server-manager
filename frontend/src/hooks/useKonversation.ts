@@ -79,6 +79,13 @@ export interface Versandauftrag {
   client_uuid: string
   is_control?: boolean
   control_type?: string
+  /**
+   * Die Zustelladresse des Zielgeraets, wenn es den neuen Weg kennt.
+   *
+   * Leer heisst: ueber die geteilte Mailbox (der alte Weg). Gesetzt heisst:
+   * genau dorthin, und nur dorthin — eine Doppelspur gibt es nicht.
+   */
+  ziel_inbox?: string | null
 }
 
 export interface KonversationOptionen {
@@ -260,12 +267,14 @@ export async function baueVersandFuer(
           client_uuid: z.bootstrapClientUuid,
           is_control: true,
           control_type: 'dr-init',
+          ziel_inbox: z.zielInbox,
         })
       }
       auftraege.push({
         blind_mailbox_id: ziel.senden,
         ciphertext_envelope: z.nachricht,
         client_uuid: z.clientUuid,
+        ziel_inbox: z.zielInbox,
       })
     }
     return auftraege

@@ -120,7 +120,10 @@ export async function sendeZustellungen(
   mailboxId: string,
   payloads: ZustellPayload[],
   eintraege: ZustellEintrag[],
-): Promise<{ angenommen: { delivery_id: string; ergebnis: string }[]; abgelehnt: { delivery_id: string; grund: string }[] }> {
+): Promise<{
+  angenommen: { delivery_id: string; seq: number; ergebnis: string }[]
+  abgelehnt: { delivery_id: string; grund: string }[]
+}> {
   const geraet = await eigenesGeraet()
   const signatur = await belege(
     relayBeweisDaten(

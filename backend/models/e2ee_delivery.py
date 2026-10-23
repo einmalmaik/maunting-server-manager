@@ -30,10 +30,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Sequence,
     String,
     Text,
     UniqueConstraint,
@@ -116,9 +118,21 @@ class E2eeDelivery(Base):
     inbox_hash: Mapped[str] = mapped_column(
         String(64), ForeignKey("e2ee_device_inboxes.inbox_hash", ondelete="CASCADE"), nullable=False
     )
-    # Die Laufnummer je Inbox. Sie ist der Cursor des Abrufs: der Client liest
-    # ab hier weiter, und sie waechst nur.
-    laufende_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Die Annahmenummer. Sie ist **global** und waechst nur — aus demselben
+    # Grund, aus dem die Kennung eines Umschlags in der alten Mailbox global
+    # wuchs: der Absender rechnet seine Haekchen darueber. Eine Nummer je Inbox
+    # waere fuer zwei Geraete desselben Kontos nicht vergleichbar, und die
+    # Quittung des einen markierte beim anderen die falsche Nachricht.
+    #
+    # Sie dient zugleich als Cursor des Abrufs: der Client liest ab hier
+    # weiter. Die Nummern einer Inbox sind darin enthalten, also monoton.
+    laufende_seq: Mapped[int] = mapped_column(
+        BigInteger,
+        Sequence("e2ee_delivery_seq"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
     angenommen_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_jetzt, nullable=False)
     ablauf_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     # Gesetzt, wenn der Auftrag quittiert wurde. Die Zeile bleibt als

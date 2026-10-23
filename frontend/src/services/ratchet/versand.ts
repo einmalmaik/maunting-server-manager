@@ -139,6 +139,7 @@ export async function baueZustellungen(
         nachricht: gebaut.nachricht,
         clientUuid: `${basisUuid}#${zielGeraet.slice(0, KENNUNG_KURZ)}`,
         bootstrapClientUuid: `${basisUuid}#i${zielGeraet.slice(0, KENNUNG_KURZ)}`,
+        zielInbox: ziel.geraet.inbox_hash || null,
       })
     } catch (fehler) {
       // Ein Gerät, für das sich kein Umschlag bauen lässt, hält die übrigen

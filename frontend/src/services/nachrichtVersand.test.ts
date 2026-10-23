@@ -18,10 +18,19 @@ vi.mock('@/lib/offlineSync', () => ({
   enqueueMessageMutation: vi.fn(),
 }))
 
+// Der neue Weg: je Zielgeraet eine Inbox. Hier nur die Schnittstelle — was der
+// Server damit tut, prueft `test_e2ee_zustellung.py`.
+const zustellung = vi.hoisted(() => ({
+  sendeZustellungen: vi.fn(),
+}))
+vi.mock('./e2eeZustellung', () => zustellung)
+
 import { ladeAnhangHoch, relayE2eeEnvelope } from '@/api/social'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu, type Nutzlastangaben } from './nachrichtVersand'
+
+const inboxVersand = zustellung.sendeZustellungen
 
 const hochladen = vi.mocked(ladeAnhangHoch)
 const relais = vi.mocked(relayE2eeEnvelope)
@@ -316,5 +325,94 @@ describe('stelleZu', () => {
     await stelleZu([aufbau('A'), auftrag('g#1', { is_control: true, control_type: 'gruppenschluessel' })])
     expect(gesendet()).toEqual(['u#iA', 'g#1'])
     expect(eingereiht()).toEqual(['u#iA'])
+  })
+})
+
+describe('stelleZu über das Gerätepostfach', () => {
+  function auftrag(extra: Partial<Versandauftrag> = {}): Versandauftrag {
+    return {
+      blind_mailbox_id: 'mb',
+      ciphertext_envelope: 'inhalt',
+      client_uuid: 'u#A',
+      ...extra,
+    }
+  }
+
+  beforeEach(() => {
+    zustellung.sendeZustellungen.mockReset()
+  })
+
+  it('schickt an die Inbox und nicht mehr über die Mailbox', async () => {
+    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, payloads: { id: string }[], eintraege: { delivery_id: string; payload_id: string }[]) =>
+      ({
+        angenommen: eintraege.map((e, i) => ({ delivery_id: e.delivery_id, seq: 40 + i, ergebnis: 'angenommen' })),
+        abgelehnt: [],
+      }) as never,
+    )
+    const ergebnis = await stelleZu([
+      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) }),
+      auftrag({ ziel_inbox: 'i' + 'b'.repeat(63), client_uuid: 'u#B' }),
+    ])
+
+    expect(relais).not.toHaveBeenCalled()
+    expect(inboxVersand).toHaveBeenCalledTimes(1)
+    const [, payloads, eintraege] = inboxVersand.mock.calls[0]
+    expect(payloads).toHaveLength(2)
+    expect(eintraege.map((e: { inbox_hash: string }) => e.inbox_hash)).toEqual([
+      'i' + 'a'.repeat(63),
+      'i' + 'b'.repeat(63),
+    ])
+    // Die kleinste Annahmenummer gilt als Kennung der Nachricht.
+    expect(ergebnis).toEqual({ niedrigsteId: 40, verbindungsfehler: false })
+  })
+
+  it('laesst die Nummer eines Sitzungsaufbaus nicht als Nachrichtenkennung gelten', async () => {
+    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, _p: unknown[], eintraege: { delivery_id: string }[]) =>
+      ({
+        angenommen: eintraege.map((e, i) => ({
+          delivery_id: e.delivery_id,
+          seq: 10 + i,
+          ergebnis: 'angenommen',
+        })),
+        abgelehnt: [],
+      }) as never,
+    )
+    const ergebnis = await stelleZu([
+      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63), is_control: true, control_type: 'dr-init', client_uuid: 'u#iA' }),
+      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) }),
+    ])
+    expect(ergebnis.niedrigsteId).toBe(11)
+  })
+
+  it('faellt fuer ein abgelehntes Ziel auf den alten Weg zurueck', async () => {
+    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, _p: unknown[], eintraege: { delivery_id: string }[]) => ({
+      angenommen: [],
+      abgelehnt: [{ delivery_id: eintraege[0].delivery_id, grund: 'inbox_voll' }],
+    }) as never)
+    relais.mockResolvedValue({ id: 7 } as never)
+
+    const ergebnis = await stelleZu([auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) })])
+
+    expect(relais).toHaveBeenCalledTimes(1)
+    expect(ergebnis).toEqual({ niedrigsteId: 7, verbindungsfehler: false })
+  })
+
+  it('faellt ganz auf den alten Weg zurueck, wenn der neue nicht antwortet', async () => {
+    zustellung.sendeZustellungen.mockRejectedValue(new Error('kein Netz'))
+    relais.mockResolvedValue({ id: 9 } as never)
+
+    const ergebnis = await stelleZu([auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) })])
+
+    expect(relais).toHaveBeenCalledTimes(1)
+    expect(ergebnis.niedrigsteId).toBe(9)
+    expect(einreihen).not.toHaveBeenCalled()
+  })
+
+  it('laesst Auftraege ohne Inbox auf dem alten Weg', async () => {
+    relais.mockResolvedValue({ id: 3 } as never)
+    const ergebnis = await stelleZu([auftrag()])
+    expect(inboxVersand).not.toHaveBeenCalled()
+    expect(relais).toHaveBeenCalledTimes(1)
+    expect(ergebnis.niedrigsteId).toBe(3)
   })
 })

@@ -59,6 +59,10 @@ def upgrade() -> None:
         "ix_e2ee_device_inbox_device", "e2ee_device_inboxes", ["device_id"]
     )
 
+    # Die Annahmenummer: eine Folge fuer alle Zustellungen. Sie wird vor der
+    # Tabelle angelegt, weil die Spalte sie als Vorgabewert nennt.
+    op.execute("CREATE SEQUENCE IF NOT EXISTS e2ee_delivery_seq")
+
     op.create_table(
         "e2ee_delivery_payloads",
         sa.Column("id", sa.String(length=36), primary_key=True),
@@ -92,7 +96,12 @@ def upgrade() -> None:
             sa.ForeignKey("e2ee_device_inboxes.inbox_hash", ondelete="CASCADE"),
             nullable=False,
         ),
-        sa.Column("laufende_seq", sa.Integer(), nullable=False),
+        sa.Column(
+            "laufende_seq",
+            sa.BigInteger(),
+            server_default=sa.text("nextval('e2ee_delivery_seq')"),
+            nullable=False,
+        ),
         sa.Column("angenommen_am", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ablauf_am", sa.DateTime(timezone=True), nullable=False),
         sa.Column("quittiert_am", sa.DateTime(timezone=True), nullable=True),
@@ -102,6 +111,9 @@ def upgrade() -> None:
         "ix_e2ee_delivery_inbox_seq", "e2ee_deliveries", ["inbox_hash", "laufende_seq"]
     )
     op.create_index("ix_e2ee_delivery_ablauf", "e2ee_deliveries", ["ablauf_am"])
+    op.create_index(
+        "ix_e2ee_delivery_seq", "e2ee_deliveries", ["laufende_seq"], unique=True
+    )
 
     op.create_table(
         "e2ee_delivery_receipts",
@@ -119,6 +131,20 @@ def upgrade() -> None:
     )
 
 
+def _indizes(tabelle: str) -> set[str]:
+    """Die Indizes einer Tabelle — Datenbanken aus `create_all` tragen andere Namen."""
+    return {
+        index["name"]
+        for index in sa.inspect(op.get_bind()).get_indexes(tabelle)
+        if index.get("name")
+    }
+
+
+def _drop_index(name: str, tabelle: str) -> None:
+    if name in _indizes(tabelle):
+        op.drop_index(name, table_name=tabelle)
+
+
 def downgrade() -> None:
     vorhanden = _tabellen()
     # Die Reihenfolge ist umgekehrt: erst die Kinder, dann die Eltern.
@@ -131,15 +157,16 @@ def downgrade() -> None:
         if tabelle not in vorhanden:
             continue
         if tabelle == "e2ee_delivery_receipts":
-            op.drop_index("ix_e2ee_delivery_receipt_ablauf", table_name=tabelle)
+            _drop_index("ix_e2ee_delivery_receipt_ablauf", tabelle)
         elif tabelle == "e2ee_deliveries":
-            op.drop_index("ix_e2ee_delivery_ablauf", table_name=tabelle)
-            op.drop_index("ix_e2ee_delivery_inbox_seq", table_name=tabelle)
+            _drop_index("ix_e2ee_delivery_ablauf", tabelle)
+            _drop_index("ix_e2ee_delivery_seq", tabelle)
+            _drop_index("ix_e2ee_delivery_inbox_seq", tabelle)
         elif tabelle == "e2ee_delivery_payloads":
-            op.drop_index(
-                "ix_e2ee_delivery_payloads_ciphertext_sha256", table_name=tabelle
-            )
-            op.drop_index("ix_e2ee_delivery_payload_ablauf", table_name=tabelle)
+            _drop_index("ix_e2ee_delivery_payloads_ciphertext_sha256", tabelle)
+            _drop_index("ix_e2ee_delivery_payload_ablauf", tabelle)
         elif tabelle == "e2ee_device_inboxes":
-            op.drop_index("ix_e2ee_device_inbox_device", table_name=tabelle)
+            _drop_index("ix_e2ee_device_inbox_device", tabelle)
         op.drop_table(tabelle)
+    # Die Annahmenummer haengt an keiner Tabelle mehr, seit sie weg ist.
+    op.execute("DROP SEQUENCE IF EXISTS e2ee_delivery_seq")

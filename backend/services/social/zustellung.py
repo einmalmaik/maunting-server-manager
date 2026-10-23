@@ -35,7 +35,6 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models import E2eeDelivery, E2eeDeliveryPayload, E2eeDeliveryReceipt, E2eeDeviceInbox
@@ -378,7 +377,13 @@ def annehmen(
                 E2eeDeliveryPayload.id == vorhanden.payload_id
             ).first()
             if alt is not None and alt.ciphertext_sha256 == nutzlast["ciphertext_sha256"]:
-                angenommen.append({"delivery_id": delivery_id, "ergebnis": "bereits"})
+                angenommen.append(
+                    {
+                        "delivery_id": delivery_id,
+                        "seq": int(vorhanden.laufende_seq),
+                        "ergebnis": "bereits",
+                    }
+                )
             else:
                 raise KonfliktFehler(
                     "Diese Zustellkennung wurde schon mit anderen Bytes benutzt."
@@ -397,7 +402,9 @@ def annehmen(
             # Der Auftrag ist schon quittiert; der Rest antwortet. Gleiche
             # Bytes sind eine Wiederholung, andere ein Konflikt.
             if rest.request_hash == _hash(eintrag_hash(eintrag, nutzlast)):
-                angenommen.append({"delivery_id": delivery_id, "ergebnis": "bereits"})
+                # Der Auftrag ist laengst quittiert; seine Nummer stand im
+                # Idempotenzrest nicht und ist auch nicht mehr noetig.
+                angenommen.append({"delivery_id": delivery_id, "seq": 0, "ergebnis": "bereits"})
             else:
                 raise KonfliktFehler(
                     "Diese Zustellkennung wurde schon mit anderen Bytes benutzt."
@@ -453,18 +460,20 @@ def annehmen(
             # Die Frist steht bei der Annahme fest und wird nicht verlaengert.
             objekt.ablauf_am = min(objekt.ablauf_am, _frist())
 
-        seq = _naechste_seq(db, inbox_hash)
-        db.add(
-            E2eeDelivery(
-                id=delivery_id,
-                payload_id=payload_id,
-                inbox_hash=inbox_hash,
-                laufende_seq=seq,
-                angenommen_am=_jetzt(),
-                ablauf_am=objekt.ablauf_am,
-            )
+        auftrag = E2eeDelivery(
+            id=delivery_id,
+            payload_id=payload_id,
+            inbox_hash=inbox_hash,
+            angenommen_am=_jetzt(),
+            ablauf_am=objekt.ablauf_am,
         )
-        angenommen.append({"delivery_id": delivery_id, "ergebnis": "angenommen"})
+        db.add(auftrag)
+        # Die Annahmenummer vergibt die Datenbank. Sie ist die Kennung, an der
+        # der Absender seine Haekchen misst — die Antwort nennt sie mit.
+        db.flush()
+        angenommen.append(
+            {"delivery_id": delivery_id, "seq": int(auftrag.laufende_seq), "ergebnis": "angenommen"}
+        )
 
     db.commit()
     return {"angenommen": angenommen, "abgelehnt": abgelehnt}
@@ -494,16 +503,6 @@ def _darf_beschreiben(
         return True, None
     erlaubt, grund = SocialService.can_message_user(db, sender_id, ziel_id)
     return erlaubt, grund
-
-
-def _naechste_seq(db: Session, inbox_hash: str) -> int:
-    """Die Laufnummer des naechsten Auftrags dieser Inbox."""
-    hoechste = (
-        db.query(func.max(E2eeDelivery.laufende_seq))
-        .filter(E2eeDelivery.inbox_hash == inbox_hash)
-        .scalar()
-    )
-    return int(hoechste or 0) + 1
 
 
 # ==========================================

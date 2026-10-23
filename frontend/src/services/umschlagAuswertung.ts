@@ -442,8 +442,8 @@ export async function werteUmschlaegeAus(
           seenClientUuids.add(dedupKey)
         }
 
-        if (!isSelf && env.id > maxIncomingId) {
-          maxIncomingId = env.id
+        if (!isSelf && (env.annahme_seq ?? env.id) > maxIncomingId) {
+          maxIncomingId = env.annahme_seq ?? env.id
         }
 
         decryptedList.push({
@@ -556,8 +556,8 @@ export async function werteUmschlaegeAus(
     // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
     // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
     const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
-    if (!isSelf && env.id > maxIncomingId) {
-      maxIncomingId = env.id
+    if (!isSelf && (env.annahme_seq ?? env.id) > maxIncomingId) {
+      maxIncomingId = env.annahme_seq ?? env.id
     }
     decryptedList.push({
       id: env.id,

@@ -159,6 +159,8 @@ export async function verarbeitePostfach(
       ciphertext_envelope: e.ciphertext,
       client_uuid: e.delivery_id,
       created_at: e.angenommen_am,
+      // Die globale Nummer: an ihr misst der Absender seine Haekchen.
+      annahme_seq: e.seq,
     }))
 
     const stand = partnerstand(gespraech.mailbox)

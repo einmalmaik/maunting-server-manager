@@ -11,6 +11,9 @@
  * geblieben; die Namen im Inneren sind die der Seite.
  */
 
+import { utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
+
 import { ladeAnhangHoch, relayE2eeEnvelope } from '@/api/social'
 import type {
   AntwortBezug,
@@ -30,6 +33,7 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
+import { sendeZustellungen, type ZustellEintrag, type ZustellPayload } from './e2eeZustellung'
 import { speichereMedium } from './messengerLocalStore'
 
 /**
@@ -306,10 +310,70 @@ export async function stelleZu(
    */
   let niedrigsteId = 0
   let verbindungsfehler = false
+
+  /*
+   * Der neue Weg zuerst: je Zielgeraet eine eigene Inbox.
+   *
+   * Der Chiffretext ist derselbe wie im alten Weg — nur der Ort ist ein
+   * anderer. Was der Server ablehnt (Postfach voll, Geraet unbekannt) oder was
+   * gar nicht ankommt, geht fuer **dieses eine Ziel** ueber die geteilte
+   * Mailbox. Ein stiller Gesamt-Rueckfall gibt es nicht.
+   */
+  const ueberMailbox: Versandauftrag[] = []
+  const nachInbox = new Map<string, Versandauftrag[]>()
+  for (const auftrag of auftraege) {
+    if (!auftrag.ziel_inbox) {
+      ueberMailbox.push(auftrag)
+      continue
+    }
+    const liste = nachInbox.get(auftrag.blind_mailbox_id) ?? []
+    liste.push(auftrag)
+    nachInbox.set(auftrag.blind_mailbox_id, liste)
+  }
+
+  for (const [mailbox, gruppe] of nachInbox) {
+    const jeKennung = new Map<string, Versandauftrag>()
+    const payloads: ZustellPayload[] = []
+    const eintraege: ZustellEintrag[] = []
+    for (const auftrag of gruppe) {
+      const payloadId = crypto.randomUUID()
+      const deliveryId = crypto.randomUUID()
+      jeKennung.set(deliveryId, auftrag)
+      payloads.push({
+        id: payloadId,
+        ciphertext: auftrag.ciphertext_envelope,
+        ciphertext_sha256: await sha256Hex(utf8ToBytes(auftrag.ciphertext_envelope)),
+      })
+      eintraege.push({
+        delivery_id: deliveryId,
+        payload_id: payloadId,
+        inbox_hash: String(auftrag.ziel_inbox),
+      })
+    }
+    try {
+      const antwort = await sendeZustellungen(mailbox, payloads, eintraege)
+      for (const an of antwort.angenommen) {
+        const auftrag = jeKennung.get(an.delivery_id)
+        // Die Annahmenummer ist global; die kleinste der Auffaecherung gilt
+        // als Kennung dieser Nachricht — genau wie beim alten Weg.
+        if (!auftrag || auftrag.is_control || !(an.seq > 0)) continue
+        if (niedrigsteId === 0 || an.seq < niedrigsteId) niedrigsteId = an.seq
+      }
+      for (const ab of antwort.abgelehnt) {
+        const auftrag = jeKennung.get(ab.delivery_id)
+        if (!auftrag) continue
+        ueberMailbox.push(auftrag)
+      }
+    } catch {
+      // Kein Netz oder ein Server ohne den neuen Weg: der alte traegt es.
+      ueberMailbox.push(...gruppe)
+    }
+  }
+
   const gescheiterteGeraete = new Set<string>()
   let ueberspringeNaechsteNachricht = false
 
-  for (const auftrag of auftraege) {
+  for (const auftrag of ueberMailbox) {
     // H-6: Paarbildung im Sendepfad. Scheitert ein Auftrag (z. B. dr-init),
     // darf die zugehörige Ratchet-Nachricht desselben Zielgeräts nicht gesendet
     // werden, sondern muss ebenfalls eingereiht werden, um Sitzungsbrüche zu verhindern.

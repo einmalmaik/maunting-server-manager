@@ -56,6 +56,13 @@ export interface DrZustellung {
   nachricht: string
   clientUuid: string
   bootstrapClientUuid: string
+  /**
+   * Die Zustelladresse des Zielgeraets, falls es den neuen Weg kennt.
+   *
+   * `null` heisst: ueber die geteilte Mailbox. Das Ziel entscheidet, nicht der
+   * Absender — was ein Geraet nicht anbietet, bekommt den alten Weg.
+   */
+  zielInbox: string | null
 }
 
 export type DrLesung =

@@ -113,6 +113,13 @@ export interface BlindEnvelopeItem {
   ciphertext_envelope: string
   client_uuid?: string | null
   created_at: string
+  /**
+   * Die globale Annahmenummer aus dem Gerätepostfach.
+   *
+   * Der neue Weg vergibt sie beim Annehmen; sie ist die Kennung, an der der
+   * Absender seine Häkchen misst. Fehlt sie (alte Mailbox), gilt `id`.
+   */
+  annahme_seq?: number
 }
 
 export async function getFriends(): Promise<FriendItem[]> {
