@@ -471,6 +471,7 @@ function MessengerSeite() {
     friends,
     activeContact,
     activeGroup,
+    groups,
     messengerGesperrt,
     gruppenrechteVon: (konto) => gruppenrechteVonRef.current(konto),
     setAngeheftet,

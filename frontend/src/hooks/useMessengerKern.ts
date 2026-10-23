@@ -8,7 +8,7 @@ import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import { useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
 import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
 import { IDENTITY_LOADING, resolveIdentity, type E2eeIdentity } from '@/services/e2eeIdentity'
-import { decryptE2eeHybridWithKeyring, deriveBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
+import { decryptE2eeHybridWithKeyring, deriveBlindMailboxId, deriveGroupBlindMailboxId, getCachedBlindMailboxId, getCachedGroupBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   eigenesGeraetFreigegeben,
@@ -29,6 +29,7 @@ import { verfallsfrist } from '@/services/nachrichtVerfall'
 import { signiereNutzlast } from '@/services/nutzlastSignatur'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { verarbeitePostfach, type PostfachGespraech } from '@/services/gespraech/postfach'
 import { setzeAnrufIdentitaet } from '@/stores/useCallStore'
 
 interface Optionen {
@@ -37,6 +38,8 @@ interface Optionen {
   friends: { user_id?: number; friend_user_id?: number; id: number; status?: string; created_at?: string }[]
   activeContact: ChatContact | null
   activeGroup: ChatGroupItem | null
+  /** Alle Gruppen des Kontos — der Hintergrundlauf ordnet ihnen Postfach-Eintraege zu. */
+  groups: ChatGroupItem[]
   messengerGesperrt: boolean
   gruppenrechteVon: (konto: number) => Set<string>
   setAngeheftet: Dispatch<SetStateAction<ChatMessage | null>>
@@ -64,6 +67,7 @@ export function useMessengerKern({
   friends,
   activeContact,
   activeGroup,
+  groups,
   messengerGesperrt,
   gruppenrechteVon,
   setAngeheftet,
@@ -252,6 +256,96 @@ export function useMessengerKern({
     if (!currentUserId) return
     void sichereDauerhafteAblage()
   }, [currentUserId])
+
+  /**
+   * Das Gerätepostfach im Hintergrund leeren.
+   *
+   * Der neue Transport stellt je Gerät zu; was hier liegt, gehört zu irgendeinem
+   * Gespräch — auch zu einem, das niemand offen hat. Ohne diesen Lauf bliebe es
+   * liegen, und nach 50 offenen Aufträgen nähme der Server nichts mehr an.
+   *
+   * Die Zuordnung braucht die Kennungen aller Gespräche. Die entstehen aus den
+   * Konten und Gruppen, nicht aus dem offenen Chat.
+   */
+  const postfachRef = useRef({ gruppenrechteVon, t, markAsRead, setVerfallSekunden })
+  postfachRef.current = { gruppenrechteVon, t, markAsRead, setVerfallSekunden }
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready') return
+    let aktiv = true
+    let laeuft = false
+
+    const gespraeche = async (): Promise<PostfachGespraech[]> => {
+      const liste: PostfachGespraech[] = []
+      for (const f of friends) {
+        const peerId = Number(f.user_id ?? f.friend_user_id ?? f.id)
+        if (!Number.isInteger(peerId) || peerId <= 0) continue
+        const mailbox =
+          getCachedBlindMailboxId(currentUserId, peerId) ??
+          (await deriveBlindMailboxId(currentUserId, peerId))
+        if (!mailbox) continue
+        liste.push({
+          mailbox,
+          drKontext: { eigeneId: currentUserId, peerId },
+          gruppenKontext: null,
+          contact: { userId: peerId, isFriend: true },
+          group: null,
+        })
+      }
+      for (const g of groups) {
+        const mailbox =
+          getCachedGroupBlindMailboxId(g.id) ?? (await deriveGroupBlindMailboxId(g.id))
+        if (!mailbox) continue
+        const mitglieder = (g.members ?? []).map((m) => Number(m.user_id))
+        if (!mitglieder.includes(currentUserId)) mitglieder.push(currentUserId)
+        liste.push({
+          mailbox,
+          drKontext: null,
+          gruppenKontext: {
+            groupId: g.id,
+            blindMailboxId: mailbox,
+            eigeneId: currentUserId,
+            mitglieder,
+            istEigentuemer: Number(g.owner_user_id) === currentUserId,
+          },
+          contact: null,
+          group: g,
+        })
+      }
+      return liste
+    }
+
+    const lauf = async () => {
+      if (!aktiv || laeuft) return
+      laeuft = true
+      try {
+        const liste = await gespraeche()
+        if (!aktiv) return
+        await verarbeitePostfach({
+          eigeneId: currentUserId,
+          decryptionKeys: identity.decryptionKeys ?? [],
+          gespraeche: liste,
+          ...postfachRef.current,
+        })
+      } catch {
+        // Netz, Ablage, ein einzelnes Gespraech: der naechste Takt versucht es
+        // erneut. Ein Fehler hier darf den Chat nicht aufhalten.
+      } finally {
+        laeuft = false
+      }
+    }
+
+    void lauf()
+    // Der Takt ist grob: das Postfach ist die Zustellung, nicht die Anzeige.
+    // Der offene Chat meldet sich ohnehin alle fuenf Sekunden.
+    const takt = setInterval(() => void lauf(), 10_000)
+    window.addEventListener('online', lauf)
+    return () => {
+      aktiv = false
+      clearInterval(takt)
+      window.removeEventListener('online', lauf)
+    }
+  }, [currentUserId, messengerGesperrt, identity, friends, groups])
 
   useEffect(() => {
     if (!currentUserId || friends.length === 0 || messengerGesperrt) return

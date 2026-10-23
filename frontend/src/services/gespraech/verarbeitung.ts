@@ -61,6 +61,14 @@ export interface GespraechsLauf {
   gruppenKontext: GruppenKontext | null
   /** Die privaten Schluessel des Geraets, aus der Identitaet. */
   decryptionKeys: string[]
+  /**
+   * Nur die uebergebenen Umschlaege verarbeiten, nichts nachladen.
+   *
+   * Fuer den Hintergrundlauf: der liest das Geraetepostfach und reicht die
+   * Eintraege herein. Die Mailboxen und die Geraete-Mailbox bleiben dann
+   * unberuehrt — der offene Chat liest sie ohnehin.
+   */
+  nurPostfach?: boolean
 }
 
 /** Was der Durchlauf zurueckmeldet oder abfragt. */
@@ -117,6 +125,7 @@ export function istNebenkopie(clientUuid: string | null | undefined): boolean {
 export async function verarbeiteGespraech(
   kontext: GespraechsLauf,
   optionen: LaufOptionen,
+  zusatz?: BlindEnvelopeItem[],
 ): Promise<LaufErgebnis | null> {
   const { mailbox: mid, eigeneId, drKontext, gruppenKontext } = kontext
   const schluessel = kontext.decryptionKeys
@@ -157,7 +166,7 @@ export async function verarbeiteGespraech(
     if (offen.length === 0) return
     void merkeEigeneWirkungen(offen).catch(() => {})
   }
-  await holeGeraeteSteuerung(
+  if (!kontext.nurPostfach) await holeGeraeteSteuerung(
     eigeneId,
     (umschlag) => decryptE2eeHybridWithKeyring(umschlag, schluessel),
     (klartext, env) => {
@@ -218,7 +227,9 @@ export async function verarbeiteGespraech(
    * Mailbox erst beim nächsten Mal.
    */
   let lesen: string[]
-  if (gruppenKontext) {
+  if (kontext.nurPostfach) {
+    lesen = []
+  } else if (gruppenKontext) {
     lesen = (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
   } else if (drKontext) {
     const ziele = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
@@ -233,26 +244,28 @@ export async function verarbeiteGespraech(
   } else {
     lesen = [mid]
   }
-  optionen.meldeMailboxen?.([...new Set([mid, ...lesen])].sort())
+  if (!kontext.nurPostfach) optionen.meldeMailboxen?.([...new Set([mid, ...lesen])].sort())
   if (!optionen.istAktuell()) {
     behalteEigeneSteuerung()
     return null
   }
 
-  const umschlaege = (
-    await Promise.all(
-      lesen.map((kennung) =>
-        fetchAlleE2eeEnvelopes(kennung, optionen.lesestand.get(kennung) ?? 0).catch(
-          () => [] as Awaited<ReturnType<typeof fetchAlleE2eeEnvelopes>>,
-        ),
-      ),
-    )
-  )
-    .flat()
-    // Beide Mailboxen zählen für sich, ihre Nummern laufen also durcheinander.
-    // Sortiert wird nach Zeit, und bei Gleichstand nach Nummer — sonst
-    // sprängen die Nachrichten zweier Mailboxen im Verlauf hin und her.
-    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
+  const umschlaege: BlindEnvelopeItem[] = kontext.nurPostfach
+    ? (zusatz ?? [])
+    : (
+        await Promise.all(
+          lesen.map((kennung) =>
+            fetchAlleE2eeEnvelopes(kennung, optionen.lesestand.get(kennung) ?? 0).catch(
+              () => [] as Awaited<ReturnType<typeof fetchAlleE2eeEnvelopes>>,
+            ),
+          ),
+        )
+      )
+        .flat()
+        // Beide Mailboxen zählen für sich, ihre Nummern laufen also durcheinander.
+        // Sortiert wird nach Zeit, und bei Gleichstand nach Nummer — sonst
+        // sprängen die Nachrichten zweier Mailboxen im Verlauf hin und her.
+        .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
   if (!optionen.istAktuell()) {
     behalteEigeneSteuerung()
     return null
@@ -625,7 +638,7 @@ export async function verarbeiteGespraech(
    * ist jeder Umschlag oben „unlesbar" geworden, und das sagt nichts über
    * ihn aus.
    */
-  if (gruppenKontext || drKontext) {
+  if (!kontext.nurPostfach && (gruppenKontext || drKontext)) {
     const hoechste = new Map<string, number>()
     const offen = new Map<string, number>()
     for (const env of umschlaege) {
