@@ -32,7 +32,8 @@ pub mod weg;
 mod desktop;
 #[cfg(windows)]
 pub(crate) use desktop::{
-    erweiterung_laden, erweiterung_popup, erweiterung_popup_schliessen, erweiterungen_abgleichen, im_profil, recht_art, recht_name,
+    erweiterung_laden, erweiterung_popup, erweiterung_popup_schliessen, erweiterungen_abgleichen, im_profil, mit_profil,
+    profil_helfer_schliessen, recht_art, recht_name,
 };
 #[cfg(target_os = "android")]
 pub mod android;
@@ -65,8 +66,23 @@ pub struct PanelZustand {
 /// damit die Oberfläche keinen fremden Panel-Host erzeugen kann.
 const EXTERNE_PANEL: [&str; 4] = ["tab-panel-whatsapp", "tab-panel-discord", "tab-panel-telegram", "tab-panel-instagram"];
 
+/// Persistente WebView-Profile der externen Dienste. Jeder Dienst hat sein
+/// eigenes Profil, getrennt von normalen Tabs und von den anderen Diensten.
+/// Muss zu `PANEL_PROFILE` in `TabsPlugin.kt` passen.
+pub(crate) const EXTERNE_PROFILE: [&str; 4] = ["aussen_whatsapp", "aussen_discord", "aussen_telegram", "aussen_instagram"];
+
 pub(crate) fn ist_externes_panel(id: &str) -> bool {
     EXTERNE_PANEL.contains(&id)
+}
+
+pub(crate) fn externes_panel_profil(id: &str) -> Option<&'static str> {
+    match id {
+        "tab-panel-whatsapp" => Some(EXTERNE_PROFILE[0]),
+        "tab-panel-discord" => Some(EXTERNE_PROFILE[1]),
+        "tab-panel-telegram" => Some(EXTERNE_PROFILE[2]),
+        "tab-panel-instagram" => Some(EXTERNE_PROFILE[3]),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -547,6 +563,18 @@ mod tests {
         assert!(ist_externes_panel("tab-panel-instagram"));
         assert!(!ist_externes_panel("tab-panel-youtube"));
         assert!(!ist_externes_panel("tab-a"));
+    }
+
+    #[test]
+    fn externe_dienste_haben_getrennte_profile() {
+        assert_eq!(externes_panel_profil("tab-panel-whatsapp"), Some("aussen_whatsapp"));
+        assert_eq!(externes_panel_profil("tab-panel-discord"), Some("aussen_discord"));
+        assert_eq!(externes_panel_profil("tab-panel-telegram"), Some("aussen_telegram"));
+        assert_eq!(externes_panel_profil("tab-panel-instagram"), Some("aussen_instagram"));
+        assert_eq!(externes_panel_profil("tab-a"), None);
+        let eindeutig: std::collections::HashSet<_> = EXTERNE_PROFILE.iter().collect();
+        assert_eq!(eindeutig.len(), EXTERNE_PROFILE.len(), "Profile sind eindeutig");
+        assert_eq!(EXTERNE_PROFILE.len(), 4);
     }
 
     #[test]

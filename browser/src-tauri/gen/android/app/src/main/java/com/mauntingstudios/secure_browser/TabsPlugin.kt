@@ -60,6 +60,18 @@ class SplitRahmenArgs {
 @InvokeArg class BildSpeichernArgs { lateinit var id: String; lateinit var name: String; var url = ""; lateinit var png: String }
 @InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
 
+/** Persistente Profile der externen Dienste, getrennt von `seiten` und voneinander.
+ *  Muss zu `tabs::EXTERNE_PROFILE` in Rust passen. */
+internal val PANEL_PROFILE = listOf("aussen_whatsapp", "aussen_discord", "aussen_telegram", "aussen_instagram")
+
+internal fun panelProfil(id: String): String? = when (id) {
+  "tab-panel-whatsapp" -> PANEL_PROFILE[0]
+  "tab-panel-discord" -> PANEL_PROFILE[1]
+  "tab-panel-telegram" -> PANEL_PROFILE[2]
+  "tab-panel-instagram" -> PANEL_PROFILE[3]
+  else -> null
+}
+
 /**
  * Die Tabs unter Android (`src/tabs/android.rs`): je Tab eine WebView über
  * der Oberfläche, im Inhaltsbereich, den die Oberfläche in CSS-Pixeln nennt.
@@ -163,7 +175,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun tabHolen(id: String, privat: Boolean): Tab = tabs.getOrPut(id) {
-    val profil = if (privat) privatProfil else SEITEN
+    val profil = if (privat) privatProfil else panelProfil(id) ?: SEITEN
     ProfileStore.getInstance().getOrCreateProfile(profil)
     Tab(this, activity, id, privat, profil).also {
       if (mitWorkerPruefung.add(profil)) workerPruefen(profil)
@@ -431,14 +443,17 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Cookies, Speicher und Cache im Profil [SEITEN]; private Profile fallen mit ihrem Tab. */
+  /** Cookies, Speicher und Cache im Profil [SEITEN] und in den getrennten
+   *  Messenger-Profilen; private Profile fallen mit ihrem Tab. */
   @Command
   fun datenLeeren(invoke: Invoke) {
     aufUi(activity, invoke) {
-      val offen = tabs.values.firstOrNull { !it.privat }?.webView
-      val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, SEITEN) }
-      profilLeeren(SEITEN, ansicht)
-      if (offen == null) ansicht.destroy()
+      for (name in listOf(SEITEN) + PANEL_PROFILE) {
+        val offen = tabs.values.firstOrNull { !it.privat && it.profil == name }?.webView
+        val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, name) }
+        profilLeeren(name, ansicht)
+        if (offen == null) ansicht.destroy()
+      }
       null
     }
   }

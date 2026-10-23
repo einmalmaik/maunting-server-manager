@@ -55,12 +55,16 @@ pub(crate) struct Nativ {
     pub umgebung: ICoreWebView2Environment,
     /// InPrivate: eigenes Profil im Speicher, zählt nicht für `im_profil`.
     pub privat: bool,
+    /// Benanntes persistentes Profil (Workspace oder externer Dienst), sonst `None`.
+    pub profil: Option<String>,
 }
 
 thread_local! {
     static UMGEBUNG: RefCell<Option<ICoreWebView2Environment>> = const { RefCell::new(None) };
     static NATIV: RefCell<HashMap<String, Nativ>> = RefCell::new(HashMap::new());
     static HELFER: RefCell<Option<ICoreWebView2Controller>> = const { RefCell::new(None) };
+    /// Unsichtbare Helfer für benannte Profile (Browserdaten löschen).
+    static HELFER_NAMED: RefCell<HashMap<String, ICoreWebView2Controller>> = RefCell::new(HashMap::new());
 }
 
 /// Einstellungen → Design: Seiten dunkel rendern. Gilt für das WebView2-Profil
@@ -163,8 +167,20 @@ fn umgebung(app: &AppHandle) -> Result<ICoreWebView2Environment, String> {
     Ok(u)
 }
 
+/// Der Profilname eines Workspace-Tabs; „standard“/„default“ bleiben im
+/// gemeinsamen Profil.
+fn benanntes_profil(workspace: Option<&str>) -> Option<String> {
+    let ws = workspace?;
+    let saubere_id: String = ws.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+    (!saubere_id.is_empty() && saubere_id != "standard" && saubere_id != "default").then(|| format!("ws_{saubere_id}"))
+}
+
+fn ist_aussen_profil(profil: Option<&str>) -> bool {
+    profil.is_some_and(|p| p.starts_with("aussen_"))
+}
+
 /// Ein unsichtbarer Controller im Hauptfenster. Nur auf dem UI-Faden.
-pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2Controller, String> {
+pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, privat: bool, profil: Option<&str>) -> Result<ICoreWebView2Controller, String> {
     let fenster = app.get_webview_window("main").ok_or("Hauptfenster fehlt")?;
     let hwnd = HWND(fenster.hwnd().map_err(fehler)?.0);
     let (tx, rx) = mpsc::channel();
@@ -177,11 +193,8 @@ pub(super) fn controller(app: &AppHandle, umgebung: &ICoreWebView2Environment, p
         let optionen = u10.CreateCoreWebView2ControllerOptions().map_err(fehler)?;
         optionen.SetIsInPrivateModeEnabled(privat).map_err(fehler)?;
         if !privat {
-            if let Some(ws) = workspace {
-                let saubere_id: String = ws.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
-                if !saubere_id.is_empty() && saubere_id != "standard" && saubere_id != "default" {
-                    optionen.SetProfileName(&HSTRING::from(format!("ws_{saubere_id}"))).map_err(fehler)?;
-                }
+            if let Some(p) = profil {
+                optionen.SetProfileName(&HSTRING::from(p)).map_err(fehler)?;
             }
         }
         u10.CreateCoreWebView2ControllerWithOptions(hwnd, &optionen, &fertig).map_err(fehler)?;
@@ -259,7 +272,12 @@ fn chrome_user_agent(version: &str) -> Option<String> {
 /// Legt den Controller eines Tabs an und hängt alles daran. UI-Faden.
 fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2, String> {
     let umgebung = umgebung(app)?;
-    let controller = controller(app, &umgebung, privat, workspace)?;
+    let profil = if privat {
+        None
+    } else {
+        super::externes_panel_profil(id).map(str::to_string).or_else(|| benanntes_profil(workspace))
+    };
+    let controller = controller(app, &umgebung, privat, profil.as_deref())?;
     let core = unsafe { controller.CoreWebView2().map_err(fehler)? };
     if let Err(e) = farbschema_setzen(&core) {
         eprintln!("[MSB] Farbschema nicht gesetzt: {e}");
@@ -304,14 +322,14 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> 
         // Der erste normale Tab gleicht die Erweiterungen an, bevor er lädt:
         // was ohne offenen Tab geändert wurde (Jugendschutz), gilt sonst erst
         // auf der zweiten Seite. Private Tabs haben keine.
-        if !privat && !NATIV.with(|n| n.borrow().values().any(|t| !t.privat)) {
+        if !privat && !ist_aussen_profil(profil.as_deref()) && !NATIV.with(|n| n.borrow().values().any(|t| !t.privat && !ist_aussen_profil(t.profil.as_deref()))) {
             match erweiterungen::abgleichen(&core, &crate::erweiterungen::soll(app)) {
                 Ok(laufen) => super::erweiterungen_setzen(laufen),
                 Err(e) => eprintln!("[MSB] Erweiterungen nicht abgeglichen: {e}"),
             }
         }
     }
-    NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat }));
+    NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat, profil }));
     Ok(core)
 }
 
@@ -335,6 +353,7 @@ pub(super) fn popup_einrichten(
     core: &ICoreWebView2,
     umgebung: ICoreWebView2Environment,
     privat: bool,
+    profil: Option<String>,
 ) -> Result<(), String> {
     unsafe {
         // Wie in `anlegen`: `seite.js` braucht die Nachrichten, die Seite
@@ -348,7 +367,7 @@ pub(super) fn popup_einrichten(
         herunterladen::anbinden(app, id, core, privat).map_err(fehler)?;
         webview2::einrichten(app, id, controller.clone(), umgebung.clone()).map_err(fehler)?;
     }
-    NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat }));
+    NATIV.with(|n| n.borrow_mut().insert(id.to_string(), Nativ { controller, core: core.clone(), umgebung, privat, profil }));
     Ok(())
 }
 
@@ -356,6 +375,11 @@ pub(super) fn popup_einrichten(
 /// der Rückruf zurückkehrt).
 pub(super) fn tab_privat(eltern_id: &str) -> bool {
     NATIV.with(|n| n.borrow().get(eltern_id).map(|t| t.privat).unwrap_or(false))
+}
+
+/// Das benannte Profil eines Tabs, damit Popups dieselbe Sitzung erben.
+pub(super) fn tab_profil(eltern_id: &str) -> Option<String> {
+    NATIV.with(|n| n.borrow().get(eltern_id).and_then(|t| t.profil.clone()))
 }
 
 /// Stößt den Abbruch eines laufenden Downloads an (`nr` aus
@@ -654,7 +678,7 @@ pub(crate) fn im_profil<T: Send + 'static>(
 ) -> Result<T, String> {
     let app2 = app.clone();
     auf_ui(app, move || {
-        if let Some(core) = NATIV.with(|n| n.borrow().values().find(|t| !t.privat).map(|t| t.core.clone())) {
+        if let Some(core) = NATIV.with(|n| n.borrow().values().find(|t| !t.privat && t.profil.is_none()).map(|t| t.core.clone())) {
             return f(&core);
         }
         let umgebung = umgebung(&app2)?;
@@ -671,6 +695,45 @@ pub(crate) fn im_profil<T: Send + 'static>(
     })
 }
 
+/// Ein Kern in einem benannten Profil, für Arbeit ohne Tab (Browserdaten
+/// löschen). Der Helfer bleibt bis [`profil_helfer_schliessen`] liegen, damit
+/// die asynchrone Arbeit ihn noch benutzen kann.
+pub(crate) fn mit_profil<T: Send + 'static>(
+    app: &AppHandle,
+    profil: &str,
+    f: impl FnOnce(&ICoreWebView2) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let app2 = app.clone();
+    let name = profil.to_string();
+    auf_ui(app, move || {
+        let vorhanden = HELFER_NAMED.with(|h| h.borrow().get(&name).and_then(|c| unsafe { c.CoreWebView2().ok() }));
+        let core = match vorhanden {
+            Some(core) => core,
+            None => {
+                let umgebung = umgebung(&app2)?;
+                let helfer = controller(&app2, &umgebung, false, Some(&name))?;
+                let core = unsafe { helfer.CoreWebView2().map_err(fehler)? };
+                HELFER_NAMED.with(|h| {
+                    h.borrow_mut().insert(name.clone(), helfer);
+                });
+                core
+            }
+        };
+        f(&core)
+    })
+}
+
+pub(crate) fn profil_helfer_schliessen(app: &AppHandle, profil: &str) {
+    let name = profil.to_string();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(helfer) = HELFER_NAMED.with(|h| h.borrow_mut().remove(&name)) {
+            unsafe {
+                let _ = helfer.Close();
+            }
+        }
+    });
+}
+
 /// Gleicht die Erweiterungen im Profil der Seiten an und gibt die laufenden
 /// Kennungen zurück. `nur_offen`: nur, wenn ein normaler Tab offen ist (sonst
 /// holt `anlegen` es nach); dann `None`.
@@ -680,7 +743,7 @@ pub fn erweiterungen_abgleichen(
     nur_offen: bool,
 ) -> Result<Option<Vec<String>>, String> {
     if nur_offen {
-        return auf_ui(app, move || match NATIV.with(|n| n.borrow().values().find(|t| !t.privat).map(|t| t.core.clone())) {
+        return auf_ui(app, move || match NATIV.with(|n| n.borrow().values().find(|t| !t.privat && !ist_aussen_profil(t.profil.as_deref())).map(|t| t.core.clone())) {
             Some(core) => unsafe { erweiterungen::abgleichen(&core, &soll) }.map(Some),
             None => Ok(None),
         });

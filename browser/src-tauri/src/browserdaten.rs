@@ -100,9 +100,8 @@ mod plattform {
         rx.recv_timeout(FRIST).map_err(|_| "Das Profil hat nicht geantwortet".to_string())?
     }
 
-    pub fn leeren(app: &AppHandle) -> Result<(), String> {
-        let (tx, rx) = mpsc::channel::<Result<(), String>>();
-        crate::tabs::im_profil(app, move |core| unsafe {
+    fn leeren_core(core: &ICoreWebView2, tx: mpsc::Sender<Result<(), String>>) -> Result<(), String> {
+        unsafe {
             profil::<ICoreWebView2Profile2>(core)
                 .and_then(|p| {
                     p.ClearBrowsingDataAll(&ClearBrowsingDataCompletedHandler::create(Box::new(move |ergebnis| {
@@ -111,19 +110,35 @@ mod plattform {
                     })))
                 })
                 .map_err(|e| e.to_string())
-        })?;
-        warten(rx)
+        }
     }
 
-    pub fn leeren_seit(app: &AppHandle, seit_sekunden: f64) -> Result<(), String> {
-        let bis = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs_f64();
+    fn leeren_profil(app: &AppHandle, profil: Option<&str>) -> Result<(), String> {
         let (tx, rx) = mpsc::channel::<Result<(), String>>();
-        crate::tabs::im_profil(app, move |core| unsafe {
+        match profil {
+            Some(p) => {
+                let gestartet = crate::tabs::mit_profil(app, p, move |core| leeren_core(core, tx));
+                let ergebnis = match gestartet {
+                    Ok(()) => warten(rx),
+                    Err(e) => Err(e),
+                };
+                crate::tabs::profil_helfer_schliessen(app, p);
+                ergebnis
+            }
+            None => {
+                crate::tabs::im_profil(app, move |core| leeren_core(core, tx))?;
+                warten(rx)
+            }
+        }
+    }
+
+    fn leeren_seit_core(core: &ICoreWebView2, seit: f64, bis: f64, tx: mpsc::Sender<Result<(), String>>) -> Result<(), String> {
+        unsafe {
             profil::<ICoreWebView2Profile2>(core)
                 .and_then(|p| {
                     p.ClearBrowsingDataInTimeRange(
                         COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_PROFILE,
-                        seit_sekunden,
+                        seit,
                         bis,
                         &ClearBrowsingDataCompletedHandler::create(Box::new(move |ergebnis| {
                             let _ = tx.send(ergebnis.map_err(|e| e.to_string()));
@@ -132,13 +147,56 @@ mod plattform {
                     )
                 })
                 .map_err(|e| e.to_string())
-        })?;
-        warten(rx)
+        }
     }
 
-    pub fn rechte(app: &AppHandle) -> Result<Vec<Seitenrecht>, String> {
-        let (tx, rx) = mpsc::channel::<Result<Vec<Seitenrecht>, String>>();
-        crate::tabs::im_profil(app, move |core| unsafe {
+    fn leeren_seit_profil(app: &AppHandle, profil: Option<&str>, seit: f64, bis: f64) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        match profil {
+            Some(p) => {
+                let gestartet = crate::tabs::mit_profil(app, p, move |core| leeren_seit_core(core, seit, bis, tx));
+                let ergebnis = match gestartet {
+                    Ok(()) => warten(rx),
+                    Err(e) => Err(e),
+                };
+                crate::tabs::profil_helfer_schliessen(app, p);
+                ergebnis
+            }
+            None => {
+                crate::tabs::im_profil(app, move |core| leeren_seit_core(core, seit, bis, tx))?;
+                warten(rx)
+            }
+        }
+    }
+
+    fn alle_profile(app: &AppHandle, leeren: impl Fn(&AppHandle, Option<&str>) -> Result<(), String>) -> Result<(), String> {
+        let mut fehler = Vec::new();
+        if let Err(e) = leeren(app, None) {
+            fehler.push(e);
+        }
+        for p in crate::tabs::EXTERNE_PROFILE {
+            if let Err(e) = leeren(app, Some(p)) {
+                fehler.push(e);
+            }
+        }
+        if fehler.is_empty() {
+            Ok(())
+        } else {
+            Err(fehler.join("; "))
+        }
+    }
+
+    pub fn leeren(app: &AppHandle) -> Result<(), String> {
+        alle_profile(app, leeren_profil)
+    }
+
+    pub fn leeren_seit(app: &AppHandle, seit_sekunden: f64) -> Result<(), String> {
+        let bis = SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e| e.to_string())?.as_secs_f64();
+        alle_profile(app, move |app, profil| leeren_seit_profil(app, profil, seit_sekunden, bis))
+    }
+
+    fn rechte_core(core: &ICoreWebView2, tx: mpsc::Sender<Result<Vec<Seitenrecht>, String>>) -> Result<(), String> {
+        unsafe {
             profil::<ICoreWebView2Profile4>(core)
                 .and_then(|p| {
                     p.GetNonDefaultPermissionSettings(&GetNonDefaultPermissionSettingsCompletedHandler::create(Box::new(
@@ -150,8 +208,39 @@ mod plattform {
                     )))
                 })
                 .map_err(|e| e.to_string())
-        })?;
-        warten(rx)
+        }
+    }
+
+    fn rechte_in(app: &AppHandle, profil: Option<&str>) -> Result<Vec<Seitenrecht>, String> {
+        let (tx, rx) = mpsc::channel::<Result<Vec<Seitenrecht>, String>>();
+        match profil {
+            Some(p) => {
+                let gestartet = crate::tabs::mit_profil(app, p, move |core| rechte_core(core, tx));
+                let ergebnis = match gestartet {
+                    Ok(()) => warten(rx),
+                    Err(e) => Err(e),
+                };
+                crate::tabs::profil_helfer_schliessen(app, p);
+                ergebnis
+            }
+            None => {
+                crate::tabs::im_profil(app, move |core| rechte_core(core, tx))?;
+                warten(rx)
+            }
+        }
+    }
+
+    pub fn rechte(app: &AppHandle) -> Result<Vec<Seitenrecht>, String> {
+        let mut alle = Vec::new();
+        if let Ok(mut rechte) = rechte_in(app, None) {
+            alle.append(&mut rechte);
+        }
+        for p in crate::tabs::EXTERNE_PROFILE {
+            if let Ok(mut rechte) = rechte_in(app, Some(p)) {
+                alle.append(&mut rechte);
+            }
+        }
+        Ok(alle)
     }
 
     unsafe fn lesen(liste: &ICoreWebView2PermissionSettingCollectionView) -> Vec<Seitenrecht> {
@@ -182,11 +271,13 @@ mod plattform {
         rechte
     }
 
-    pub fn zuruecksetzen(app: &AppHandle, art: &str, herkunft: &str) -> Result<(), String> {
-        let art = crate::tabs::recht_art(art).ok_or("Unbekanntes Recht")?;
-        let herkunft = HSTRING::from(herkunft);
-        let (tx, rx) = mpsc::channel::<Result<(), String>>();
-        crate::tabs::im_profil(app, move |core| unsafe {
+    fn zuruecksetzen_core(
+        core: &ICoreWebView2,
+        art: COREWEBVIEW2_PERMISSION_KIND,
+        herkunft: HSTRING,
+        tx: mpsc::Sender<Result<(), String>>,
+    ) -> Result<(), String> {
+        unsafe {
             profil::<ICoreWebView2Profile4>(core)
                 .and_then(|p| {
                     p.SetPermissionState(
@@ -200,8 +291,40 @@ mod plattform {
                     )
                 })
                 .map_err(|e| e.to_string())
-        })?;
-        warten(rx)
+        }
+    }
+
+    fn zuruecksetzen_in(app: &AppHandle, profil: Option<&str>, art: COREWEBVIEW2_PERMISSION_KIND, herkunft: &HSTRING) -> Result<(), String> {
+        let (tx, rx) = mpsc::channel::<Result<(), String>>();
+        let herkunft = herkunft.clone();
+        match profil {
+            Some(p) => {
+                let gestartet = crate::tabs::mit_profil(app, p, move |core| zuruecksetzen_core(core, art, herkunft, tx));
+                let ergebnis = match gestartet {
+                    Ok(()) => warten(rx),
+                    Err(e) => Err(e),
+                };
+                crate::tabs::profil_helfer_schliessen(app, p);
+                ergebnis
+            }
+            None => {
+                crate::tabs::im_profil(app, move |core| zuruecksetzen_core(core, art, herkunft, tx))?;
+                warten(rx)
+            }
+        }
+    }
+
+    pub fn zuruecksetzen(app: &AppHandle, art: &str, herkunft: &str) -> Result<(), String> {
+        let art = crate::tabs::recht_art(art).ok_or("Unbekanntes Recht")?;
+        let herkunft = HSTRING::from(herkunft);
+        let mut fehler = None;
+        if let Err(e) = zuruecksetzen_in(app, None, art, &herkunft) {
+            fehler = Some(e);
+        }
+        for p in crate::tabs::EXTERNE_PROFILE {
+            let _ = zuruecksetzen_in(app, Some(p), art, &herkunft);
+        }
+        fehler.map_or(Ok(()), Err)
     }
 }
 
