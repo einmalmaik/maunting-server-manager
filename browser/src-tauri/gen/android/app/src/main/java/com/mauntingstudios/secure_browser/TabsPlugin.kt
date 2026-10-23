@@ -36,7 +36,7 @@ import java.util.UUID
 @InvokeArg class TabArgs { lateinit var id: String }
 @InvokeArg class DunkelArgs { var an = false }
 @InvokeArg class LadenArgs { lateinit var id: String; lateinit var url: String; var privat = false }
-@InvokeArg class VorneArgs { var vorne: String? = null; var sekundaer: String? = null }
+@InvokeArg class VorneArgs { var vorne: String? = null; var sekundaer: String? = null; var panel: String? = null }
 @InvokeArg
 class SplitRahmenArgs {
   lateinit var primaerId: String
@@ -51,6 +51,7 @@ class SplitRahmenArgs {
   var sekundaerHoehe = 0.0
 }
 @InvokeArg class RahmenArgs { var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
+@InvokeArg class PanelRahmenArgs { lateinit var id: String; var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
 @InvokeArg class AktionArgs { lateinit var id: String; lateinit var aktion: String }
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
@@ -81,6 +82,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private var vorne: String? = null
   private var split: SplitRahmenArgs? = null
   private var rahmen = RahmenArgs()
+  private var panel: PanelRahmenArgs? = null
   private var vollbild: Pair<View, WebChromeClient.CustomViewCallback>? = null
   private var privatProfil = PRIVAT + UUID.randomUUID()
   private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
@@ -196,13 +198,32 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     val a = invoke.parseArgs(VorneArgs::class.java)
     aufUi(activity, invoke) {
       vorne = a.vorne
+      if (a.panel == null) panel = null
       val sekundaer = a.sekundaer
       for ((id, tab) in tabs) {
-        val istSichtbar = id == vorne || (sekundaer != null && id == sekundaer)
+        val istSichtbar = id == vorne || (sekundaer != null && id == sekundaer) || (a.panel != null && panel?.id == id)
         tab.sichtbar(istSichtbar)
       }
       zurueckPruefen()
       null
+    }
+  }
+
+  @Command
+  fun panelRahmen(invoke: Invoke) {
+    val a = invoke.parseArgs(PanelRahmenArgs::class.java)
+    aufUi(activity, invoke) {
+      panel = a
+      tabs[a.id]?.webView?.layoutParams = panelPlatz(a)
+      null
+    }
+  }
+
+  private fun panelPlatz(a: PanelRahmenArgs): FrameLayout.LayoutParams {
+    val d = activity.resources.displayMetrics.density
+    return FrameLayout.LayoutParams((a.breite * d).toInt(), (a.hoehe * d).toInt()).apply {
+      leftMargin = (a.x * d).toInt()
+      topMargin = (a.y * d).toInt()
     }
   }
 
@@ -228,7 +249,9 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   fun splitAufheben(invoke: Invoke) {
     aufUi(activity, invoke) {
       split = null
-      for (tab in tabs.values) tab.webView.layoutParams = platz()
+      for ((id, tab) in tabs) {
+        if (panel?.id != id) tab.webView.layoutParams = platz()
+      }
       null
     }
   }
@@ -239,7 +262,9 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     aufUi(activity, invoke) {
       rahmen = a
       if (split == null) {
-        for (tab in tabs.values) tab.webView.layoutParams = platz()
+        for ((id, tab) in tabs) {
+          if (panel?.id != id) tab.webView.layoutParams = platz()
+        }
       }
       null
     }
@@ -260,10 +285,13 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     aufUi(activity, invoke) {
       tabs.remove(a.id)?.let { wegraeumen(it) }
       if (vorne == a.id) vorne = null
+      if (panel?.id == a.id) panel = null
       val splitInfo = split
       if (splitInfo != null && (splitInfo.primaerId == a.id || splitInfo.sekundaerId == a.id)) {
         split = null
-        for (tab in tabs.values) tab.webView.layoutParams = platz()
+        for ((id, tab) in tabs) {
+          if (panel?.id != id) tab.webView.layoutParams = platz()
+        }
       }
       zurueckPruefen()
       null

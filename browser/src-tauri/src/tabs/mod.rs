@@ -56,6 +56,20 @@ pub struct SplitZustand {
 }
 
 #[derive(Debug, Clone)]
+pub struct PanelZustand {
+    pub id: String,
+    pub rahmen: Rahmen,
+}
+
+/// Die drei externen Web-Apps in der Seitenleiste. Ihre Kennungen sind fest,
+/// damit die Oberfläche keinen fremden Panel-Host erzeugen kann.
+const EXTERNE_PANEL: [&str; 4] = ["tab-panel-whatsapp", "tab-panel-discord", "tab-panel-telegram", "tab-panel-instagram"];
+
+pub(crate) fn ist_externes_panel(id: &str) -> bool {
+    EXTERNE_PANEL.contains(&id)
+}
+
+#[derive(Debug, Clone)]
 pub struct TabDaten {
     pub privat: bool,
     /// Seit wann der Tab nicht vorne liegt; `None`, solange er vorne ist.
@@ -67,6 +81,8 @@ pub struct Zustand {
     pub aktiv: Option<String>,
     pub split: Option<SplitZustand>,
     pub rahmen: Rahmen,
+    /// Externe Web-App in der Seitenleiste, mit eigenem Rechteck.
+    pub panel: Option<PanelZustand>,
     /// Die Oberfläche legt gerade etwas über den Inhaltsbereich (Dialog,
     /// Vorschlagsliste). Native Webviews liegen immer oben, deshalb muss der
     /// Tab so lange weg.
@@ -86,6 +102,7 @@ impl Default for Zustand {
             aktiv: None,
             split: None,
             rahmen: Rahmen { x: 0.0, y: 0.0, breite: 800.0, hoehe: 600.0 },
+            panel: None,
             verdeckt: false,
             vollbild: None,
             leistung: ruhe::Leistung::default(),
@@ -107,6 +124,9 @@ impl Zustand {
         }
         if let Some(s) = &self.split {
             return s.sekundaer_id == id;
+        }
+        if let Some(p) = &self.panel {
+            return p.id == id;
         }
         false
     }
@@ -173,6 +193,9 @@ pub(crate) fn austragen(tabs: &Tabs, id: &str) {
     }
     if z.vollbild.as_deref() == Some(id) {
         z.vollbild = None;
+    }
+    if z.panel.as_ref().is_some_and(|p| p.id == id) {
+        z.panel = None;
     }
 }
 
@@ -250,6 +273,9 @@ pub fn tab_schliessen(app: AppHandle, tabs: State<'_, Tabs>, id: String) -> Resu
         if z.vollbild.as_deref() == Some(&id) {
             z.vollbild = None;
         }
+        if z.panel.as_ref().is_some_and(|p| p.id == id) {
+            z.panel = None;
+        }
     }
     crate::schild::tab_vergessen(&id);
     seite_vergessen(&id);
@@ -289,6 +315,23 @@ pub fn tab_seite_zuruecksetzen(app: AppHandle, id: String) -> Result<(), String>
 pub fn tabs_rahmen(app: AppHandle, tabs: State<'_, Tabs>, rahmen: Rahmen) -> Result<(), String> {
     tabs.0.lock().unwrap().rahmen = rahmen;
     plattform::rahmen_anwenden(&app, &tabs);
+    Ok(())
+}
+
+/// Geometrie einer externen Web-App in der Seitenleiste. `None` versteckt sie
+/// nur; die WebView und ihre Sitzung bleiben erhalten.
+#[tauri::command(async)]
+pub fn panel_rahmen(app: AppHandle, tabs: State<'_, Tabs>, id: String, rahmen: Option<Rahmen>) -> Result<(), String> {
+    id_pruefen(&id)?;
+    if !ist_externes_panel(&id) {
+        return Err("Kein externes Panel".into());
+    }
+    {
+        let mut z = tabs.0.lock().unwrap();
+        z.panel = rahmen.map(|rahmen| PanelZustand { id, rahmen });
+    }
+    plattform::rahmen_anwenden(&app, &tabs);
+    plattform::sichtbarkeit(&app, &tabs);
     Ok(())
 }
 
@@ -494,5 +537,37 @@ mod tests {
         z.vollbild = Some("tab-b".into());
         assert!(z.sichtbar("tab-b"));
         assert!(!z.sichtbar("tab-a"));
+    }
+
+    #[test]
+    fn externe_panel_kennungen_sind_begrenzt() {
+        assert!(ist_externes_panel("tab-panel-whatsapp"));
+        assert!(ist_externes_panel("tab-panel-discord"));
+        assert!(ist_externes_panel("tab-panel-telegram"));
+        assert!(ist_externes_panel("tab-panel-instagram"));
+        assert!(!ist_externes_panel("tab-panel-youtube"));
+        assert!(!ist_externes_panel("tab-a"));
+    }
+
+    #[test]
+    fn panel_bleibt_neben_dem_haupttab_sichtbar_und_wird_aufgeraeumt() {
+        let rahmen = Rahmen { x: 1.0, y: 2.0, breite: 300.0, hoehe: 400.0 };
+        let mut z = Zustand { aktiv: Some("tab-a".into()), ..Zustand::default() };
+        assert!(!z.sichtbar("tab-panel-whatsapp"));
+        z.panel = Some(PanelZustand { id: "tab-panel-whatsapp".into(), rahmen });
+        assert!(z.sichtbar("tab-panel-whatsapp"));
+        assert!(z.sichtbar("tab-a"));
+        z.verdeckt = true;
+        assert!(!z.sichtbar("tab-panel-whatsapp"));
+        z.verdeckt = false;
+        z.vollbild = Some("tab-b".into());
+        assert!(!z.sichtbar("tab-panel-whatsapp"));
+        z.vollbild = Some("tab-panel-whatsapp".into());
+        assert!(z.sichtbar("tab-panel-whatsapp"));
+
+        let tabs = Tabs::default();
+        tabs.0.lock().unwrap().panel = Some(PanelZustand { id: "tab-panel-whatsapp".into(), rahmen });
+        austragen(&tabs, "tab-panel-whatsapp");
+        assert!(tabs.0.lock().unwrap().panel.is_none());
     }
 }

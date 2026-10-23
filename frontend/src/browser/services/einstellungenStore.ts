@@ -29,7 +29,7 @@ export const EIGENES_BILD_MAX_BYTES = 3 * 1024 * 1024
 export type Modul = 'singra' | 'messenger' | 'notizen' | 'kalender' | 'tresor'
 
 /** Was in Leiste oder Menü steht und sich ordnen lässt: die Module und die Listen des Browsers. */
-export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads'
+export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads' | 'whatsapp' | 'discord' | 'telegram' | 'instagram'
 
 /** Knöpfe in Kopf- und Navigationsleiste, die man ausblenden kann. */
 export type Knopf = 'neuLaden' | 'schild' | 'stern' | 'screenshot' | 'erweiterungen' | 'privaterTab'

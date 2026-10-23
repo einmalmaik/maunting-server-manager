@@ -81,11 +81,19 @@ export function bilderEntfernen(tab: string): void {
 
 const naechstesBild = () => new Promise<void>((fertig) => requestAnimationFrame(() => requestAnimationFrame(() => fertig())))
 
+/** Externe Web-App in der Seitenleiste, deren Standbild mit aufgenommen wird. */
+let externePanelId: string | null = null
+
+export function panelRegistrieren(id: string | null): void {
+  if (externePanelId && externePanelId !== id) bilderEntfernen(externePanelId)
+  externePanelId = id
+}
+
 async function standbildAufnehmen(): Promise<void> {
   const { aktivId, split } = useTabsStore.getState()
   // In der geteilten Ansicht liegen beide Seiten als eigene Webview vor; nur
   // ein Bild ließe die andere Hälfte leer zurück.
-  const ids = [aktivId, ...(split ? [split.sekundaerId] : [])].filter((id): id is string => Boolean(id))
+  const ids = [aktivId, ...(split ? [split.sekundaerId] : []), ...(externePanelId ? [externePanelId] : [])].filter((id): id is string => Boolean(id))
   const neu: Record<string, string> = {}
   for (const id of ids) {
     try {

@@ -182,6 +182,9 @@ export const nativ = {
   tabSeiteZuruecksetzen: (id: string) => rufen('tab_seite_zuruecksetzen', { id }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
     nacheinander('tabs_rahmen', { rahmen }),
+  /** Geometrie einer externen Web-App im Panel; `null` versteckt sie nur. */
+  panelRahmen: (id: string, rahmen: { x: number; y: number; breite: number; hoehe: number } | null) =>
+    nacheinander('panel_rahmen', { id, rahmen }),
   tabsSplitSetzen: (
     primaerId: string,
     primaerRahmen: { x: number; y: number; breite: number; hoehe: number },

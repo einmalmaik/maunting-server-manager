@@ -4,9 +4,10 @@
  * Seiten von MSS (`navigate('/chat')` aus einer Benachrichtigung) im
  * richtigen Panel.
  */
-import type { LucideIcon } from 'lucide-react'
+import type { ElementType } from 'react'
 import { Bookmark, Bot, Calendar, Code, Download, History, KeyRound, Link2, MessageSquare, Settings, StickyNote } from 'lucide-react'
 
+import { DiscordSymbol, InstagramSymbol, TelegramSymbol, WhatsAppSymbol } from '../marken'
 import type { Modul } from '../services/einstellungenStore'
 
 export type PanelId =
@@ -18,18 +19,24 @@ export type PanelId =
   | 'lesezeichen'
   | 'verlauf'
   | 'downloads'
+  | 'whatsapp'
+  | 'discord'
+  | 'telegram'
+  | 'instagram'
   | 'koppeln'
   | 'entwickler'
 
 export interface Leisteneintrag {
   id: PanelId
-  symbol: LucideIcon
+  symbol: ElementType
   /** i18n-Schlüssel des Namens. */
   name: string
   /** Gehört zu MSM: braucht die Kopplung, lässt sich ausblenden. */
   modul?: Modul
   /** Arbeitet ohne Panel weiter (lokaler Spiegel). */
   offline?: boolean
+  /** Externe Web-App, die im Panel gehostet wird. */
+  extern?: string
 }
 
 export const MSM_EINTRAEGE: Leisteneintrag[] = [
@@ -44,6 +51,10 @@ export const BROWSER_EINTRAEGE: Leisteneintrag[] = [
   { id: 'lesezeichen', symbol: Bookmark, name: 'browser.leiste.lesezeichen' },
   { id: 'verlauf', symbol: History, name: 'browser.leiste.verlauf' },
   { id: 'downloads', symbol: Download, name: 'browser.leiste.downloads' },
+  { id: 'whatsapp', symbol: WhatsAppSymbol, name: 'browser.leiste.whatsapp', extern: 'https://web.whatsapp.com' },
+  { id: 'discord', symbol: DiscordSymbol, name: 'browser.leiste.discord', extern: 'https://discord.com/app' },
+  { id: 'telegram', symbol: TelegramSymbol, name: 'browser.leiste.telegram', extern: 'https://web.telegram.org' },
+  { id: 'instagram', symbol: InstagramSymbol, name: 'browser.leiste.instagram', extern: 'https://www.instagram.com' },
 ]
 
 /** Kein Panel: die Einstellungen sind eine eigene Seite im Tab (`msb://einstellungen`). */

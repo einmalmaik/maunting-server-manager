@@ -187,6 +187,7 @@ pub fn run() {
             tabs::tab_aktion,
             tabs::tab_seite_zuruecksetzen,
             tabs::tabs_rahmen,
+            tabs::panel_rahmen,
             tabs::tabs_darstellung,
             tabs::tabs_split_setzen,
             tabs::tabs_split_aufheben,

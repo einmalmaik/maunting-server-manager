@@ -247,6 +247,15 @@ pub fn tab_verwerfen(app: &AppHandle, id: &str) {
     });
 }
 
+/// Chrome-Kennung für die externen Panels, mit der installierten WebView2-Version.
+fn chrome_user_agent(version: &str) -> Option<String> {
+    let version = version.trim();
+    if version.is_empty() || !version.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    Some(format!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version} Safari/537.36"))
+}
+
 /// Legt den Controller eines Tabs an und hängt alles daran. UI-Faden.
 fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> Result<ICoreWebView2, String> {
     let umgebung = umgebung(app)?;
@@ -257,6 +266,17 @@ fn anlegen(app: &AppHandle, id: &str, privat: bool, workspace: Option<&str>) -> 
     }
     unsafe {
         let einstellungen = core.Settings().map_err(fehler)?;
+        // Externe Dienste sollen einen aktuellen Chrome statt eines Edge sehen.
+        if super::ist_externes_panel(id) {
+            let mut roh = windows::core::PWSTR::null();
+            if umgebung.BrowserVersionString(&mut roh).is_ok() {
+                if let Some(ua) = chrome_user_agent(&webview2_com::take_pwstr(roh)) {
+                    if let Ok(s2) = einstellungen.cast::<ICoreWebView2Settings2>() {
+                        let _ = s2.SetUserAgent(&HSTRING::from(ua));
+                    }
+                }
+            }
+        }
         // Web-Nachrichten nur für `seite.js`: es fängt `chrome.webview` ein,
         // bevor die Seite läuft, und nimmt es ihr weg.
         einstellungen.SetIsWebMessageEnabled(true).map_err(fehler)?;
@@ -350,6 +370,9 @@ pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
     let stand: HashMap<String, (bool, bool)> = {
         let z = tabs.0.lock().unwrap();
         let vorne = |id: &str| {
+            if z.panel.as_ref().is_some_and(|p| p.id == id) {
+                return z.sichtbar(id);
+            }
             if let Some(v) = &z.vollbild {
                 v == id
             } else if let Some(s) = &z.split {
@@ -398,13 +421,14 @@ fn rechteck(app: &AppHandle, x: f64, y: f64, breite: f64, hoehe: f64) -> RECT {
 }
 
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let (r, split, aktiv, vollbild) = {
+    let (r, split, aktiv, vollbild, panel) = {
         let z = tabs.0.lock().unwrap();
-        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.vollbild.clone())
+        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.vollbild.clone(), z.panel.clone())
     };
     if vollbild.is_some() {
         return;
     }
+    let panel_rect = panel.as_ref().map(|p| rechteck(app, p.rahmen.x, p.rahmen.y, p.rahmen.breite, p.rahmen.hoehe));
     if let Some(s) = split {
         let rect_primaer = rechteck(app, s.primaer_rahmen.x, s.primaer_rahmen.y, s.primaer_rahmen.breite, s.primaer_rahmen.hoehe);
         let rect_sekundaer = rechteck(app, s.sekundaer_rahmen.x, s.sekundaer_rahmen.y, s.sekundaer_rahmen.breite, s.sekundaer_rahmen.hoehe);
@@ -413,7 +437,17 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
         let _ = app.run_on_main_thread(move || {
             NATIV.with(|n| {
                 for (id, tab) in n.borrow().iter() {
-                    let ziel_rect = if !primaer_id.is_empty() && id == &primaer_id {
+                    let ziel_rect = if let (Some(panel), Some(rect)) = (&panel, panel_rect) {
+                        if id == &panel.id {
+                            rect
+                        } else if !primaer_id.is_empty() && id == &primaer_id {
+                            rect_primaer
+                        } else if id == &s.sekundaer_id {
+                            rect_sekundaer
+                        } else {
+                            default_rect
+                        }
+                    } else if !primaer_id.is_empty() && id == &primaer_id {
                         rect_primaer
                     } else if id == &s.sekundaer_id {
                         rect_sekundaer
@@ -430,9 +464,14 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
         let rechteck = rechteck(app, r.x, r.y, r.breite, r.hoehe);
         let _ = app.run_on_main_thread(move || {
             NATIV.with(|n| {
-                for tab in n.borrow().values() {
+                for (id, tab) in n.borrow().iter() {
+                    let ziel_rect = if let (Some(panel), Some(rect)) = (&panel, panel_rect) {
+                        if id == &panel.id { rect } else { rechteck }
+                    } else {
+                        rechteck
+                    };
                     unsafe {
-                        let _ = tab.controller.SetBounds(rechteck);
+                        let _ = tab.controller.SetBounds(ziel_rect);
                     }
                 }
             })
@@ -666,5 +705,14 @@ mod tests {
         assert_eq!(KULISSE.A, 0xFF, "die Kulisse deckt, sie scheint nicht durch");
         let helligkeit = (u16::from(KULISSE.R) + u16::from(KULISSE.G) + u16::from(KULISSE.B)) / 3;
         assert!(helligkeit <= 64, "die Kulisse bleibt dunkel, Helligkeit {helligkeit}");
+    }
+
+    #[test]
+    fn bildet_chrome_kennung_aus_der_webview_version() {
+        let ua = chrome_user_agent("141.0.3537.57").expect("Kennung");
+        assert!(ua.contains("Chrome/141.0.3537.57"));
+        assert!(!ua.contains("Edg/"));
+        assert!(chrome_user_agent("").is_none());
+        assert!(chrome_user_agent("141.0.3537.57-beta").is_none());
     }
 }

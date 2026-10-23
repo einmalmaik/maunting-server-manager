@@ -66,22 +66,23 @@ pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: boo
 
 /// Vorne liegt der aktive Tab (oder bei Split beide Tabs), außer die Oberfläche legt gerade etwas darüber.
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
-    let (vorne, sekundaer) = {
+    let (vorne, sekundaer, panel) = {
         let z = tabs.0.lock().unwrap();
+        let panel = z.panel.as_ref().and_then(|p| z.sichtbar(&p.id).then(|| p.id.clone()));
         if z.verdeckt {
-            (None, None)
+            (None, None, None)
         } else {
-            (z.aktiv.clone(), z.split.as_ref().map(|s| s.sekundaer_id.clone()))
+            (z.aktiv.clone(), z.split.as_ref().map(|s| s.sekundaer_id.clone()), panel)
         }
     };
-    senden(app, "sichtbarkeit", json!({ "vorne": vorne, "sekundaer": sekundaer }));
+    senden(app, "sichtbarkeit", json!({ "vorne": vorne, "sekundaer": sekundaer, "panel": panel }));
 }
 
 /// Der Inhaltsbereich in CSS-Pixeln der Oberfläche; Kotlin rechnet um.
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let (r, split, aktiv) = {
+    let (r, split, aktiv, panel) = {
         let z = tabs.0.lock().unwrap();
-        (z.rahmen, z.split.clone(), z.aktiv.clone())
+        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.panel.clone())
     };
     if let Some(s) = split {
         let primaer_id = aktiv.unwrap_or_default();
@@ -104,6 +105,13 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
     } else {
         senden(app, "splitAufheben", json!({}));
         senden(app, "rahmen", json!({ "x": r.x, "y": r.y, "breite": r.breite, "hoehe": r.hoehe }));
+    }
+    if let Some(p) = panel {
+        senden(
+            app,
+            "panelRahmen",
+            json!({ "id": p.id, "x": p.rahmen.x, "y": p.rahmen.y, "breite": p.rahmen.breite, "hoehe": p.rahmen.hoehe }),
+        );
     }
 }
 

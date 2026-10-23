@@ -10,14 +10,15 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 import { PasswordInput } from '@/components/ui/PasswordInput'
 
 import { herkunftsName, useFrageDesTabs, useRueckfragen, type Rueckfrage } from '../services/rueckfragen'
+import type { Tab } from '../services/tab'
 import { useAktiverTab } from '../services/tabsStore'
 import { useKlickSperre } from './klickSperre'
 
 /** Längere Texte einer Seite werden gekürzt; ein Dialog ist kein Leseort. */
 const TEXT_MAX = 2000
 
-export function SeitenDialoge() {
-  const tab = useAktiverTab()
+export function SeitenDialoge({ tab: externerTab }: { tab?: Tab }) {
+  const tab = externerTab ?? useAktiverTab()
   const frage = useFrageDesTabs(tab?.id)
   if (!frage || frage.art === 'kontextmenue') return null
   // `key`: jede Frage bekommt frische Eingabefelder.

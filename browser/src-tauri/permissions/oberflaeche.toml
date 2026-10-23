@@ -25,6 +25,7 @@ permissions = [
   "allow-tab-aktion",
   "allow-tab-seite-zuruecksetzen",
   "allow-tabs-rahmen",
+  "allow-panel-rahmen",
   "allow-tabs-split-setzen",
   "allow-tabs-split-aufheben",
   "allow-tabs-verdecken",
