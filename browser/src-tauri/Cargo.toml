@@ -1,6 +1,6 @@
 [package]
 name = "maunting-secure-browser"
-version = "5.6.0"
+version = "5.7.0"
 description = "Maunting Pontis auf Tauri v2"
 edition = "2021"
 rust-version = "1.88"

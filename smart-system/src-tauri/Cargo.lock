@@ -3056,7 +3056,7 @@ dependencies = [
 
 [[package]]
 name = "maunting-smart-system"
-version = "5.6.0"
+version = "5.7.0"
 dependencies = [
  "aws-lc-rs",
  "base64 0.22.1",
