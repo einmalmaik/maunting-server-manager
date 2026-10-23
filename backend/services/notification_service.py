@@ -303,6 +303,7 @@ class NotificationService:
         control_type: str | None = None,
         has_active_foreground_connection: bool = False,
         extra_data: dict[str, Any] | None = None,
+        ereignis: str | None = None,
     ) -> dict[str, Any] | None:
         """Erzeugt einen validierten, bereinigten WebPush-Auftrag.
 
@@ -337,6 +338,7 @@ class NotificationService:
             "body": body or "Neue Benachrichtigung",
             "target_user_id": target_user_id,
             "sender_user_id": sender_user_id,
+            **({"ereignis": ereignis} if ereignis else {}),
             **(extra_data or {}),
         }
 
@@ -350,6 +352,7 @@ class NotificationService:
         is_control: bool = False,
         control_type: str | None = None,
         title: str = "Neue Nachricht",
+        ereignis: str | None = None,
     ) -> dict[str, Any] | None:
         """Dasselbe fuer eine Mailbox, die zu keinem Konto gehoert.
 
@@ -373,7 +376,11 @@ class NotificationService:
         # nicht viel zu tun, aber sie ist die Stelle, an der „was darf in einer
         # Meldung stehen" einmal beantwortet wird — und nicht zweimal.
         return NotificationService.sanitize_push_payload(
-            {"title": title, "body": "Neue Nachricht"},
+            {
+                "title": title,
+                "body": "Neue Nachricht",
+                **({"ereignis": ereignis} if ereignis else {}),
+            },
             is_e2ee=True,
             privacy_mode=True,
         )

@@ -75,6 +75,7 @@ from routers import (
     social_calls_router,
     livekit_admin_router,
     browser_suche_router,
+    notification_channels_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -1061,6 +1062,8 @@ app.include_router(notes_router)
 app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)
+# Dauerhafte Ausweise fuer den Hintergrundkanal eines Geraets.
+app.include_router(notification_channels_router)
 app.include_router(social_router)
 app.include_router(social_calls_router)
 app.include_router(livekit_admin_router)

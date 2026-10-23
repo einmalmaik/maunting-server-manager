@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, WebSocket
@@ -87,6 +88,54 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     # damit jti-Pflicht und Blacklist (Logout-Widerruf) auch für Bearer gelten.
     token = _bearer_token(request) or lies_zugangstoken(request.cookies)
     return _user_from_token(token, db)
+
+
+@dataclass(frozen=True)
+class SyncTeilnehmer:
+    """Wer an einem Ereignisstrom hängt — und mit welcher Familie.
+
+    `kanal_id` ist gesetzt, wenn der Zugang über einen dauerhaften
+    Kanal-Ausweis läuft. Dann gehört die Verbindung dieser Kennung und nicht
+    der Sitzung: `SyncEventService.trenne(user_id, "kanal:<id>")` findet sie
+    beim Widerruf, und ein Abmelden eines anderen Geräts lässt sie stehen.
+    """
+
+    user: User
+    familie: str | None
+    kanal_id: int | None = None
+
+
+def sync_teilnehmer(request: Request, db: Session = Depends(get_db)) -> SyncTeilnehmer:
+    """Zugang zum Ereignisstrom: Sitzung **oder** dauerhafter Kanal-Ausweis.
+
+    Der zweite Weg ist für den Hintergrunddienst eines Geräts. Er darf nur
+    zuhören: Präsenz melden, Mailboxen abonnieren, den Strom lesen. Deshalb
+    hängt diese Abhängigkeit an genau diesen Routen und an keiner anderen —
+    ein Ausweis fürs Zuhören öffnet kein Konto.
+
+    Erst der normale Weg (Bearer-JWT oder Cookie), dann der Ausweis. Schlägt
+    beides fehl, kommt die ursprüngliche 401 des normalen Wegs zurück; ein
+    widerrufener Ausweis verrät nicht, dass er einmal galt.
+    """
+    from fastapi import HTTPException
+
+    from services import notification_channel_service
+
+    try:
+        konto = get_current_user(request=request, db=db)
+        return SyncTeilnehmer(user=konto, familie=session_familie(request))
+    except HTTPException as fehler:
+        if fehler.status_code not in (401, 403):
+            raise
+        treffer = notification_channel_service.aus_bearer(
+            db, request.headers.get("authorization")
+        )
+        if treffer is None:
+            raise fehler
+        kanal, konto = treffer
+        return SyncTeilnehmer(
+            user=konto, familie=f"kanal:{kanal.id}", kanal_id=kanal.id
+        )
 
 
 def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
@@ -302,7 +351,7 @@ def _all_cookie_values(request: Request, name: str) -> list[str]:
     return values
 
 
-def verify_csrf(request: Request) -> None:
+def verify_csrf(request: Request, db: Session = Depends(get_db)) -> None:
     """Double-Submit-Cookie CSRF-Schutz. Nur fuer state-changing Requests.
 
     Akzeptiert den Header-Wert, wenn er zu einem der vom Browser gesendeten
@@ -329,6 +378,16 @@ def verify_csrf(request: Request) -> None:
         payload = AuthService.decode_token(bearer, verify_exp=False)
         if payload and payload.get("type") == "access" and payload.get("jti"):
             return
+        # Ein **gueltiger** Kanal-Ausweis ist ebenfalls ein ausdruecklicher
+        # Header, kein Ambient-Cookie — ein fremder Ursprung kann ihn nicht
+        # setzen. Ein blosser 64-stelliger Wert befreit ausdruecklich nicht:
+        # sonst umginge ein Cookie-Request mit erfundenem Header die Pruefung.
+        # Ein JWT hat Punkte, dieser Wert nicht.
+        if len(bearer) == 64 and "." not in bearer:
+            from services.notification_channel_service import ist_gueltig
+
+            if ist_gueltig(db, bearer):
+                return
     csrf_header = request.headers.get("x-csrf-token")
     # Alle Namen: im Entwicklungsbetrieb heisst das Cookie anders (ohne
     # `__Secure-`), ein Browser kann aber noch eines aus einer frueheren

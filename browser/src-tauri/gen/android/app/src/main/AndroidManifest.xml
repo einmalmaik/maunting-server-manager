@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Der Dauerdienst haelt die Verbindung fuer Benachrichtigungen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 
@@ -95,6 +100,34 @@
             android:excludeFromRecents="true"
             android:taskAffinity=""
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode" />
+
+        <!--
+            Der Dauerdienst: hoert auf dem Ereignisstrom zu, auch wenn der
+            Browser zu ist. `specialUse`, weil er keiner der benannten Arten
+            entspricht — und weil `dataSync` seit Android 15 auf sechs Stunden
+            je Tag begrenzt ist.
+        -->
+        <service
+            android:name=".Hintergrunddienst"
+            android:exported="false"
+            android:process=":dienst"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Messenger notifications while the app is closed" />
+        </service>
+
+        <!-- Nach Neustart oder Update: nur wenn der Mensch ihn eingeschaltet hat -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Status-Receiver für geräuschlose Hintergrund-Installationen via PackageInstaller -->
         <receiver

@@ -295,7 +295,7 @@ export function Calendar() {
         time_hint: string
       }>('/calendar/test-reminder', { method: 'POST' })
 
-      const sent = await sendeGeraeteBenachrichtigung({
+      const gesendet = await sendeGeraeteBenachrichtigung({
         titel: t('notifications.reminderTitle', { wann: res.time_hint }),
         text: t('notifications.reminderText', { titel: res.title, start: res.start }),
         erzwingen: true,
@@ -303,7 +303,7 @@ export function Calendar() {
 
       if (res.email_sent) {
         toast.success(t('calendar.testReminderSentEmail'))
-      } else if (sent) {
+      } else if (gesendet.ok) {
         toast.success(t('calendar.testReminderSent'))
       } else {
         toast.error(t('calendar.testReminderNoPopup'))

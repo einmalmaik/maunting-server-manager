@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_serializer, field_validator
 from services.chat_media_validator import MAX_STORY_MEDIA_URL_CHARS
 from schemas.passkey import Zweitnachweis
@@ -476,6 +478,20 @@ class StreamMailboxAbos(BaseModel):
 
     conn_id: str = Field(..., min_length=4, max_length=64)
     eintraege: list[MailboxAbo] = Field(default_factory=list, max_length=200)
+
+
+class StreamPraesenz(BaseModel):
+    """Ob ein laufender Stream gerade vorne oder hinten steht.
+
+    Zwei Werte, mehr nicht: der Client sagt über sich selbst, was er zeigen
+    kann. Wer vorne steht, sieht die Nachricht ohnehin; ein Hintergrunddienst
+    zeigt sie selbst; erst wenn keiner das kann, geht ein Push hinaus. Damit
+    kommt dieselbe Meldung **einmal** an, auch wenn zwei Fenster oder MSS und
+    Pontis auf demselben Gerät offen sind.
+    """
+
+    conn_id: str = Field(..., min_length=4, max_length=64)
+    zustand: Literal["vordergrund", "hintergrund"]
 
 
 class E2eeMailboxSyncItem(BaseModel):

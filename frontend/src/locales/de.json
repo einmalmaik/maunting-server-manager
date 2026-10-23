@@ -2892,7 +2892,8 @@
         "oauth_link": "Social-Konto verknüpfen",
         "2fa_change": "Zwei-Faktor-Anmeldung ändern",
         "vault_reset": "Tresor zurücksetzen",
-        "kamera_sicherung": "Kamera-Sicherung einschalten"
+        "kamera_sicherung": "Kamera-Sicherung einschalten",
+        "notification_channel": "Benachrichtigungen im Hintergrund erlauben"
       }
     },
     "zweitfaktor": {
@@ -4001,6 +4002,9 @@
     "aiHint": "Hinweis, wenn ein Auftrag fertig ist oder wartet. Keine E-Mails.",
     "deviceLabel": "Geräte-Benachrichtigungen",
     "deviceHint": "Pop-up-Meldungen auf Windows- und Android-Geräten bei Server-Vorfällen, Terminen und KI-Aufträgen.",
+    "backgroundLabel": "Auch bei geschlossener App",
+    "backgroundHint": "Hält die Verbindung selbst — ohne Google. Android zeigt dafür eine dauerhafte Hinweiszeile.",
+    "backgroundFailed": "Der Hintergrunddienst ließ sich nicht einschalten.",
     "incidentTitle": "Server-Vorfall: {{server}}",
     "incidentText": "{{titel}} ({{art}})",
     "incidentToast": "⚠️ Vorfall auf {{server}}: {{titel}}",

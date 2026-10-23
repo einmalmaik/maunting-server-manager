@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
 import { merkeStromKennung, vergissStromKennung } from '@/services/mailboxAbo'
+import { merkePraesenzKennung, vergissPraesenzKennung } from '@/services/praesenz'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
 import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
@@ -1889,6 +1890,10 @@ export function startLiveSync(): () => void {
                 // ausrechnen kann — dort gibt es keinen Empfänger
                 // nachzuschlagen.
                 merkeStromKennung((data as { conn_id?: string }).conn_id ?? null)
+                // Derselbe Rückweg, zweiter Zweck: vorne oder hinten. Der
+                // Server wählt daraus **einen** Zusteller je Konto, statt
+                // jedem offenen Fenster eine eigene Meldung zu schicken.
+                merkePraesenzKennung((data as { conn_id?: string }).conn_id ?? null)
               }
               handleIncomingSyncEvent(currentEvent, data)
             } catch {
@@ -1911,6 +1916,7 @@ export function startLiveSync(): () => void {
       // meldete der Client nach dem Neuverbinden an eine Verbindung, die es
       // nicht mehr gibt — und bliebe stumm.
       vergissStromKennung()
+      vergissPraesenzKennung()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
       }

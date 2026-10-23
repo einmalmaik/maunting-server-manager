@@ -9,6 +9,12 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Der Dauerdienst haelt die Verbindung fuer Benachrichtigungen. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Ohne Ausnahme von der Akku-Optimierung beenden Samsung und Xiaomi den
+         Dienst nach Stunden still. Der Dialog gehoert dem System. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <!-- Kamera-Sicherung des Tresors: liest neue Aufnahmen aus DCIM. Den Ort braucht
@@ -114,6 +120,22 @@
                 <action android:name="com.mauntingstudios.smart_system.INSTALL_STATUS" />
             </intent-filter>
         </receiver>
+
+        <!--
+            Der Dauerdienst: hoert auf dem Ereignisstrom zu, auch wenn die App
+            zu ist. `specialUse`, weil er keiner der benannten Arten entspricht
+            (kein Datenabgleich, kein Medienabspielen) — und weil `dataSync`
+            seit Android 15 auf sechs Stunden je Tag begrenzt ist.
+        -->
+        <service
+            android:name=".Hintergrunddienst"
+            android:exported="false"
+            android:process=":dienst"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Messenger notifications while the app is closed" />
+        </service>
 
         <provider
           android:name="androidx.core.content.FileProvider"

@@ -189,6 +189,7 @@ export type PasskeyZweck =
   | '2fa_change'
   | 'vault_reset'
   | 'kamera_sicherung'
+  | 'notification_channel'
 
 function nachB64url(puffer: ArrayBuffer): string {
   const bytes = new Uint8Array(puffer)

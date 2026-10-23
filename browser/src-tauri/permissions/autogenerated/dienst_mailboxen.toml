@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dienst-mailboxen"
+description = "Enables the dienst_mailboxen command without any pre-configured scope."
+commands.allow = ["dienst_mailboxen"]
+
+[[permission]]
+identifier = "deny-dienst-mailboxen"
+description = "Denies the dienst_mailboxen command without any pre-configured scope."
+commands.deny = ["dienst_mailboxen"]

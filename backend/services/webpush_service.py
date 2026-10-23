@@ -640,12 +640,19 @@ def sende_an_mailbox(
 
 
 def sende_an_konto(db: Session, user_id: int, nutzlast: dict[str, Any]) -> int:
-    """Stellt `nutzlast` an alle Geraete dieses Kontos zu. Gibt deren Zahl zurueck.
+    """Stellt `nutzlast` an **eine** Adresse dieses Kontos zu.
 
     Kehrt sofort zurueck: der eigentliche Versand laeuft im Hintergrund, weil
     diese Funktion mitten im Nachrichtenrelais steht und ein langsamer
-    Push-Dienst dort niemanden aufhalten darf. Die Zahl sagt deshalb „an so
-    viele Geraete ging es hinaus", nicht „so viele haben es bekommen".
+    Push-Dienst dort niemanden aufhalten darf. Der Rueckgabewert ist 1 oder 0 —
+    „hinausgegangen", nicht „angekommen".
+
+    **Genau eine Adresse, nicht alle.** Bis 10/2026 ging dieselbe Meldung an
+    jede Zeile des Kontos: zwei Browser, zwei Meldungen, und mit MSS und Pontis
+    auf einem Geraet waren es noch mehr. Der Server waehlt jetzt den zuletzt
+    angelegten Zustellweg; welcher Browser zuerst klingelt, ist damit eine
+    Frage der Reihenfolge und nicht des Zufalls. Wer auf einem zweiten Geraet
+    etwas erfahren will, oeffnet es — der Verlauf liegt dort ohnehin.
 
     Der Schalter `users.device_notifications` gilt hier genauso wie im
     Vordergrund. Wer Benachrichtigungen abgeschaltet hat, bekommt auch bei
@@ -655,9 +662,15 @@ def sende_an_konto(db: Session, user_id: int, nutzlast: dict[str, Any]) -> int:
     if not konto or not konto.is_active or not konto.device_notifications:
         return 0
 
-    abos = db.query(PushSubscription).filter_by(user_id=user_id).all()
-    if not abos:
+    abo = (
+        db.query(PushSubscription)
+        .filter_by(user_id=user_id)
+        .order_by(PushSubscription.id.desc())
+        .first()
+    )
+    if not abo:
         return 0
+    abos = [abo]
 
     paar = _paar(db)
     if not paar:

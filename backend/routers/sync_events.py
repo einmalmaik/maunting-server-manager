@@ -18,15 +18,17 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
 from dependencies import (
+    SyncTeilnehmer,
     get_current_user,
     get_current_user_for_ws,
     session_familie,
+    sync_teilnehmer,
     verify_csrf,
     ws_session_familie,
     ws_subprotokoll,
 )
 from models.user import User
-from schemas.social import StreamMailboxAbos
+from schemas.social import StreamMailboxAbos, StreamPraesenz
 from services import team_service
 from services.social_service import SocialService
 from services.sync_event_service import MAX_MAILBOXES, SyncEventService
@@ -41,13 +43,19 @@ async def _event_stream(
     user_id: int,
     team_ids: list[int],
     is_admin: bool,
+    familie: str | None,
 ) -> AsyncIterator[str]:
-    """Generiert einen asynchronen SSE-Datenstrom für den authentifizierten Benutzer."""
+    """Generiert einen asynchronen SSE-Datenstrom für den authentifizierten Benutzer.
+
+    `familie` ist die Sitzung — oder `kanal:<id>` für den Hintergrunddienst
+    eines Geräts. Daran findet der Widerruf genau diese Verbindung und nicht
+    die anderen des Kontos.
+    """
     conn_id, queue = SyncEventService.subscribe(
         user_id=user_id,
         team_ids=team_ids,
         is_admin=is_admin,
-        familie=session_familie(request),
+        familie=familie,
     )
     try:
         # 1. Initiales Begrüßungs-Signal
@@ -83,9 +91,15 @@ async def _event_stream(
 async def live_events(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    teilnehmer: SyncTeilnehmer = Depends(sync_teilnehmer),
 ) -> StreamingResponse:
-    """Authentifizierter SSE-Endpunkt für Echtzeit-Synchronisation von Notizen & Kalender."""
+    """Authentifizierter SSE-Endpunkt für Echtzeit-Synchronisation von Notizen & Kalender.
+
+    Zugang wahlweise über die Sitzung oder einen dauerhaften Kanal-Ausweis
+    (`SyncTeilnehmer`). Der zweite Weg ist der Hintergrunddienst eines Geräts:
+    er hört zu und darf sonst nichts.
+    """
+    user = teilnehmer.user
     user_teams = team_service.list_user_teams(db, user)
     team_ids = [t.id for t in user_teams]
     is_admin = bool(user.is_owner)
@@ -96,6 +110,7 @@ async def live_events(
             user_id=user.id,
             team_ids=team_ids,
             is_admin=is_admin,
+            familie=teilnehmer.familie,
         ),
         media_type="text/event-stream",
         headers={
@@ -110,7 +125,7 @@ async def live_events(
 def set_stream_mailboxes(
     req: StreamMailboxAbos,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    teilnehmer: SyncTeilnehmer = Depends(sync_teilnehmer),
 ) -> dict:
     """Sagt dem laufenden Stream, über welche Mailboxen er Bescheid geben soll.
 
@@ -127,6 +142,7 @@ def set_stream_mailboxes(
     Prüfung, die auch über die Push-Adresse wacht. Was durchfällt, wird still
     übergangen; die Antwort nennt nur die Anzahl.
     """
+    user = teilnehmer.user
     erlaubt = SocialService.erlaubte_mailboxen(
         db,
         user.id,
@@ -137,6 +153,29 @@ def set_stream_mailboxes(
     return {"ok": True, "count": anzahl}
 
 
+@router.post("/presence", dependencies=[Depends(verify_csrf)])
+def set_stream_presence(
+    req: StreamPraesenz,
+    teilnehmer: SyncTeilnehmer = Depends(sync_teilnehmer),
+) -> dict:
+    """Sagt dem laufenden Stream, ob dieser Client vorne oder hinten steht.
+
+    Der Rückweg zu SSE, wie `set_stream_mailboxes`: die `conn_id` steht im
+    `ready`-Signal. Der Wert ändert sich bei jedem Tabwechsel, deshalb ist der
+    Aufruf billig und ohne Datenbank.
+
+    Wozu: eine Meldung des Betriebssystems soll **einmal** kommen. Der Server
+    wählt dafür genau einen Zusteller (`SyncEventService.zustelllage`) und
+    schickt den Push nur, wenn keiner die Meldung selbst zeigen kann. Ohne
+    diese Angabe gälte weiter „irgendeine offene Verbindung unterdrückt den
+    Push" — und ein Fenster im Hintergrund verschluckte die Meldung.
+    """
+    gesetzt = SyncEventService.set_praesenz(
+        req.conn_id, req.zustand, user_id=teilnehmer.user.id
+    )
+    return {"ok": gesetzt}
+
+
 # Zusätzlicher Alias-Router unter /api/sync/events zur maximalen Kompatibilität
 sync_alias_router = APIRouter(prefix="/api/sync", tags=["sync-events"])
 
@@ -145,10 +184,10 @@ sync_alias_router = APIRouter(prefix="/api/sync", tags=["sync-events"])
 async def sync_events_alias(
     request: Request,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    teilnehmer: SyncTeilnehmer = Depends(sync_teilnehmer),
 ) -> StreamingResponse:
     """Alias für den SSE-Live-Event-Kanal."""
-    return await live_events(request=request, db=db, user=user)
+    return await live_events(request=request, db=db, teilnehmer=teilnehmer)
 
 
 @router.websocket("/ws")

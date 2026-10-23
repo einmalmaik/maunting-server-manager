@@ -17,7 +17,8 @@ import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import { abonniere, kuendige } from '@/services/pushAbo'
 import { kuendigeMailboxPush } from '@/services/mailboxPush'
-import { useMessengerNotificationStore, playNotificationChime } from '@/stores/messengerNotificationStore'
+import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
+import { melde, planeMeldung } from '@/services/benachrichtigung/hub'
 import { NotificationService } from '@/services/notificationService'
 import { loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
 import { erinnerungenAus, PLAN_TAGE, type GeplanteErinnerung } from '@/lib/erinnerungsplan'
@@ -433,47 +434,58 @@ export function ServerIncidentNotifier() {
 
 
         // Chat-Fokus und Vordergrund-Erkennung
-        const isCurrentActive = store.activeMailboxId === mid
         const isDocVisible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-        const isWindowFocused = typeof document !== 'undefined' && (typeof document.hasFocus !== 'function' || document.hasFocus())
-        const isChatFocused = isCurrentActive && isDocVisible && isWindowFocused
+        const isWindowFocused =
+          typeof document !== 'undefined' &&
+          (typeof document.hasFocus !== 'function' || document.hasFocus())
         const isForeground = isDocVisible && isWindowFocused
 
-        // Strikte Outgoing Echo Prevention & Empfänger-Filterung (recipient_id == current_user && !is_read)
-        const shouldNotify = NotificationService.shouldNotify({
-          recipientId: detail.recipient_id,
-          currentUserId: user?.id,
-          isRead: isChatFocused,
-          senderUserId: detail.sender_user_id,
-          isGroup: Boolean(meta.isGroup),
-          isControl,
-          controlType: detail.control_type,
-        })
-        if (!shouldNotify) {
-          return
+        /**
+         * Die Entscheidung liegt seit 22.10.2026 in `planeMeldung` — dieselbe
+         * Regel für Web, Pontis, MSS und Android. Hier stehen nur noch die
+         * Tatsachen, die der Hub nicht kennen kann: ist **dieser** Chat sichtbar,
+         * welche Mailbox ist stumm, wen hat der Mensch blockiert.
+         */
+        const lage = {
+          art: 'chat' as const,
+          schalterAn: user?.device_notifications !== false,
+          absenderId: detail.sender_user_id ?? detail.sender_id,
+          eigeneId: user?.id,
+          empfaengerId: detail.recipient_id,
+          istSteuerung: isControl,
+          stumm: store.isMuted(mid),
+          blockiert: Boolean(meta.userId && store.isBlocked(meta.userId)),
+          chatOffen: store.activeMailboxId === mid && isDocVisible && isWindowFocused,
+          fensterImVordergrund: isForeground,
+          // Der Server wählt einen Zusteller je Konto. Ein zweites Fenster
+          // oder MSS/Pontis auf demselben Gerät bekommt `melden: false` und
+          // zeigt dann keine zweite Systemmeldung.
+          meldenErlaubt: detail.melden !== false,
         }
+        const plan = planeMeldung(lage)
 
         /**
          * „Hier liegt etwas Neues" — und zwar **vor** der Stummschaltung.
          *
          * Die Erwähnungswache hing bis 20.09.2026 am Ungelesen-Zähler, und den
-         * überspringt der stumme Pfad gleich darunter. In einer stummen Gruppe
-         * erschien deshalb nicht einmal das @-Abzeichen, obwohl genau das der
-         * Sinn der Sache ist: kein Ton, aber sehen, dass man gemeint war.
+         * überspringt der stumme Pfad. In einer stummen Gruppe erschien deshalb
+         * nicht einmal das @-Abzeichen, obwohl genau das der Sinn der Sache ist:
+         * kein Ton, aber sehen, dass man gemeint war.
          *
          * Das Ereignis nennt nur die Mailbox. Es trägt keinen Inhalt und löst
          * keine Meldung aus; wer daran hängt, entscheidet selbst, ob er
          * hinsieht.
          */
-        if (typeof window !== 'undefined') {
+        const erwaehnungSichtbar =
+          plan.grund !== 'eigene-aktion' &&
+          plan.grund !== 'steuerung' &&
+          plan.grund !== 'nicht-empfaenger' &&
+          plan.grund !== 'chat-offen'
+        if (erwaehnungSichtbar && typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('msm:mailbox-neu', { detail: { mid } }))
         }
 
-        // 5. Stummschaltung und Blockierung prüfen
-        if (store.isMuted(mid)) return
-        if (meta.userId && store.isBlocked(meta.userId)) {
-          return
-        }
+        if (plan.grund) return
 
         const senderOrChat = meta.name
         const title = t('notifications.messageTitle', { name: senderOrChat })
@@ -482,26 +494,22 @@ export function ServerIncidentNotifier() {
           : t('notifications.messageFrom', { name: senderOrChat })
 
         // Ungelesen-Zähler im Store erhöhen
-        store.incrementUnread(mid)
+        if (plan.zaehlen) store.incrementUnread(mid)
 
-        // Nur akustisch signalisieren und benachrichtigen, wenn Gerätebenachrichtigung aktiv ist
-        if (user?.device_notifications !== false) {
-          playNotificationChime()
-          toast.success(
-            meta.isGroup
-              ? t('notifications.messageToastGroup', { name: meta.name })
-              : t('notifications.messageToastDirect', { name: senderOrChat }),
-          )
-
-          // Background vs. Foreground Push: Bei aktiver WebSocket-Verbindung im Vordergrund
-          // dürfen keine doppelten OS-Pushes getriggert werden!
-          if (!isForeground) {
-            void sendeGeraeteBenachrichtigung({
-              titel: title,
-              text: text,
-            })
-          }
-        }
+        // Ton, Einblendung und Systemmeldung an genau einer Stelle. Der
+        // Schlüssel trägt die `client_uuid`: die zweite Kopie derselben
+        // Nachricht für ein anderes Gerät ist derselbe Umschlag und darf
+        // nicht ein zweites Mal klingeln.
+        void melde(lage, {
+          // Die Kennung des Servers, wenn es eine gibt: sie reist auch im Push
+          // und ist damit die einzige, die Seite und Service Worker teilen.
+          schluessel: detail.ereignis || `chat:${mid}:${detail.client_uuid || detail.id || ''}`,
+          titel: title,
+          text,
+          toastText: meta.isGroup
+            ? t('notifications.messageToastGroup', { name: meta.name })
+            : t('notifications.messageToastDirect', { name: senderOrChat }),
+        })
       }
     }
 

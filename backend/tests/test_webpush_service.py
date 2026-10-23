@@ -313,14 +313,22 @@ def test_ein_inaktives_konto_bekommt_nichts(db: Session, owner_user: User, abgef
     assert webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"}) == 0
 
 
-def test_versand_geht_an_jedes_geraet(db: Session, owner_user: User, abgefangener_versand):
+def test_versand_geht_an_genau_ein_geraet(db: Session, owner_user: User, abgefangener_versand):
+    """Genau eine Adresse je Meldung.
+
+    Bis 10/2026 ging dieselbe Meldung an jede Zeile des Kontos: zwei Browser,
+    zwei Meldungen — und mit MSS und Pontis auf einem Gerät waren es mehr.
+    Welche Adresse klingelt, entscheidet die Reihenfolge (zuletzt angelegt),
+    nicht der Zufall.
+    """
     _abo_anlegen(db, owner_user, "https://fcm.googleapis.com/fcm/send/telefon")
     _abo_anlegen(db, owner_user, "https://fcm.googleapis.com/fcm/send/rechner")
 
-    assert webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"}) == 2
+    assert webpush_service.sende_an_konto(db, owner_user.id, {"title": "Neue Nachricht"}) == 1
 
     ziele, koerper, _pem, _oeff, je_mailbox = abgefangener_versand[0]
-    assert len(ziele) == 2
+    assert len(ziele) == 1
+    assert ziele[0][1] == "https://fcm.googleapis.com/fcm/send/rechner"
     assert json.loads(koerper)["title"] == "Neue Nachricht"
     # Der kontogebundene Weg raeumt in `push_subscriptions` auf, nie in
     # `e2ee_mailbox_push`. Beide reichen `id`-Werte in denselben Faden; stuende

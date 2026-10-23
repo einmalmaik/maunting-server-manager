@@ -101,6 +101,9 @@ AUSGESCHLOSSEN: dict[str, str] = {
     "login_challenges.payload_json": "Interner Zustand eines Anmeldeschritts",
     "device_pairings.code_hash": "Hash eines Kopplungscodes",
     "device_pairings.family": "Sitzungskennung",
+    # Der Ausweis selbst ist nie gespeichert, nur sein Hash — und der gehoert
+    # nicht in ein Exportpaket.
+    "notification_channels.token_hash": "Hash eines Kanal-Ausweises",
     "device_pairings.verlauf_blob": "Fuer ein Geraet versiegelter Verlauf",
     "push_subscriptions.endpoint": "Zustelladresse des Push-Dienstes",
     "push_subscriptions.p256dh": "Schluessel des Push-Dienstes",

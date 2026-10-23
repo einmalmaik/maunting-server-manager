@@ -18,18 +18,27 @@ vi.mock('@/services/deliveryReceiptService', () => ({
   checkAndDispatchPendingDeliveryReceipts: vi.fn(),
 }))
 vi.mock('@/lib/offlineSync', () => ({ loadCalendarEventsOfflineFirst: vi.fn().mockResolvedValue([]) }))
-vi.mock('@/stores/messengerNotificationStore', () => ({
-  useMessengerNotificationStore: {
-    getState: () => ({
-      syncBlockedFromBackend: vi.fn().mockResolvedValue(undefined),
-      syncMailboxDirectoryFromBackend: vi.fn().mockResolvedValue(undefined),
-    }),
+const nachrichtenStore = vi.hoisted(() => ({
+  chime: vi.fn(),
+  zustand: {
+    syncBlockedFromBackend: vi.fn().mockResolvedValue(undefined),
+    syncMailboxDirectoryFromBackend: vi.fn().mockResolvedValue(undefined),
+    mailboxDirectory: {} as Record<string, { name: string; isGroup?: boolean; userId?: number }>,
+    activeMailboxId: null as string | null,
+    isMuted: (_mid: string) => false,
+    isBlocked: (_userId: number) => false,
+    incrementUnread: vi.fn(),
   },
-  playNotificationChime: vi.fn(),
+}))
+
+vi.mock('@/stores/messengerNotificationStore', () => ({
+  useMessengerNotificationStore: { getState: () => nachrichtenStore.zustand },
+  playNotificationChime: nachrichtenStore.chime,
 }))
 
 import { api } from '@/api/client'
 import { ServerIncidentNotifier } from './ServerIncidentNotifier'
+import { sendeGeraeteBenachrichtigung } from '@/lib/benachrichtigung'
 import { useAuthStore } from '@/stores/authStore'
 import { useToastStore } from '@/stores/toastStore'
 
@@ -170,3 +179,111 @@ describe('ServerIncidentNotifier — Vorfälle & Persistenz', () => {
   })
 })
 
+
+/**
+ * Der Weg einer Chat-Nachricht — über den Hub, nicht mehr über einen eigenen
+ * `if`-Zweig in dieser Datei. Was hier geprüft wird, ist genau das, was am
+ * 22.10.2026 kaputt war: ein Ton je Nachricht, kein Ton im stummen Chat, keine
+ * zweite Meldung für die Kopie desselben Umschlags.
+ */
+describe('ServerIncidentNotifier — Chat über den Hub', () => {
+  const zustand = nachrichtenStore.zustand
+
+  const nachricht = (teile: Record<string, unknown> = {}) => ({
+    type: 'e2ee_blind_message',
+    blind_mailbox_id: 'mb-anna',
+    sender_user_id: 6,
+    recipient_id: 5,
+    id: 4711,
+    client_uuid: 'uuid-4711',
+    is_control: false,
+    ...teile,
+  })
+
+  const schicke = async (teile: Record<string, unknown> = {}) => {
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('msm:sync-event', { detail: nachricht(teile) }))
+    })
+  }
+
+  beforeEach(() => {
+    localStorage.clear()
+    sessionStorage.clear()
+    useToastStore.getState().clearAll()
+    nachrichtenStore.chime.mockClear()
+    vi.mocked(sendeGeraeteBenachrichtigung).mockReset()
+    vi.mocked(sendeGeraeteBenachrichtigung).mockResolvedValue({ weg: 'tauri', ok: true })
+    zustand.mailboxDirectory = { 'mb-anna': { name: 'owner', isGroup: false, userId: 6 } }
+    zustand.activeMailboxId = null
+    zustand.isMuted = () => false
+    zustand.isBlocked = () => false
+    zustand.incrementUnread.mockClear()
+    useAuthStore.setState({
+      isAuthenticated: true,
+      user: { id: 5, username: 'anna', device_notifications: true } as never,
+    })
+  })
+
+  afterEach(() => {
+    useAuthStore.setState({ isAuthenticated: false, user: null })
+    localStorage.clear()
+  })
+
+  it('klingelt und zählt die Nachricht des Gegenübers', async () => {
+    render(<ServerIncidentNotifier />)
+    await schicke()
+    await waitFor(() => expect(nachrichtenStore.chime).toHaveBeenCalledTimes(1))
+    expect(zustand.incrementUnread).toHaveBeenCalledWith('mb-anna')
+    expect(sendeGeraeteBenachrichtigung).toHaveBeenCalledTimes(1)
+  })
+
+  it('klingelt für dieselbe Nachricht nicht zweimal', async () => {
+    // Der Umschlag geht je Gerät einmal raus; beide Kopien tragen dieselbe
+    // `client_uuid`. Bis 22.10.2026 waren das zwei Töne.
+    render(<ServerIncidentNotifier />)
+    await schicke({ id: 4711 })
+    await schicke({ id: 4712 })
+    await waitFor(() => expect(nachrichtenStore.chime).toHaveBeenCalledTimes(1))
+  })
+
+  it('schweigt in einem stummen Chat, meldet die Mailbox aber weiter', async () => {
+    // Kein Ton, aber die Erwähnungswache muss von der neuen Post erfahren —
+    // sonst erschiene in einer stummen Gruppe nicht einmal das @-Abzeichen.
+    zustand.isMuted = () => true
+    const gehoert: string[] = []
+    const horcher = (e: Event) => gehoert.push(String((e as CustomEvent).detail?.mid))
+    window.addEventListener('msm:mailbox-neu', horcher)
+    try {
+      render(<ServerIncidentNotifier />)
+      await schicke()
+      expect(nachrichtenStore.chime).not.toHaveBeenCalled()
+      expect(sendeGeraeteBenachrichtigung).not.toHaveBeenCalled()
+      expect(gehoert).toContain('mb-anna')
+    } finally {
+      window.removeEventListener('msm:mailbox-neu', horcher)
+    }
+  })
+
+  it('schweigt im offenen Chat und zählt nicht', async () => {
+    zustand.activeMailboxId = 'mb-anna'
+    // jsdom hat keinen echten Fokus; ohne diese Vorgabe wäre „offen" hier nie
+    // erreicht und der Test prüfte den falschen Zweig.
+    const fokus = vi.spyOn(document, 'hasFocus').mockReturnValue(true)
+    try {
+      render(<ServerIncidentNotifier />)
+      await schicke()
+      expect(nachrichtenStore.chime).not.toHaveBeenCalled()
+      expect(sendeGeraeteBenachrichtigung).not.toHaveBeenCalled()
+      expect(zustand.incrementUnread).not.toHaveBeenCalled()
+    } finally {
+      fokus.mockRestore()
+    }
+  })
+
+  it('meldet die eigene Nachricht nicht', async () => {
+    render(<ServerIncidentNotifier />)
+    await schicke({ sender_user_id: 5 })
+    expect(nachrichtenStore.chime).not.toHaveBeenCalled()
+    expect(sendeGeraeteBenachrichtigung).not.toHaveBeenCalled()
+  })
+})

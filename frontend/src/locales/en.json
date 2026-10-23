@@ -2892,7 +2892,8 @@
         "oauth_link": "Link a social account",
         "2fa_change": "Change two-factor sign-in",
         "vault_reset": "Reset vault",
-        "kamera_sicherung": "Turn on camera backup"
+        "kamera_sicherung": "Turn on camera backup",
+        "notification_channel": "Allow background notifications"
       }
     },
     "zweitfaktor": {
@@ -4001,6 +4002,9 @@
     "aiHint": "A note when a task finishes or is waiting. No emails.",
     "deviceLabel": "Device notifications",
     "deviceHint": "Pop-up alerts on Windows and Android devices for server events, appointments, and AI tasks.",
+    "backgroundLabel": "Even with the app closed",
+    "backgroundHint": "Keeps the connection itself — without Google. Android shows a permanent notice for this.",
+    "backgroundFailed": "The background service could not be switched on.",
     "incidentTitle": "Server incident: {{server}}",
     "incidentText": "{{titel}} ({{art}})",
     "incidentToast": "⚠️ Incident on {{server}}: {{titel}}",

@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { Bell, Bot, Mail, Smartphone } from 'lucide-react'
+import { Bell, Bot, Mail, Radio, Smartphone } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toastStore'
 import { Switch } from '@/components/ui/Switch'
+import { ausschalten, dienstVerfuegbar, einschalten, stand } from '@/services/hintergrunddienst'
 import { useAnkerLage } from './Ankerlage'
 
 interface BenachrichtigungsGlockeProps {
@@ -21,6 +22,8 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(user?.email_notifications ?? true)
   const [aiNotificationsEnabled, setAiNotificationsEnabled] = useState<boolean>(user?.ai_notifications ?? true)
   const [deviceNotificationsEnabled, setDeviceNotificationsEnabled] = useState<boolean>(user?.device_notifications ?? true)
+  const [hintergrundAn, setHintergrundAn] = useState(false)
+  const [hintergrundLaeuft, setHintergrundLaeuft] = useState(false)
   const [bellOpen, setBellOpen] = useState(false)
   const bellRef = useRef<HTMLDivElement>(null)
   const menueRef = useRef<HTMLDivElement>(null)
@@ -39,6 +42,42 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
       setDeviceNotificationsEnabled(user.device_notifications !== false)
     }
   }, [user?.email_notifications, user?.ai_notifications, user?.device_notifications])
+
+  // Der Dienst läuft außerhalb der App; sein Stand kommt aus Android, nicht
+  // aus diesem Fenster.
+  useEffect(() => {
+    if (!bellOpen || !dienstVerfuegbar()) return
+    let aktiv = true
+    void stand().then((lage) => {
+      if (aktiv) setHintergrundAn(lage.aktiv)
+    })
+    return () => {
+      aktiv = false
+    }
+  }, [bellOpen])
+
+  const schalteHintergrund = async (an: boolean) => {
+    setHintergrundLaeuft(true)
+    try {
+      if (an) {
+        // Der Nachweis entsteht hier, mit Absicht: ein dauerhafter Ausweis
+        // wird nicht im Hintergrund angelegt.
+        const eingeschaltet = await einschalten(t('notifications.backgroundLabel'))
+        if (!eingeschaltet) {
+          toast.error(t('notifications.backgroundFailed'))
+          return
+        }
+        setHintergrundAn(true)
+      } else {
+        await ausschalten()
+        setHintergrundAn(false)
+      }
+    } catch {
+      toast.error(t('notifications.backgroundFailed'))
+    } finally {
+      setHintergrundLaeuft(false)
+    }
+  }
 
   useEffect(() => {
     if (!bellOpen) return
@@ -173,6 +212,25 @@ export function BenachrichtigungsGlocke({ className = '', align = 'sidebar', pla
               aria-label={t('notifications.deviceLabel')}
             />
           </label>
+          {dienstVerfuegbar() && (
+            <label className="flex items-start gap-3 px-3 py-2.5 hover:bg-surface-container-highest transition-colors cursor-pointer border-t border-outline-variant/20">
+              <Radio className="mt-0.5 h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-on-surface">
+                  {t('notifications.backgroundLabel')}
+                </span>
+                <span className="block text-xs text-on-surface-variant">
+                  {t('notifications.backgroundHint')}
+                </span>
+              </span>
+              <Switch
+                checked={hintergrundAn}
+                disabled={hintergrundLaeuft}
+                onCheckedChange={(wert) => void schalteHintergrund(wert)}
+                aria-label={t('notifications.backgroundLabel')}
+              />
+            </label>
+          )}
         </div>,
         document.body,
       )}

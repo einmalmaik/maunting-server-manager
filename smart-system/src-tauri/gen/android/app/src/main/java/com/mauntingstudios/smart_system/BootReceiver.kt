@@ -18,6 +18,9 @@ class BootReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED == action
         ) {
             Erinnerungen.neuStellen(context)
+            // Nur wenn der Mensch ihn eingeschaltet hat — und nur dann, weil
+            // ein Neustart ihn sonst gegen seinen Willen wieder anmachte.
+            Hintergrunddienst.nachNeustart(context)
         }
     }
 }

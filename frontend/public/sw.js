@@ -129,9 +129,39 @@ self.addEventListener('fetch', (event) => {
 // 1. Bei aktiver WebSocket-/Browser-Verbindung im Vordergrund (focused)
 //    werden keine doppelten OS-Pushes ausgelöst.
 // 2. Bei E2EE- oder Privatsphäre-Filtern werden NIEMALS Klartextinhalte angezeigt.
+// Dieselbe Meldung nicht zweimal.
+//
+// Jede Meldung traegt eine feste Kennung (`msg:<mailbox>:<id>`). Sie kommt im
+// Ereignis des offenen Tabs UND im Push an. Beide Wege teilen sich diese
+// Ablage (Cache API, im Fenster wie im Service Worker erreichbar), damit die
+// Nachricht auf demselben Geraet einmal erscheint und nicht zweimal.
+const EREIGNIS_ABLAGE = 'msm-push-ereignisse'
+const EREIGNIS_SCHLUESSEL = '/bereits-gezeigt.json'
+
+async function ereignisIstNeu(kennung) {
+  if (!kennung) return true
+  try {
+    const ablage = await caches.open(EREIGNIS_ABLAGE)
+    const antwort = await ablage.match(EREIGNIS_SCHLUESSEL)
+    const liste = antwort ? await antwort.json() : []
+    if (liste.includes(kennung)) return false
+    liste.push(kennung)
+    await ablage.put(
+      EREIGNIS_SCHLUESSEL,
+      new Response(JSON.stringify(liste.slice(-200)), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    return true
+  } catch {
+    // Ohne Ablage lieber einmal zu viel als gar nicht.
+    return true
+  }
+}
+
 self.addEventListener('push', (event) => {
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
       // 1. Foreground-Prüfung: Ist ein Fenster / Tab aktuell im Vordergrund aktiv?
       const hasFocusedClient = clientList.some((client) => client.focused);
       if (hasFocusedClient) {
@@ -148,6 +178,9 @@ self.addEventListener('push', (event) => {
           data = { title: 'Maunting Server Manager', body: event.data.text() };
         }
       }
+
+      // Dieselbe Nachricht kam schon an (offener Tab oder ein zweiter Push).
+      if (!(await ereignisIstNeu(data.ereignis))) return
 
       // Steuersignale (Quittungen etc.) triggern keine OS-Pushes
       if (data.is_control || data.control_type === 'read_receipt' || data.control_type === 'delivery_receipt') {

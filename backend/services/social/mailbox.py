@@ -197,8 +197,15 @@ class MailboxMixin:
                     return existing
             raise
 
+        #: Eine Kennung je Meldung, aus Werten, die nicht raten: Mailbox und
+        #: Umschlag. Sie reist im Ereignis **und** im Push, damit dieselbe
+        #: Nachricht auf demselben Gerät nicht zweimal erscheint (Seite und
+        #: Service Worker teilen sich die Ablage, `sw.js`).
+        ereignis = f"msg:{clean_mailbox}:{envelope.id}"
+
         msg_payload = {
             "type": "e2ee_blind_message",
+            "ereignis": ereignis,
             "blind_mailbox_id": clean_mailbox,
             "id": envelope.id,
             "client_uuid": envelope.client_uuid,
@@ -220,9 +227,25 @@ class MailboxMixin:
         push_raus = False
 
         if target_recipient_id and sender_user_id:
-            SyncEventService.publish(msg_payload, user_id=target_recipient_id)
+            # **Ein** Zusteller je Konto: der zuletzt aktive Vordergrund-Client,
+            # sonst der Hintergrunddienst. Zwei offene Fenster oder MSS und
+            # Pontis auf einem Gerät melden dieselbe Nachricht damit einmal.
+            zusteller, praesenz = SyncEventService.zustelllage(user_id=target_recipient_id)
+            SyncEventService.publish(
+                msg_payload,
+                user_id=target_recipient_id,
+                zusteller=zusteller,
+                melden_markieren=praesenz,
+            )
             if target_recipient_id != sender_user_id:
-                SyncEventService.publish(msg_payload, user_id=sender_user_id)
+                # Die eigene Kopie ist kein Anlass für eine Meldung: sie geht an
+                # die Geräte des Absenders, und was jemand selbst geschrieben
+                # hat, soll dort nicht als „Neue Nachricht" aufpoppen. Sie trägt
+                # deshalb `melden: false` — ein Zusteller wird für sie nicht
+                # gewählt (`melden_markieren` ohne `zusteller`).
+                SyncEventService.publish(
+                    msg_payload, user_id=sender_user_id, melden_markieren=True
+                )
                 # Zwei getrennte Schritte, und das mit Absicht: der erste
                 # entscheidet, ob überhaupt jemand etwas erfahren darf (Echo,
                 # Steuersignal, offener Tab) und streicht jeden Inhalt aus dem
@@ -233,6 +256,14 @@ class MailboxMixin:
                 # `sende_an_konto` kehrt sofort zurück und schickt im
                 # Hintergrund. Ein langsamer Push-Dienst darf den Absender hier
                 # nicht warten lassen.
+                # Kein Push, wenn ein Client die Meldung selbst zeigt. Für
+                # Clients ohne Präsenzmeldung (ältere Fassungen) gilt weiter
+                # „irgendeine offene Verbindung genügt", damit ein Update
+                # niemanden stumm macht.
+                meldet_selbst = zusteller is not None or (
+                    not praesenz
+                    and SyncEventService.has_active_subscribers(target_recipient_id)
+                )
                 nutzlast = NotificationService.prepare_push_dispatch(
                     target_user_id=target_recipient_id,
                     sender_user_id=sender_user_id,
@@ -240,7 +271,8 @@ class MailboxMixin:
                     is_e2ee=True,
                     is_control=is_control,
                     control_type=control_type,
-                    has_active_foreground_connection=SyncEventService.has_active_subscribers(target_recipient_id),
+                    has_active_foreground_connection=meldet_selbst,
+                    ereignis=ereignis,
                 )
                 if nutzlast:
                     push_raus = True
@@ -265,7 +297,16 @@ class MailboxMixin:
             # Zugestellt wird jetzt an die Abonnenten dieser Mailbox. Wer sie
             # nicht abonniert hat, erfährt nichts — und abonnieren darf nur,
             # wer teilnimmt oder den Besitznachweis hat.
-            SyncEventService.publish(msg_payload, mailbox_id=clean_mailbox)
+            # An einer Gruppenmailbox hängen mehrere Menschen: gewählt wird
+            # **je Konto** einer, nicht einer für alle. Sonst schwiege der Rest
+            # der Gruppe, sobald ein Mitglied die App offen hat.
+            zusteller, praesenz = SyncEventService.zusteller_je_mailbox(clean_mailbox)
+            SyncEventService.publish(
+                msg_payload,
+                mailbox_id=clean_mailbox,
+                zusteller=zusteller,
+                melden_markieren=praesenz,
+            )
 
             # Und derselbe Weg für den geschlossenen Tab. `sende_an_mailbox`
             # fragt keine Konten ab — es gibt hier keines zu fragen, und genau
@@ -273,7 +314,9 @@ class MailboxMixin:
             # die eine Zeile, die dem Server wieder verriete, wer Post in einer
             # Mailbox bekommt, die er sonst niemandem zuordnen kann.
             nutzlast = NotificationService.prepare_mailbox_push(
-                is_control=is_control, control_type=control_type
+                is_control=is_control,
+                control_type=control_type,
+                ereignis=ereignis,
             )
             if nutzlast:
                 push_raus = True

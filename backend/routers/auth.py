@@ -835,6 +835,14 @@ def logout(
             AuthService.revoke_refresh_family(db, user_id_to_revoke, family_to_revoke)
         else:
             AuthService.revoke_all_user_refresh_tokens(db, user_id_to_revoke)
+        # Ein dauerhafter Kanal-Ausweis überlebt kein Abmelden. Er trifft die
+        # Kanäle **dieser** Sitzung und schliesst ihre offene Verbindung
+        # (`SyncEventService.trenne`), nicht die der anderen Geräte.
+        from services import notification_channel_service
+
+        notification_channel_service.widerrufen_familie(
+            db, user_id_to_revoke, family_to_revoke
+        )
 
     _clear_auth_cookies(response)
     return {"message": "Abgemeldet"}

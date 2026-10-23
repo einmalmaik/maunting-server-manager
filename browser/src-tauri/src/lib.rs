@@ -10,6 +10,7 @@ pub mod aktualisieren;
 pub mod browserdaten;
 pub mod cookies;
 pub mod datei;
+pub mod dienst;
 pub mod downloads;
 pub mod erweiterungen;
 pub mod fenster;
@@ -26,11 +27,50 @@ pub mod tabs;
 pub mod widget;
 
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
 
 #[cfg(all(not(target_os = "android"), not(debug_assertions)))]
 const DIENST: &str = "MauntingSecureBrowser";
 #[cfg(any(target_os = "android", debug_assertions))]
 const DIENST: &str = "MauntingSecureBrowserDev";
+
+/**
+ * Eine Meldung des Betriebssystems, für die Webview `main`.
+ *
+ * Derselbe Befehl wie in MSS (`smart-system/src-tauri/src/lib.rs`), und er
+ * fehlte hier bis 22.10.2026: Der gemeinsame Client (`lib/benachrichtigung.ts`)
+ * ruft ihn zuerst, scheiterte in Pontis stumm und fiel auf Wege zurück, die es
+ * im WebView nicht gibt. Deshalb kam in Pontis keine Benachrichtigung an.
+ *
+ * **Nicht erreichbar aus einem Tab.** Seiten laufen in eigenen Webviews ohne
+ * Rechte (`capabilities/oberflaeche.json`), und genau das soll so bleiben:
+ * eine beliebige Seite darf keine Systemmeldungen auslösen. Wer den Messenger
+ * in einem Pontis-Tab benutzt, braucht deshalb den engen Weg über den Host
+ * (Tab → `tabs`, mit Herkunftsprüfung auf die Panel-Adresse) — der fehlt noch.
+ */
+#[tauri::command]
+async fn benachrichtigung_senden(
+    app: tauri::AppHandle,
+    titel: String,
+    text: String,
+) -> Result<(), String> {
+    let notif = app.notification();
+    if let Ok(perm) = notif.permission_state() {
+        if perm != tauri_plugin_notification::PermissionState::Granted {
+            let _ = notif.request_permission();
+        }
+    }
+
+    notif
+        .builder()
+        .title(titel)
+        .body(text)
+        .icon("ic_launcher")
+        .large_icon("ic_launcher")
+        .channel_id("mss_alerts")
+        .show()
+        .map_err(|e| e.to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -90,6 +130,9 @@ pub fn run() {
             .plugin(tauri_plugin_biometric::init())
             .plugin(schluesselfach::biometrie::init_android_schluesselfach())
             .plugin(tabs::android::init())
+            // Der Dauerdienst: hält die Verbindung für Benachrichtigungen,
+            // auch wenn der Browser geschlossen ist.
+            .plugin(dienst::init_android_dienst())
             .plugin(widget::init());
     }
 
@@ -160,6 +203,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             konfig::konfig_laden,
             konfig::konfig_aendern,
+            benachrichtigung_senden,
+            dienst::dienst_starten,
+            dienst::dienst_stoppen,
+            dienst::dienst_mailboxen,
+            dienst::dienst_stand,
+            dienst::dienst_akku_befreien,
             schluesselfach::befehle::refresh_token_speichern,
             schluesselfach::befehle::refresh_token_laden,
             schluesselfach::befehle::refresh_token_loeschen,
@@ -385,5 +434,32 @@ mod tests {
         for (msb, mss) in paare {
             assert_eq!(ohne_paket(msb), ohne_paket(mss));
         }
+    }
+
+    /// Der Dauerdienst ist in MSS und Pontis dieselbe Sache; nur das Android-
+    /// Paket unterscheidet ihn. Zwei Fassungen, die auseinanderlaufen, hörten
+    /// in einer der beiden Apps auf etwas anderes als die Oberfläche erwartet.
+    #[test]
+    fn der_hintergrunddienst_ist_in_beiden_apps_gleich() {
+        let ohne_paket = |s: &str| -> Vec<String> {
+            s.lines()
+                .filter(|z| !z.starts_with("package ") && !z.starts_with("const PAKET"))
+                .map(|z| z.trim().to_string())
+                .collect()
+        };
+        let paare = [
+            (
+                include_str!("../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/Hintergrunddienst.kt"),
+                include_str!("../../../smart-system/src-tauri/gen/android/app/src/main/java/com/mauntingstudios/smart_system/Hintergrunddienst.kt"),
+            ),
+            (
+                include_str!("../gen/android/app/src/main/java/com/mauntingstudios/secure_browser/DienstPlugin.kt"),
+                include_str!("../../../smart-system/src-tauri/gen/android/app/src/main/java/com/mauntingstudios/smart_system/DienstPlugin.kt"),
+            ),
+        ];
+        for (msb, mss) in paare {
+            assert_eq!(ohne_paket(msb), ohne_paket(mss));
+        }
+        assert_eq!(ohne_paket(include_str!("dienst.rs")), ohne_paket(include_str!("../../../smart-system/src-tauri/src/dienst.rs")));
     }
 }

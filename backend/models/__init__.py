@@ -23,6 +23,7 @@ from .ai_mail_outbox import AiMailOutbox
 from .ai_meldung import AiMeldung
 from .desktop_job import DesktopJob
 from .device_pairing import DevicePairing
+from .notification_channel import NotificationChannel
 from .server import Server
 from .node import Node
 from .node_enrollment import NodeEnrollment
