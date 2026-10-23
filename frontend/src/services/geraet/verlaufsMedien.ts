@@ -21,9 +21,9 @@
 import { utf8ToBytes } from '@msdis/shield/core'
 import { sha256Hex } from '@msdis/shield/integrity'
 
-import { relayE2eeEnvelope, type E2eeGeraetItem } from '@/api/social'
+import type { E2eeGeraetItem } from '@/api/social'
 import { angemeldetesKonto } from '@/lib/angemeldetesKonto'
-import { deriveUserDeviceMailboxId, encryptE2eeHybrid } from '../e2eeCrypto'
+import { deriveUserDeviceMailboxId } from '../e2eeCrypto'
 import { sichereMedium, zeigerVon } from '../medienSicherung'
 import type { MedienZeiger } from '../medienKrypto'
 import {
@@ -35,15 +35,15 @@ import {
   speichereMedium,
   type LocalStoredMessage,
 } from '../messengerLocalStore'
-import { signiereNutzlast } from '../nutzlastSignatur'
+import { sendeGeraeteQuittung } from './verlaufsQuittung'
 import { eigenesGeraet } from './geraeteAblage'
-import { geraeteVon } from './geraeteVerzeichnis'
+import {
+  VERLAUF_MEDIA_ACK_TYP,
+  VERLAUF_MEDIA_TYP,
+} from './verlaufsTypen'
+import { FENSTER_MS, endung, kennungInOrdnung, sendeSigniertesPaket } from './verlaufsVersand'
 
-export const VERLAUF_MEDIA_TYP = 'history_media'
-export const VERLAUF_MEDIA_ACK_TYP = 'history_media_ack'
-
-/** Dieselbe Grenze wie beim Verlauf: das Relais nimmt 1 MiB Zeichen. */
-export const MAX_UMSCHLAG_ZEICHEN = 1_000_000
+export { VERLAUF_MEDIA_ACK_TYP, VERLAUF_MEDIA_TYP }
 
 /** Ein Anhang der Historie: so gross darf eine Datei hoechstens sein. */
 const MAX_MEDIA_ZEICHEN = 12_000_000
@@ -51,14 +51,7 @@ const MAX_MEDIA_ZEICHEN = 12_000_000
 const MAX_MEDIA_GESAMT = 64_000_000
 /** So viele Zeichen traegt ein Medienpaket. */
 const MEDIEN_TEIL_ZEICHEN = 160_000
-/** Ein Uebertragungsfenster; aeltere Pakete werden verworfen. */
-const FENSTER_MS = 24 * 60 * 60 * 1000
 const GESENDETE_MEDIEN = 'msm:history_media_done'
-
-export function endung(geraetId: string): string {
-  const sauber = (geraetId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(-16)
-  return sauber || 'geraet'
-}
 
 function mediumGesendet(konto: number, geraet: string, mediaId: string): boolean {
   try {
@@ -80,10 +73,6 @@ export function merkeMediumGesendet(konto: number, geraet: string, mediaId: stri
     // Ohne Ablage geht der Anhang beim naechsten Lauf noch einmal; das ist
     // nur Zeit, kein Fehler.
   }
-}
-
-export function kennungInOrdnung(wert: unknown): wert is string {
-  return typeof wert === 'string' && /^[A-Za-z0-9._:-]{1,120}$/.test(wert)
 }
 
 /** Ein Anhang, den die Uebergabe mitnehmen will. */
@@ -182,26 +171,14 @@ export async function sendeMedienAnGeraet(
           daten: daten.slice(teil * MEDIEN_TEIL_ZEICHEN, (teil + 1) * MEDIEN_TEIL_ZEICHEN),
           ablauf: Date.now() + FENSTER_MS,
         })
-        const innen = await encryptE2eeHybrid(paket, ziel.public_key)
-        const inhalt = await signiereNutzlast(geraeteMailbox, konto, {
-          type: VERLAUF_MEDIA_TYP,
-          v: 1,
-          ziel: ziel.device_id,
-          geraet: meins.kennung,
-          paket: innen,
-        })
-        const huelle = await encryptE2eeHybrid(
-          JSON.stringify(inhalt),
-          ziel.public_key,
-          meins.paar.publicKeyJwk,
-        )
-        if (huelle.length > MAX_UMSCHLAG_ZEICHEN) throw new Error('zu gross')
-        await relayE2eeEnvelope({
-          blind_mailbox_id: geraeteMailbox,
-          ciphertext_envelope: huelle,
-          client_uuid: `media-${endung(ziel.device_id)}-${transferId.slice(0, 10)}-${teil}`,
-          is_control: true,
-          control_type: VERLAUF_MEDIA_TYP,
+        await sendeSigniertesPaket({
+          konto,
+          meins,
+          ziel,
+          mailbox: geraeteMailbox,
+          typ: VERLAUF_MEDIA_TYP,
+          clientUuid: `media-${endung(ziel.device_id)}-${transferId.slice(0, 10)}-${teil}`,
+          innereDaten: paket,
         })
         gesendet += 1
       } catch {
@@ -219,38 +196,9 @@ export async function sendeMedienAnGeraet(
 }
 
 /** Meldet dem Quellgerät, dass ein Anhang vollständig angekommen ist. */
-async function sendeMedienAck(
-  quellGeraet: string,
-  mediaId: string,
-  transferId: string,
-): Promise<void> {
-  const konto = angemeldetesKonto()
-  if (!konto || !kennungInOrdnung(quellGeraet) || !kennungInOrdnung(mediaId)) return
-  const meins = await eigenesGeraet()
-  if (meins.kennung === quellGeraet) return
-  const ziel = (await geraeteVon(konto)).find((g) => g.device_id === quellGeraet)
-  if (!ziel?.public_key) return
-  const geraeteMailbox = await deriveUserDeviceMailboxId(konto)
-  const inhalt = await signiereNutzlast(geraeteMailbox, konto, {
-    type: VERLAUF_MEDIA_ACK_TYP,
-    v: 1,
-    ziel: quellGeraet,
-    geraet: meins.kennung,
-    mediaId,
-    transferId,
-  })
-  const huelle = await encryptE2eeHybrid(
-    JSON.stringify(inhalt),
-    ziel.public_key,
-    meins.paar.publicKeyJwk,
-  )
-  await relayE2eeEnvelope({
-    blind_mailbox_id: geraeteMailbox,
-    ciphertext_envelope: huelle,
-    client_uuid: `mediaack-${endung(quellGeraet)}-${transferId.slice(0, 10)}`,
-    is_control: true,
-    control_type: VERLAUF_MEDIA_ACK_TYP,
-  })
+async function sendeMedienAck(quellGeraet: string, mediaId: string, transferId: string): Promise<void> {
+  if (!kennungInOrdnung(mediaId)) return
+  await sendeGeraeteQuittung(quellGeraet, VERLAUF_MEDIA_ACK_TYP, transferId, { mediaId })
 }
 
 /**

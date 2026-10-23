@@ -1301,6 +1301,26 @@ export function mischeVerlauf(
  * Returns messages sorted chronologically (oldest to newest).
  */
 export async function loadLocalMessages(blindMailboxId: string): Promise<LocalStoredMessage[]> {
+  return await ladeLokaleNachrichten(blindMailboxId, false)
+}
+
+/**
+ * Wie `loadLocalMessages`, aber ein Lesefehler wird geworfen.
+ *
+ * Der Verlaufsübergang darf einen fehlgeschlagenen Lesevorgang nicht für
+ * „diese Mailbox ist leer" halten: sonst gingen leere Teile hinaus, das Ziel
+ * quittierte sie, und der Verlauf galt als übergeben, obwohl nichts reiste.
+ */
+export async function loadLocalMessagesStrict(
+  blindMailboxId: string,
+): Promise<LocalStoredMessage[]> {
+  return await ladeLokaleNachrichten(blindMailboxId, true)
+}
+
+async function ladeLokaleNachrichten(
+  blindMailboxId: string,
+  streng: boolean,
+): Promise<LocalStoredMessage[]> {
   if (!blindMailboxId) return []
   try {
     const db = await openLocalDatabase()
@@ -1369,7 +1389,8 @@ export async function loadLocalMessages(blindMailboxId: string): Promise<LocalSt
       return true
     })
     return sortMessagesChronologically(filtered)
-  } catch {
+  } catch (fehler) {
+    if (streng) throw fehler
     return []
   }
 }
@@ -1790,6 +1811,15 @@ export async function updateMessageInLocalStore(
  * der Erstabgleich mitnehmen.
  */
 export async function listeLokaleMailboxen(): Promise<string[]> {
+  return await ladeMailboxen(false)
+}
+
+/** Wie `listeLokaleMailboxen`, aber ein Lesefehler wird geworfen. */
+export async function listeLokaleMailboxenStrict(): Promise<string[]> {
+  return await ladeMailboxen(true)
+}
+
+async function ladeMailboxen(streng: boolean): Promise<string[]> {
   try {
     const db = await openLocalDatabase()
     return await new Promise<string[]>((resolve, reject) => {
@@ -1805,7 +1835,8 @@ export async function listeLokaleMailboxen(): Promise<string[]> {
       }
       req.onerror = () => reject(req.error)
     })
-  } catch {
+  } catch (fehler) {
+    if (streng) throw fehler
     return []
   }
 }

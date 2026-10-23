@@ -72,7 +72,9 @@ vi.mock('../messengerLocalStore', async (original) => {
   return {
     ...echt,
     listeLokaleMailboxen: async () => [...speicher.keys()],
+    listeLokaleMailboxenStrict: async () => [...speicher.keys()],
     loadLocalMessages: async (mid: string) => speicher.get(mid) ?? [],
+    loadLocalMessagesStrict: async (mid: string) => speicher.get(mid) ?? [],
     saveLocalMessages: async (mid: string, nachrichten: any[]) => {
       speicher.set(mid, nachrichten)
     },
@@ -84,6 +86,7 @@ import {
   VERLAUF_SYNC_TYP,
   merkeVerlaufGesendet,
   sendeVerlaufAnGeraet,
+  sendeVerlaufAnNeueGeraete,
   verarbeiteVerlaufsAbgleich,
 } from './verlaufsAbgleich'
 import { VERLAUF_MEDIA_ACK_TYP, VERLAUF_MEDIA_TYP } from './verlaufsMedien'
@@ -136,12 +139,18 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     const anzahl = await sendeVerlaufAnGeraet(ziel)
 
     expect(anzahl).toBe(2)
-    expect(relay).toHaveBeenCalledTimes(2)
-    for (const [auftrag] of relay.mock.calls) {
+    // Ein Manifest und je Mailbox ein Teil. Das Manifest zählt nicht als
+    // Verlaufsteil, geht aber als eigener Umschlag voraus.
+    expect(relay).toHaveBeenCalledTimes(3)
+    const teile = relay.mock.calls
+      .map(([auftrag]) => auftrag)
+      .filter((auftrag) => auftrag.control_type === VERLAUF_SYNC_TYP)
+    expect(teile).toHaveLength(2)
+    for (const auftrag of relay.mock.calls.map(([a]) => a)) {
       expect(auftrag.blind_mailbox_id).toBe('geraete-3')
       expect(auftrag.is_control).toBe(true)
-      expect(auftrag.control_type).toBe(VERLAUF_SYNC_TYP)
     }
+    expect(relay.mock.calls.some(([a]) => a.control_type === 'history_manifest')).toBe(true)
     const entschluesselt = encrypt.mock.calls.map(([text]) => JSON.parse(text))
     const a = entschluesselt.find((p) => p.type === VERLAUF_SYNC_TYP && p.ziel === 'ziel-1')
     expect(a?.geraet).toBe('sender-1')
@@ -180,11 +189,12 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     expect(paket.art).toBe('direkt')
   })
 
-  it('misst die äußere Hülle und halbiert, statt das Paket zu verlieren', async () => {
-    // Das Relais nimmt 1 MiB an. Bis 10/2026 wurde nur der **innere** Umschlag
-    // geprüft; Signatur und Hybridverschlüsselung legten ihre eigene Hülle
-    // darum, und das Paket kam als Ganzes nicht an — der Verlauf riss an genau
-    // dieser Stelle ab, ohne Meldung.
+  it('meldet eine zu große Hülle als Teilfehler, statt sie still zu verlieren', async () => {
+    // Das Relais nimmt 1 MiB an. Der Textvertrag schneidet die Teile vorher am
+    // Klartext (180 KB); die Hülle bleibt damit im Regelfall darunter. Kann ein
+    // Teil trotzdem nicht abgelegt werden, gilt die Übergabe als offen — ein
+    // stilles Halbieren würde die Teilnummern verschieben und den bereits
+    // quittierten Teil unter derselben Kennung mit anderem Inhalt schicken.
     speicher.set(
       'chat-a',
       Array.from({ length: 120 }, (_, i) => nachricht(i + 1, `Nachricht ${i + 1}`)),
@@ -201,19 +211,19 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
       }
       return b64
     })
+    const teilfehler = vi.fn()
     try {
-      await sendeVerlaufAnGeraet(ziel)
+      expect(
+        await sendeVerlaufAnGeraet(ziel, { beiTeilfehler: teilfehler }),
+      ).toBe(0)
     } finally {
       encrypt.mockImplementation(original)
     }
 
-    expect(relay).toHaveBeenCalled()
-    // Was wirklich hinausging, nicht was der erste Versuch war: die erste
-    // Hülle war zu groß und wurde verworfen.
-    const gesendet = relay.mock.calls[0][0].ciphertext_envelope
-    const aussen = JSON.parse(atob(gesendet.replace('sv-e2ee-hybrid-v1:', '')))
-    const paket = JSON.parse(atob(aussen.paket.replace('sv-e2ee-hybrid-v1:', '')))
-    expect(paket.nachrichten.length).toBe(60)
+    expect(teilfehler).toHaveBeenCalled()
+    expect(
+      relay.mock.calls.some(([auftrag]) => auftrag.control_type === VERLAUF_SYNC_TYP),
+    ).toBe(false)
   })
 
   it('merkt eine vollständige Übergabe und lässt einen Teilfehler offen', async () => {
@@ -239,6 +249,17 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     expect(teilfehler).toHaveBeenCalled()
   })
 
+  it('merkt den Verlauf erst nach der Empfangsquittung, nicht nach dem Absenden', async () => {
+    // Bis 10/2026 setzte `sendeVerlaufAnNeueGeraete` den Merker, sobald die
+    // Umschläge beim Relais lagen. Ein unterwegs verlorener Teil fiel damit
+    // niemandem auf, und das neue Gerät behielt die Lücke für immer.
+    speicher.set('chat-a', [nachricht(1, 'Hallo')])
+
+    await sendeVerlaufAnNeueGeraete()
+
+    expect(window.localStorage.getItem('msm:history_sent:3:ziel-1')).toBeNull()
+  })
+
   it('teilt einen langen Verlauf in mehrere Pakete, statt bei 200 abzubrechen', async () => {
     speicher.set(
       'chat-a',
@@ -248,7 +269,8 @@ describe('Verlaufsübergabe an ein freigegebenes Gerät', () => {
     const anzahl = await sendeVerlaufAnGeraet(ziel)
 
     expect(anzahl).toBe(2)
-    expect(relay).toHaveBeenCalledTimes(2)
+    // Manifest plus zwei Textteile.
+    expect(relay).toHaveBeenCalledTimes(3)
   })
 
   it('nimmt ein Verlaufspaket für dieses Gerät an und mischt es', async () => {

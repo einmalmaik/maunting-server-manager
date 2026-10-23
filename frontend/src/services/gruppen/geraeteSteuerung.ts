@@ -22,8 +22,8 @@ import {
 } from './dmGeheimnis'
 import { leereAntwortSperren, verarbeiteGruppenSteuerung } from './gruppenSteuerung'
 import { normalisiereMitglieder, type GruppenKontext } from './typen'
-import { VERLAUF_SYNC_TYP, verarbeiteVerlaufsAbgleich } from '../geraet/verlaufsAbgleich'
-import { VERLAUF_MEDIA_ACK_TYP, VERLAUF_MEDIA_TYP } from '../geraet/verlaufsMedien'
+import { verarbeiteVerlaufsAbgleich } from '../geraet/verlaufsAbgleich'
+import { istVerlaufsTyp } from '../geraet/verlaufsTypen'
 
 /**
  * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
@@ -178,14 +178,13 @@ export async function holeGeraeteSteuerung(
         continue
       }
 
-      // Der Verlauf eines frisch freigegebenen eigenen Geräts. Er kommt aus
-      // derselben Mailbox wie die Schlüssel und ist dort an genau dieses Gerät
-      // versiegelt; der Absender ist ein freigegebenes Geschwistergerät.
-      if (
-        roh.type === VERLAUF_SYNC_TYP ||
-        roh.type === VERLAUF_MEDIA_TYP ||
-        roh.type === VERLAUF_MEDIA_ACK_TYP
-      ) {
+      // Der Verlauf eines frisch freigegebenen eigenen Geräts — Text, Anhänge
+      // und die Quittungen dazu. Er kommt aus derselben Mailbox wie die
+      // Schlüssel und ist dort an genau dieses Gerät versiegelt; der Absender
+      // ist ein freigegebenes Geschwistergerät. Die Typen stehen in
+      // `verlaufsTypen`, damit ein neuer Quittungstyp nicht an dieser Stelle
+      // vergessen wird.
+      if (istVerlaufsTyp(roh.type)) {
         try {
           verarbeitet += await verarbeiteVerlaufsAbgleich(roh, eigeneId, entsiegle)
         } catch {
