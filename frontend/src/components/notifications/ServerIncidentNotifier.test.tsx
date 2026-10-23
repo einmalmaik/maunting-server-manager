@@ -13,10 +13,13 @@ vi.mock('@/lib/benachrichtigung', () => ({
 }))
 vi.mock('@/services/pushAbo', () => ({ abonniere: vi.fn(), kuendige: vi.fn() }))
 vi.mock('@/services/mailboxPush', () => ({ kuendigeMailboxPush: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('@/services/deliveryReceiptService', () => ({
-  sendE2eeDeliveryReceipt: vi.fn(),
-  checkAndDispatchPendingDeliveryReceipts: vi.fn(),
-}))
+// Ein Wecksignal darf keinen Umschlag erzeugen. Der Stellvertreter zählt nur;
+// eine Quittung entsteht erst nach dem lokalen Commit im Lesepfad.
+const relais = vi.hoisted(() => ({ relayE2eeEnvelope: vi.fn() }))
+vi.mock('@/api/social', async (importOriginal) => {
+  const echt = await importOriginal<typeof import('@/api/social')>()
+  return { ...echt, relayE2eeEnvelope: relais.relayE2eeEnvelope }
+})
 vi.mock('@/lib/offlineSync', () => ({ loadCalendarEventsOfflineFirst: vi.fn().mockResolvedValue([]) }))
 const nachrichtenStore = vi.hoisted(() => ({
   chime: vi.fn(),
@@ -218,6 +221,7 @@ describe('ServerIncidentNotifier — Chat über den Hub', () => {
     zustand.isMuted = () => false
     zustand.isBlocked = () => false
     zustand.incrementUnread.mockClear()
+    relais.relayE2eeEnvelope.mockClear()
     useAuthStore.setState({
       isAuthenticated: true,
       user: { id: 5, username: 'anna', device_notifications: true } as never,
@@ -235,6 +239,17 @@ describe('ServerIncidentNotifier — Chat über den Hub', () => {
     await waitFor(() => expect(nachrichtenStore.chime).toHaveBeenCalledTimes(1))
     expect(zustand.incrementUnread).toHaveBeenCalledWith('mb-anna')
     expect(sendeGeraeteBenachrichtigung).toHaveBeenCalledTimes(1)
+  })
+
+  it('quittiert ein Wecksignal nicht', async () => {
+    // Ein Wecksignal sagt nur, dass Arbeit da ist: nicht, ob der Umschlag für
+    // dieses Gerät war, ob er sich öffnen ließ oder ob er überhaupt eine
+    // Nachricht ist. Bis 10/2026 schickte diese Stelle trotzdem eine
+    // Zustellquittung und markierte damit Ungeprüftes als zugestellt.
+    render(<ServerIncidentNotifier />)
+    await schicke()
+    await waitFor(() => expect(nachrichtenStore.chime).toHaveBeenCalled())
+    expect(relais.relayE2eeEnvelope).not.toHaveBeenCalled()
   })
 
   it('klingelt für dieselbe Nachricht nicht zweimal', async () => {

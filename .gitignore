@@ -147,3 +147,5 @@ _messenger_audit_export/export_messenger_audit.py
 _messenger_audit_export/MESSENGER_DATEIEN.md
 /_messenger_audit_export
 docs/messenger-audit-2026-10-21.md
+/.qoder
+docs/messenger-e2ee-umsetzungsplan.md

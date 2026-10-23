@@ -18,7 +18,10 @@ import {
 } from '@/services/e2eeGeraet'
 import { sendeVerlaufAnNeueGeraete } from '@/services/geraet/verlaufsAbgleich'
 import { merkeWirkungAusKlartext } from '@/services/eigeneWirkungen'
-import { holeGeraeteSteuerung } from '@/services/gruppenSchluessel'
+import {
+  holeGeraeteSteuerung,
+  verteileOffeneZustellungenAller,
+} from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
@@ -220,11 +223,29 @@ export function useMessengerKern({
       // **Auch ohne offenes Gespräch ablegen.** Eine Bearbeitung oder Löschung
       // aus einem Zweitgerät kam beim Start bisher nicht an: der Cursor wanderte
       // weiter, und die Wirkung war weg, bevor der Chat je geöffnet wurde.
-      (klartext, env) => {
-        void merkeWirkungAusKlartext(klartext, env)
-      },
+      // Das Versprechen wird zurückgegeben, nicht verworfen: scheitert das
+      // Ablegen, bleibt der Lesestand davor stehen und die Wirkung wird beim
+      // nächsten Durchlauf erneut versucht.
+      (klartext, env) => merkeWirkungAusKlartext(klartext, env),
     ).catch(() => {})
     void sendeVerlaufAnNeueGeraete().catch(() => {})
+
+    /*
+     * Ein früherer Lauf kann einzelne Geräte beim Verteilen verpasst haben.
+     * Der Auftrag liegt in der Ablage; hier wird er nachgeholt — beim Start,
+     * wenn das Netz zurückkommt und wenn die App wieder nach vorn tritt.
+     */
+    const holeNach = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void verteileOffeneZustellungenAller(currentUserId).catch(() => {})
+    }
+    holeNach()
+    window.addEventListener('online', holeNach)
+    document.addEventListener('visibilitychange', holeNach)
+    return () => {
+      window.removeEventListener('online', holeNach)
+      document.removeEventListener('visibilitychange', holeNach)
+    }
   }, [currentUserId, identity, messengerGesperrt])
 
   useEffect(() => {

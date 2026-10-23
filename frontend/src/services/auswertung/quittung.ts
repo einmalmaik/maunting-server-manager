@@ -2,6 +2,16 @@
 
 import type { Lesung } from '@/hooks/useKonversation'
 
+/**
+ * Woran sich eine Quittung im Umschlag erkennt.
+ *
+ * Steht in der `client_uuid`, weil das das einzige Feld ist, das den Weg durch
+ * das Relais bis in den Lesepfad übersteht. Eine Quittung ist selbst ein
+ * Umschlag in derselben Mailbox und darf weder als Nachricht erscheinen noch
+ * erneut quittiert werden.
+ */
+export const QUITTUNG_PRAEFIX = 'deliv-'
+
 export interface QuittungsZustand {
   maxPartnerReadId: number
   maxPartnerDeliveredId: number

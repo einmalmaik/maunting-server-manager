@@ -24,6 +24,9 @@ import {
   speichereEntwurf,
   ladeEntwurf,
   ladeAlleEntwuerfe,
+  leseMedium,
+  loescheMedium,
+  speichereMedium,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -94,6 +97,9 @@ function installMockIndexedDb() {
         } else if (storeName === 'envelope_plaintexts') {
           // Zusammengesetzter Schlüssel wie im Schema: `[blindMailboxId, envelopeId]`.
           key = `${item.blindMailboxId}:${item.envelopeId}`
+        } else if (storeName === 'medien') {
+          // Eigener Schlüssel wie im Schema: die Medienkennung.
+          key = String(item.mediaId)
         } else {
           key = String(item.blindMailboxId)
         }
@@ -372,6 +378,24 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(await leseUmschlagKlartext('box-klartext', 43)).toBeNull()
     expect(await leseUmschlagKlartext('box-anders', 42)).toBeNull()
     expect((await ladeUmschlagKlartexte('box-klartext')).get(42)).toBe('Hallo')
+  })
+
+  it('hält einen Anhang dauerhaft fest und gibt ihn wieder her', async () => {
+    /*
+     * Bis 10/2026 lag ein empfangenes Bild nur im Arbeitsspeicher. Nach dem
+     * Neuladen war es weg, und der Server behält den Blob nur 30 Tage — die
+     * Nachricht trägt keinen Inhalt, sondern einen Zeiger darauf.
+     */
+    const inhalt = 'data:image/png;base64,iVBORw0KGgo='
+    await speichereMedium('media-1', inhalt, 'bild.png')
+
+    expect(await leseMedium('media-1')).toBe(inhalt)
+    expect(await leseMedium('media-2')).toBeNull()
+
+    // Und weg mit ihm: das Löschen einer Nachricht muss auch ihren Anhang
+    // aus der Ablage nehmen.
+    await loescheMedium('media-1')
+    expect(await leseMedium('media-1')).toBeNull()
   })
 
   it('übersteht simulierten F5-Reload und stellt Verlauf ohne Keys neu einzugeben wieder her', async () => {

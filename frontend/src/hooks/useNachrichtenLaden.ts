@@ -36,6 +36,7 @@ import {
   saveLocalMessages,
 } from '@/services/messengerLocalStore'
 import { tilgeInhalt, tilgeNachrichtLokal } from '@/services/nachrichtLoeschen'
+import { sichereAnhaenge } from '@/services/medienSicherung'
 import { wendeReaktionenAn } from '@/services/reaktionen'
 import { anheftung } from '@/services/nachrichtAnheftung'
 import { hakenFuer } from '@/services/auswertung/quittung'
@@ -357,6 +358,20 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         void tilgeNachrichtLokal(currentMid, msg, geloeschtAm).catch(() => {})
       }
 
+      /*
+       * Die Anhänge holen und dauerhaft ablegen.
+       *
+       * Bis 10/2026 lag ein empfangenes Bild nur im Arbeitsspeicher und war
+       * nach dem Neuladen weg — der Server behält den Blob 30 Tage, die
+       * Nachricht trägt nur einen Zeiger darauf. Jetzt wird der Anhang beim
+       * Empfang geholt und in der kontogebundenen Ablage abgelegt. Danach ist
+       * er ohne Netz und ohne Server da.
+       *
+       * Der Versand ist nicht betroffen: er läuft im Hintergrund weiter, und
+       * ein Anhang, der nicht zu holen war, blockiert nichts.
+       */
+      void sichereAnhaenge(processedList, currentMid).catch(() => {})
+
       setMessages((prev) => {
         const processedClientUuids = new Set<string>()
         for (const m of processedList) {
@@ -449,8 +464,8 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
       // Zustell- oder Lesequittungen (delivery_receipt, read_receipt) an die Mailbox gesendet!
       // Dadurch verbleibt die Nachricht beim blockierten Absender dauerhaft auf genau 1 grauem Häkchen (✓).
       const isTargetBlocked = activeContact ? isBlocked(activeContact.userId) : false
-      // In einer Gruppe keine Quittungen, wie schon in `deliveryReceiptService`.
-      // Jedes Mitglied schickte je Nachricht zwei in die Gruppenmailbox; bei
+      // In einer Gruppe keine Quittungen. Jedes Mitglied schickte je Nachricht
+      // zwei in die Gruppenmailbox; bei
       // zehn Mitgliedern 18 Umschläge je Nachricht, und das Hundert-Fenster
       // hielt kaum noch echte Nachrichten (bis 26.09.2026).
       const istGruppe = Boolean(activeGroup)

@@ -35,7 +35,7 @@ import {
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
-import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
+import { QUITTUNG_PRAEFIX } from '@/services/auswertung/quittung'
 import {
   eigeneWirkungenFuer,
   merkeEigeneWirkungen,

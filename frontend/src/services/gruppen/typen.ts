@@ -165,8 +165,38 @@ export interface DmGeheimnis {
   beleg?: Record<string, unknown>
 }
 
+/**
+ * Eine Schlüsselzustellung, die noch nicht jedes Gerät erreicht hat.
+ *
+ * Der Schlüssel liegt bereits in der Ablage — die Nachricht darf also mit ihm
+ * raus. Was fehlt, ist die Zustellung an einzelne Geräte. Ohne diesen Auftrag
+ * war ein Teilfehler bis 10/2026 still: die betroffenen Geräte sahen eine
+ * unbekannte Kennung, und nur ihre eigene Nachfrage holte den Schlüssel
+ * manchmal nach. Der Auftrag hält die fehlenden Geräte ausdrücklich fest und
+ * wird beim nächsten Versand oder beim nächsten Start wiederholt.
+ *
+ * `blindMailboxId` und `mitglieder` stehen hier, weil die Nutzlast mit genau
+ * dieser Mailbox unterschrieben wird. Würde ein späterer Lauf sie neu ableiten,
+ * trüge die Unterschrift eine andere Bindung, und der Empfänger wiese sie ab.
+ */
+export interface GruppenZustellung {
+  groupId: number
+  keyId: string
+  blindMailboxId: string
+  mitglieder: number[]
+  /** Konten, an deren Geräte der Schlüssel noch muss. */
+  empfaenger: number[]
+  /** Gerätekennungen, bei denen die Zustellung scheiterte. */
+  offen: string[]
+  seit: string
+}
+
 export interface GruppenAblage {
   lies(groupId: number, keyId: string): Promise<GruppenSchluesselEintrag | null>
+  /** Offene Zustellaufträge, wahlweise nur die einer Gruppe. */
+  liesZustellungen(groupId?: number): Promise<GruppenZustellung[]>
+  schreibeZustellung(eintrag: GruppenZustellung): Promise<void>
+  loescheZustellung(groupId: number, keyId: string): Promise<void>
   liesAktuellen(groupId: number): Promise<GruppenSchluesselEintrag | null>
   /** Das Geheimnis dieser Gruppe, falls dieses Gerät es kennt. */
   liesGeheimnis(groupId: number): Promise<GruppenGeheimnis | null>

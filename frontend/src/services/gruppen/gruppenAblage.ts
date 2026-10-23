@@ -14,19 +14,21 @@ import type {
   GruppenAblage,
   GruppenGeheimnis,
   GruppenSchluesselEintrag,
+  GruppenZustellung,
 } from './typen'
 
 const DB_PRAEFIX = 'msm_e2ee_gruppen'
 /**
  * Version 2: `beantwortet` kommt hinzu. Version 3: das Gruppengeheimnis.
- * Version 4: dasselbe für den Direktchat.
+ * Version 4: dasselbe für den Direktchat. Version 5: offene Zustellaufträge.
  */
-const DB_VERSION = 4
+const DB_VERSION = 5
 const STORE_KEYS = 'keys'
 const STORE_AKTUELL = 'aktuell'
 const STORE_ANFRAGEN = 'beantwortet'
 const STORE_GEHEIMNISSE = 'geheimnisse'
 const STORE_DM_GEHEIMNISSE = 'dm_geheimnisse'
+const STORE_ZUSTELLUNGEN = 'zustellungen'
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -92,6 +94,13 @@ function oeffneDatenbank(): Promise<IDBDatabase> {
       // eines fremden bekäme.
       if (!db.objectStoreNames.contains(STORE_DM_GEHEIMNISSE)) {
         db.createObjectStore(STORE_DM_GEHEIMNISSE, { keyPath: 'peerId' })
+      }
+      // Offene Schlüsselzustellungen. Sie enthalten Konten und Gerätekennungen,
+      // aber keinen Schlüssel: der liegt bereits unter `keys`. Deshalb bleiben
+      // sie lesbar wie der Zeiger in `aktuell` — ohne PIN muss der Auftrag
+      // trotzdem auffindbar sein.
+      if (!db.objectStoreNames.contains(STORE_ZUSTELLUNGEN)) {
+        db.createObjectStore(STORE_ZUSTELLUNGEN, { keyPath: ['groupId', 'keyId'] })
       }
     }
     req.onsuccess = () => {
@@ -268,11 +277,44 @@ const indexedDbAblage: GruppenAblage = {
     if (vorhanden.verteiltAm === verteiltAm && bekannt.length === verteiltAn.length) return
     await dmZeileSchreiben({ ...vorhanden, verteiltAm, verteiltAn })
   },
+  async liesZustellungen(groupId) {
+    const db = await oeffneDatenbank()
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_ZUSTELLUNGEN, 'readonly')
+      const req =
+        groupId === undefined
+          ? tx.objectStore(STORE_ZUSTELLUNGEN).getAll()
+          : tx.objectStore(STORE_ZUSTELLUNGEN).getAll(IDBKeyRange.bound([groupId], [groupId, []]))
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    return rohzeilen as unknown as GruppenZustellung[]
+  },
+  async schreibeZustellung(eintrag) {
+    const db = await oeffneDatenbank()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ZUSTELLUNGEN, 'readwrite')
+      tx.objectStore(STORE_ZUSTELLUNGEN).put(eintrag)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
+  async loescheZustellung(groupId, keyId) {
+    const db = await oeffneDatenbank()
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_ZUSTELLUNGEN, 'readwrite')
+      tx.objectStore(STORE_ZUSTELLUNGEN).delete([groupId, keyId])
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  },
   async loescheGruppe(groupId) {
     const db = await oeffneDatenbank()
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(
-        [STORE_KEYS, STORE_AKTUELL, STORE_ANFRAGEN, STORE_GEHEIMNISSE],
+        [STORE_KEYS, STORE_AKTUELL, STORE_ANFRAGEN, STORE_GEHEIMNISSE, STORE_ZUSTELLUNGEN],
         'readwrite',
       )
       tx.objectStore(STORE_GEHEIMNISSE).delete(groupId)
@@ -281,6 +323,7 @@ const indexedDbAblage: GruppenAblage = {
       tx.objectStore(STORE_KEYS).delete(IDBKeyRange.bound([groupId], [groupId, []]))
       tx.objectStore(STORE_AKTUELL).delete(groupId)
       tx.objectStore(STORE_ANFRAGEN).delete(IDBKeyRange.bound([groupId], [groupId, []]))
+      tx.objectStore(STORE_ZUSTELLUNGEN).delete(IDBKeyRange.bound([groupId], [groupId, []]))
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
       tx.onabort = () => reject(tx.error)

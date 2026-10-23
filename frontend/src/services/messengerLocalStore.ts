@@ -113,7 +113,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -124,6 +124,7 @@ const STORE_MAILBOXES = 'mailboxes'
 const STORE_KLARTEXTE = 'envelope_plaintexts'
 const STORE_ENTWUERFE = 'entwuerfe'
 const STORE_FUNKEN = 'funken'
+const STORE_MEDIEN = 'medien'
 
 /**
  * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
@@ -278,6 +279,17 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       // der Verlauf, und nicht offen im localStorage.
       if (!db.objectStoreNames.contains(STORE_FUNKEN)) {
         db.createObjectStore(STORE_FUNKEN, { keyPath: 'partnerId' })
+      }
+      // Version 5: die Anhänge selbst.
+      //
+      // Bis 10/2026 lag ein empfangenes Bild nur im Arbeitsspeicher
+      // (`chatMediaBlobCache`). Nach einem Neuladen war es weg, und ohne Netz
+      // kam es nie wieder: der Server kennt den Blob nur noch 30 Tage, und die
+      // Nachricht trägt keinen Inhalt, sondern einen Zeiger darauf. Was hier
+      // liegt, ist der entschlüsselte Anhang — im Siegel der Ablage, also
+      // geschützt wie der Verlauf.
+      if (!db.objectStoreNames.contains(STORE_MEDIEN)) {
+        db.createObjectStore(STORE_MEDIEN, { keyPath: 'mediaId' })
       }
     }
 
@@ -708,6 +720,118 @@ export async function ladeUmschlagKlartexte(
     return treffer
   } catch {
     return treffer
+  }
+}
+
+// ==========================================
+// Die Anhänge
+// ==========================================
+
+/**
+ * Bindet einen Anhang an seinen Platz. Siehe `versiegleZeile`.
+ *
+ * Nur die Medienkennung bleibt im Klartext — sie ist der Schlüssel der Zeile
+ * und sagt nichts über den Inhalt aus. Dateiname und Dateityp stehen im
+ * versiegelten Manifest des Pakets und wandern hier nicht noch einmal mit.
+ */
+function mediumAad(mediaId: string): string {
+  return `msm-medium:${mediaId}`
+}
+
+/**
+ * Legt einen entschlüsselten Anhang dauerhaft ab.
+ *
+ * Das ist der Unterschied zwischen „angezeigt" und „da": bis 10/2026 lag ein
+ * Bild nur im Arbeitsspeicher und war nach dem Neuladen weg. Der Server
+ * behält den Blob 30 Tage, die Nachricht trägt nur einen Zeiger — nach Ablauf
+ * gäbe es nichts mehr zu holen. Wer den Anhang einmal geholt hat, behält ihn.
+ *
+ * Der Inhalt ist der Klartext der Datei als data-URL. Er wird im Siegel der
+ * Ablage abgelegt, also geschützt wie der Verlauf; ohne PIN gilt dieselbe Grenze
+ * wie für den Verlauf.
+ */
+export async function speichereMedium(
+  mediaId: string,
+  klartext: string,
+  name?: string | null,
+): Promise<void> {
+  if (!mediaId || !klartext) return
+  const db = await openLocalDatabase()
+  // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
+  const zeile = await versiegleZeile(
+    { mediaId, klartext, name: name ?? null, gespeichertAm: new Date().toISOString() },
+    ['mediaId'],
+    mediumAad(mediaId),
+  )
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN, 'readwrite')
+    tx.objectStore(STORE_MEDIEN).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Der dauerhaft abgelegte Anhang — oder `null`, wenn es keinen gibt.
+ *
+ * Ein Fehler beim Lesen ist ein Fehler und kein „nichts da": die Anzeige
+ * entscheidet danach, ob sie den Anhang noch holen muss oder gar nicht
+ * mehr kann.
+ */
+export async function leseMedium(mediaId: string): Promise<string | null> {
+  if (!mediaId) return null
+  const db = await openLocalDatabase()
+  const roh = await new Promise<Record<string, any> | null>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN, 'readonly')
+    const req = tx.objectStore(STORE_MEDIEN).get(mediaId)
+    req.onsuccess = () => resolve(req.result ?? null)
+    req.onerror = () => reject(req.error)
+  })
+  if (!roh) return null
+  const zeile = await entsiegleZeile<{ klartext?: unknown }>(roh, mediumAad(mediaId))
+  return typeof zeile?.klartext === 'string' ? zeile.klartext : null
+}
+
+/** Nimmt einen Anhang aus der Ablage. Gehört zum Löschen und zum Verfall. */
+export async function loescheMedium(mediaId: string): Promise<void> {
+  if (!mediaId) return
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN, 'readwrite')
+    tx.objectStore(STORE_MEDIEN).delete(mediaId)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Alle abgelegten Anhänge — für den Datenexport.
+ *
+ * Was hier liegt, gehört dem Nutzer: es ist sein Bild, seine Sprachnachricht.
+ * Ein Export, der den Verlauf mitnimmt und die Anhänge weglässt, wäre
+ * unvollständig, ohne es zu sagen.
+ */
+export async function listeMedien(): Promise<
+  { mediaId: string; name: string | null; klartext: string }[]
+> {
+  const leere: { mediaId: string; name: string | null; klartext: string }[] = []
+  try {
+    const db = await openLocalDatabase()
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_MEDIEN, 'readonly')
+      const req = tx.objectStore(STORE_MEDIEN).getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    const offen = await entsiegleZeilen<{ mediaId: string; name: string | null; klartext: string }>(
+      rohzeilen,
+      (z) => mediumAad(String(z.mediaId)),
+    )
+    return offen.filter((z) => typeof z.klartext === 'string')
+  } catch {
+    return leere
   }
 }
 

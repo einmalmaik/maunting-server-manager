@@ -24,6 +24,7 @@ import {
   normalisiereMitglieder,
   type GruppenKontext,
   type GruppenSchluesselEintrag,
+  type GruppenZustellung,
 } from './typen'
 
 /**
@@ -83,6 +84,9 @@ export async function schluesselZumSenden(kontext: GruppenKontext): Promise<Grup
    * Zustellweg neben dem ersten, der genauso oft scheitern kann.
    */
   if (vorhanden && !frischErzeugt && gleicheMitglieder(vorhanden.mitglieder, jetzige)) {
+    // Ein früherer Lauf kann einzelne Geräte verpasst haben. Der Auftrag liegt
+    // dauerhaft; hier ist der nächste Anlass, ihn nachzuholen.
+    await wiederholeOffene(kontext.groupId, kontext.eigeneId)
     return vorhanden
   }
 
@@ -125,7 +129,7 @@ export async function anJedesGeraet(
   nutzlast: string,
   kontrolltyp: string,
   nur?: readonly string[],
-): Promise<{ anzahl: number; kennungen: string[] }> {
+): Promise<{ anzahl: number; kennungen: string[]; fehlend: string[]; ziele: number }> {
   const meins = await eigenesGeraet()
   const basis =
     typeof crypto !== 'undefined' && crypto.randomUUID
@@ -138,6 +142,7 @@ export async function anJedesGeraet(
   let zugestellt = 0
   let ziele = 0
   const kennungen: string[] = []
+  const fehlend: string[] = []
   for (const empfaengerId of empfaengerIds) {
     const geraete = await geraeteVon(empfaengerId)
     const ziel = await deriveUserDeviceMailboxId(empfaengerId)
@@ -162,19 +167,15 @@ export async function anJedesGeraet(
         kennungen.push(geraet.device_id)
       } catch {
         // Ein Gerät, das sich nicht erreichen lässt, hält die übrigen nicht auf.
-        // Es sieht später eine unbekannte Kennung und fordert nach.
+        // Es wird aber **festgehalten**: bis 10/2026 war der Teilfehler still,
+        // und nur die eigene Nachfrage des Geräts holte den Schlüssel manchmal
+        // nach. Wer den Auftrag schreibt, entscheidet `verteileSchluessel`.
+        fehlend.push(geraet.device_id)
       }
     }
   }
 
-  // Kein einziges Ziel erreicht, obwohl es welche gab. Das war bis 09/2026 eine
-  // stille 0, die niemand auswertete: der Absender schrieb munter weiter mit
-  // einem Schlüssel, den ausser ihm keiner hatte, und im Verlauf der anderen
-  // stand nur „Verschlüsselte Nachricht".
-  if (ziele > 0 && zugestellt === 0) {
-    throw new GruppenSchluesselNichtZugestelltError(kontext.groupId, ziele)
-  }
-  return { anzahl: zugestellt, kennungen }
+  return { anzahl: zugestellt, kennungen, fehlend, ziele }
 }
 
 export async function schluesselNutzlast(
@@ -198,18 +199,121 @@ export async function schluesselNutzlast(
   return JSON.stringify(signiert)
 }
 
+/**
+ * Der Zustellauftrag wird **vor** dem Verteilen geschrieben.
+ *
+ * Scheitert ein einzelnes Gerät, liegt der Auftrag schon da und wird beim
+ * nächsten Versand oder Start wiederholt. Scheitert gar keines, wird er wieder
+ * gelöscht. Fällt das Schreiben aus, geht keine Nachricht mit einem Schlüssel
+ * raus, dessen Verteilung niemand mehr nachholen kann.
+ */
 async function verteileSchluessel(
   kontext: GruppenKontext,
   eintrag: GruppenSchluesselEintrag,
   empfaenger: readonly number[],
   geheimnis: string | null,
 ): Promise<number> {
-  return (
-    await anJedesGeraet(
+  const basis: Omit<GruppenZustellung, 'offen'> = {
+    groupId: eintrag.groupId,
+    keyId: eintrag.keyId,
+    blindMailboxId: kontext.blindMailboxId,
+    mitglieder: [...empfaenger],
+    empfaenger: [...empfaenger],
+    seit: new Date().toISOString(),
+  }
+  const nutzlast = await schluesselNutzlast(kontext, eintrag, geheimnis)
+  const ergebnis = await anJedesGeraet(
+    kontext,
+    empfaenger,
+    nutzlast,
+    GRUPPEN_SCHLUESSEL_TYP,
+  )
+  if (ergebnis.fehlend.length > 0) {
+    await ablage.schreibeZustellung({ ...basis, offen: ergebnis.fehlend })
+  } else {
+    await ablage.loescheZustellung(kontext.groupId, eintrag.keyId)
+  }
+
+  // Kein einziges Ziel erreicht, obwohl es welche gab. Das war bis 09/2026 eine
+  // stille 0, die niemand auswertete: der Absender schrieb munter weiter mit
+  // einem Schlüssel, den ausser ihm keiner hatte, und im Verlauf der anderen
+  // stand nur „Verschlüsselte Nachricht".
+  if (ergebnis.ziele > 0 && ergebnis.anzahl === 0) {
+    throw new GruppenSchluesselNichtZugestelltError(kontext.groupId, ergebnis.ziele)
+  }
+  return ergebnis.anzahl
+}
+
+/**
+ * Holt eine einzelne offene Zustellung nach.
+ *
+ * Gibt es den Schlüssel nicht mehr (gruppenweise gelöscht), fällt der Auftrag
+ * mit weg. Was inzwischen aus dem Verzeichnis verschwunden ist, gilt als
+ * erledigt: ein entferntes Gerät braucht keinen Schlüssel mehr, und der
+ * Auftrag soll nicht ewig liegen bleiben.
+ */
+async function wiederholeZustellung(
+  zustellung: GruppenZustellung,
+  eigeneId: number,
+): Promise<void> {
+  const eintrag = await ablage.lies(zustellung.groupId, zustellung.keyId)
+  if (!eintrag) {
+    await ablage.loescheZustellung(zustellung.groupId, zustellung.keyId)
+    return
+  }
+  const geheimnis = (await ablage.liesGeheimnis(zustellung.groupId))?.geheimnis ?? null
+  const kontext: GruppenKontext = {
+    groupId: zustellung.groupId,
+    blindMailboxId: zustellung.blindMailboxId,
+    eigeneId,
+    mitglieder: zustellung.mitglieder,
+    // Aus einem Nachtrag entsteht kein Eigentümerrang — hier wird nur
+    // zugestellt, nie ein Geheimnis erzeugt.
+    istEigentuemer: false,
+  }
+  try {
+    const nutzlast = await schluesselNutzlast(kontext, eintrag, geheimnis)
+    const ergebnis = await anJedesGeraet(
       kontext,
-      empfaenger,
-      await schluesselNutzlast(kontext, eintrag, geheimnis),
+      zustellung.empfaenger,
+      nutzlast,
       GRUPPEN_SCHLUESSEL_TYP,
+      zustellung.offen,
     )
-  ).anzahl
+    if (ergebnis.fehlend.length === 0) {
+      await ablage.loescheZustellung(zustellung.groupId, zustellung.keyId)
+    } else {
+      await ablage.schreibeZustellung({ ...zustellung, offen: ergebnis.fehlend })
+    }
+  } catch {
+    // Netz oder Relais: der Auftrag bleibt liegen und kommt beim nächsten
+    // Anlass wieder. Ein Teilfehler darf das Senden nicht aufhalten.
+  }
+}
+
+/** Offene Zustellungen dieser Gruppe nachholen. */
+async function wiederholeOffene(groupId: number, eigeneId: number): Promise<void> {
+  const offene = await ablage.liesZustellungen(groupId)
+  for (const zustellung of offene) {
+    await wiederholeZustellung(zustellung, eigeneId)
+  }
+}
+
+/**
+ * Alle offenen Schlüsselzustellungen nachholen — beim Start, nach einem
+ * Netzwechsel und beim Entsperren.
+ *
+ * Ein Gerät, das beim Verteilen nicht erreichbar war, bekommt den Schlüssel so
+ * ausdrücklich nachgeliefert, statt darauf zu warten, dass es die unbekannte
+ * Kennung selbst bemerkt und nachfragt.
+ */
+export async function verteileOffeneZustellungenAller(eigeneId: number): Promise<number> {
+  if (!Number.isInteger(eigeneId) || eigeneId <= 0) return 0
+  let erledigt = 0
+  const offene = await ablage.liesZustellungen()
+  for (const zustellung of offene) {
+    await wiederholeZustellung(zustellung, eigeneId)
+    erledigt += 1
+  }
+  return erledigt
 }

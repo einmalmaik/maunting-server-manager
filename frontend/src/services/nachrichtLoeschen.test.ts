@@ -21,6 +21,7 @@ vi.mock('@/api/social', () => api)
 const ablage = {
   updateMessageInLocalStore: vi.fn(async () => {}),
   leereUmschlagKlartext: vi.fn(async () => {}),
+  loescheMedium: vi.fn(async () => {}),
 }
 vi.mock('./messengerLocalStore', () => ablage)
 
@@ -112,6 +113,19 @@ describe('nachrichtLoeschen', () => {
     // Ohne diesen Schritt bliebe die Fassung liegen, aus der ein späterer Abruf
     // die Nachricht wieder aufbaut.
     expect(ablage.leereUmschlagKlartext).toHaveBeenCalledWith(MAILBOX, 42)
+  })
+
+  it('nimmt auch den dauerhaft abgelegten Anhang mit', async () => {
+    // Seit 10/2026 liegt ein geholter Anhang dauerhaft in der Ablage. Bliebe
+    // er dort, wäre die Nachricht nur im Text verschwunden, ihr Bild aber
+    // weiterhin auf diesem Gerät.
+    await tilgeNachrichtLokal(
+      MAILBOX,
+      nachricht({ imageAttachment: { mediaId: 'bild-1' } }),
+      '2026-09-20T01:00:00.000Z',
+    )
+
+    expect(ablage.loescheMedium).toHaveBeenCalledWith('bild-1')
   })
 
   it('rührt den Klartextspeicher bei einer noch nicht bestätigten Nachricht nicht an', async () => {

@@ -468,6 +468,65 @@ describe('ratchetSitzung', () => {
     expect(zweiterVersuch).toMatchObject({ art: 'klartext', text: 'wichtig' })
   })
 
+  it('holt den Ratchet-Zustand nach, wenn der Klartext schon liegt und das Schreiben abbrach', async () => {
+    /*
+     * Klartext und Ratchet-Zustand liegen in zwei Ablagen. Stürzt der Prozess
+     * zwischen beiden Schreibvorgängen ab, liegt der Klartext schon da, der
+     * Zustand aber nicht. Bis 10/2026 las `liesDrUmschlag` in diesem Fall nur
+     * den Klartext und ließ die Sitzung auf der alten Kettenposition stehen:
+     * die nächste Nachricht war nicht mehr entschlüsselbar, ohne dass es eine
+     * Meldung gab.
+     */
+    const kA = kontextVon(ALICE, BOB)
+    const kB = kontextVon(BOB, ALICE)
+    aktiviere(alice)
+    const [erste] = await baueZustellungen(kA, 'eins', 'u1')
+    const [zweite] = await baueZustellungen(kA, 'zwei', 'u2')
+
+    aktiviere(bob)
+    await verarbeiteBootstrap(kB, oeffneHybrid(erste.bootstrap!))
+
+    let abgelegt: string | null = null
+    const fach: KlartextAblage = {
+      lies: async () => abgelegt,
+      lege: async (text) => {
+        abgelegt = text
+      },
+    }
+    const schreibeEcht = bob.ablage.schreibe.bind(bob.ablage)
+    let einmal = true
+    bob.ablage.schreibe = async (id, zustand, marke, begleiter) => {
+      if (einmal) {
+        einmal = false
+        throw new Error('Platte voll')
+      }
+      return schreibeEcht(id, zustand, marke, begleiter)
+    }
+
+    const abgebrochen = await liesDrUmschlag(kB, erste.nachricht, fach)
+    bob.ablage.schreibe = schreibeEcht
+    expect(abgebrochen.art).toBe('fehler')
+    expect(abgelegt).toBe('eins')
+
+    // Der Klartext liegt schon; der Zustand muss trotzdem nachrücken.
+    expect(await liesDrUmschlag(kB, erste.nachricht, fach)).toMatchObject({
+      art: 'klartext',
+      text: 'eins',
+    })
+
+    // Der Beweis ist die Sendekette: ohne fortgeschriebenen Zustand hat Bob
+    // keine, und `baueZustellungen` baute die Sitzung neu auf — genau der
+    // „Die Sicherheitssitzung wurde neu aufgebaut"-Fall aus dem Betrieb.
+    const [antwort] = await baueZustellungen(kontextVon(BOB, ALICE), 'antwort', 'u3')
+    expect(antwort.bootstrap).toBeNull()
+
+    aktiviere(alice)
+    expect(await liesDrUmschlag(kontextVon(ALICE, BOB), antwort.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'antwort',
+    })
+  })
+
   it('verwirft die Sitzung, wenn die Gegenstelle ihren Schlüssel unter derselben Kennung tauscht', async () => {
     const kA = kontextVon(ALICE, BOB)
     const kB = kontextVon(BOB, ALICE)

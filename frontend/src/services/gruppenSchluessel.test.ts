@@ -97,6 +97,13 @@ let serverMitglieder: number[] = []
 /** Lässt jeden Relais-Aufruf scheitern, für den Fall „erreicht niemanden". */
 let relaisKaputt = false
 /**
+ * Lässt einzelne Zustellungen scheitern — je nach Inhalt des Umschlags.
+ *
+ * Damit lässt sich der Fall „ein Gerät erreicht, ein anderes nicht" nachstellen:
+ * der Umschlag nennt den öffentlichen Schlüssel des Empfängers.
+ */
+let relaisScheitertWenn: ((p: { ciphertext_envelope: string }) => boolean) | null = null
+/**
  * Jede Registrierung eines Besitznachweises, in der Reihenfolge.
  *
  * Erwartet wird genau eine, und zwar auf der Kennung **aus dem Geheimnis**.
@@ -114,7 +121,7 @@ vi.mock('@/api/social', () => ({
     client_uuid?: string | null
     control_type?: string | null
   }) => {
-    if (relaisKaputt) throw new Error('Relais nicht erreichbar')
+    if (relaisKaputt || relaisScheitertWenn?.(payload)) throw new Error('Relais nicht erreichbar')
     const umschlag: Umschlag = {
       id: naechsteId++,
       mailboxId: payload.blind_mailbox_id,
@@ -151,6 +158,7 @@ import {
   fordereDmGeheimnis,
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
+  verteileOffeneZustellungenAller,
   fordereGruppenSchluessel,
   holeGeraeteSteuerung,
   gruppenZiele,
@@ -169,6 +177,7 @@ import {
   type GruppenGeheimnis,
   type GruppenKontext,
   type GruppenSchluesselEintrag,
+  type GruppenZustellung,
 } from './gruppenSchluessel'
 import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
 import { signiereNutzlast } from './nutzlastSignatur'
@@ -205,6 +214,7 @@ function neueAblage(): TestAblage {
   const beantwortet = new Set<string>()
   const geheimnisse = new Map<number, GruppenGeheimnis>()
   const dmGeheimnisse = new Map<number, DmGeheimnis>()
+  const zustellungen = new Map<string, GruppenZustellung>()
   return {
     async liesGeheimnis(groupId) {
       return geheimnisse.get(groupId) ?? null
@@ -237,6 +247,17 @@ function neueAblage(): TestAblage {
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
     },
+    async liesZustellungen(groupId) {
+      return [...zustellungen.values()].filter(
+        (z) => groupId === undefined || z.groupId === groupId,
+      )
+    },
+    async schreibeZustellung(eintrag) {
+      zustellungen.set(`${eintrag.groupId}:${eintrag.keyId}`, eintrag)
+    },
+    async loescheZustellung(groupId, keyId) {
+      zustellungen.delete(`${groupId}:${keyId}`)
+    },
     async liesAktuellen(groupId) {
       const keyId = aktuelle.get(groupId)
       return keyId ? (keys.get(`${groupId}:${keyId}`) ?? null) : null
@@ -262,6 +283,9 @@ function neueAblage(): TestAblage {
       geheimnisse.delete(groupId)
       for (const marke of [...beantwortet]) {
         if (marke.startsWith(`${groupId}:`)) beantwortet.delete(marke)
+      }
+      for (const [platz, wert] of [...zustellungen]) {
+        if (wert.groupId === groupId) zustellungen.delete(platz)
       }
     },
     anzahl: () => keys.size,
@@ -459,6 +483,37 @@ describe('gruppenSchluessel', () => {
     } finally {
       relaisKaputt = false
     }
+  })
+
+  it('liefert einem Gerät nach, das den Schlüssel zuerst nicht bekam', async () => {
+    /*
+     * Der Teilfehler, der bis 10/2026 still war: Bobs Gerät war beim
+     * Verteilen nicht erreichbar, und nur Bobs eigene Nachfrage holte den
+     * Schlüssel manchmal nach. Der Auftrag liegt jetzt dauerhaft, und der
+     * nächste Anlass liefert ihn.
+     */
+    relaisScheitertWenn = (p) => p.ciphertext_envelope.includes('pub-bob-handy')
+    try {
+      await sende(alice, alle, 'erst an Carol')
+    } finally {
+      relaisScheitertWenn = null
+    }
+
+    // Carol kann die Nachricht lesen, Bob noch nicht.
+    expect((await lies(carol, alle)).texte).toEqual(['erst an Carol'])
+    expect((await lies(bob, alle)).texte).toEqual([])
+
+    // Der Auftrag nennt genau das Gerät, das fehlte.
+    const offen = await alice.ablage.liesZustellungen(GRUPPE)
+    expect(offen).toHaveLength(1)
+    expect(offen[0].offen).toEqual([bob.kennung])
+
+    // Der nächste Anlass holt ihn nach — und danach ist der Auftrag erledigt.
+    aktiviere(alice)
+    await verteileOffeneZustellungenAller(ALICE)
+    expect(await alice.ablage.liesZustellungen(GRUPPE)).toHaveLength(0)
+
+    expect((await lies(bob, alle)).texte).toEqual(['erst an Carol'])
   })
 
   it('stellt den Schlüssel an jedes Gerät zu, und jeder öffnet genau seinen Umschlag', async () => {
@@ -1367,6 +1422,47 @@ describe('Zustellung über die Geräte-Mailbox', () => {
     aktiviere(bob)
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+  })
+
+  it('rückt den Lesestand nicht über eine gescheiterte Verarbeitung', async () => {
+    /*
+     * Bis 10/2026 verschluckten die inneren `catch`-Zweige jeden
+     * Verarbeitungsfehler und setzten den Stand trotzdem auf die Kennung des
+     * Umschlags. Der äußere `angehalten`-Schutz sah davon nichts: die Wirkung
+     * lag hinter dem Cursor, wurde nie wieder versucht und war ohne Meldung
+     * verloren.
+     */
+    const empfangen: number[] = []
+    for (const nummer of [1, 2]) {
+      const payload = JSON.stringify({
+        type: 'reaction',
+        mailbox: 'dm:1:2',
+        actor_id: BOB,
+        emoji: nummer === 1 ? '👍' : '🎉',
+      })
+      mailbox.push({
+        id: naechsteId++,
+        mailboxId: 'dev:2',
+        ciphertext_envelope: `${HYBRID}${bob.oeffentlich}.${Buffer.from(payload, 'utf-8').toString('base64')}`,
+        client_uuid: `ctrl-${nummer}#own0`,
+        control_type: 'reaction',
+      })
+    }
+
+    aktiviere(bob)
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (_text, env) => {
+      if (env.id === 1) throw new Error('Ablage voll')
+      empfangen.push(env.id)
+    })
+    // Die zweite Wirkung lief weiter — ein Fehler hält die übrigen nicht auf.
+    expect(empfangen).toEqual([2])
+
+    // Der gescheiterte Umschlag kommt beim nächsten Durchlauf wieder.
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (_text, env) => {
+      empfangen.push(env.id)
+    })
+    expect(empfangen).toContain(1)
+    expect(empfangen.filter((id) => id === 1)).toHaveLength(1)
   })
 
   it('geht über fremden Inhalt derselben Mailbox hinweg', async () => {

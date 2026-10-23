@@ -3560,7 +3560,7 @@
       "readme": {
         "title": "Datenexport aus Maunting Server Manager",
         "intro": "Dieses Archiv enthält die Daten deines Kontos im Klartext. Bewahre es auf wie ein Passwort.",
-        "structure": "server/ enthält je Tabelle eine JSON-Datei mit allem, was der Server zu deinem Konto speichert. geraet/ enthält, was nur dieses Gerät lesen kann (Messenger-Verlauf, Gespräche, Entwürfe). tresor/ enthält den Tresor, falls er in der App entsperrt war. dateien/ enthält Profilbild und KI-Anhänge. manifest.json listet alle Tabellen mit Zeilenzahl.",
+        "structure": "server/ enthält je Tabelle eine JSON-Datei mit allem, was der Server zu deinem Konto speichert. geraet/ enthält, was nur dieses Gerät lesen kann (Messenger-Verlauf, Gespräche, Entwürfe und die Anhänge, die dieses Gerät dauerhaft hält). tresor/ enthält den Tresor, falls er in der App entsperrt war. dateien/ enthält Profilbild und KI-Anhänge. manifest.json listet alle Tabellen mit Zeilenzahl.",
         "secretsIncluded": "Hinterlegte Zugangsdaten (GitHub, Steam, Postfächer, Kalender) stehen im Klartext in server/user_credentials.json, server/user_mailboxes.json und server/user_calendars.json.",
         "secretsMissing": "Hinterlegte Zugangsdaten fehlen, weil dein Konto weder Passwort noch 2FA hat.",
         "notesLocked_one": "{{count}} Feld aus persönlichen Notizen oder Terminen blieb verschlüsselt, weil auf dem exportierenden Gerät der Schlüssel fehlte.",

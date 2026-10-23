@@ -8,6 +8,7 @@ import { ladeAnhangHerunter } from '@/api/social'
 import type { MedienZeiger } from '@/services/medienKrypto'
 import { toast } from '@/stores/toastStore'
 import { chatMediaBlobCache } from '@/services/klartextSpeicher'
+import { holeMedium } from '@/services/medienSicherung'
 
 /**
  * Woran ein Anhang hängt: wer ihn geschickt hat und in welche Mailbox.
@@ -102,7 +103,9 @@ export async function holeAnhangUrl(
 ): Promise<string | null> {
   const zeiger = medienZeiger(anhang)
   if (!zeiger) return null
-  const zwischengespeichert = chatMediaBlobCache.get(zeiger.mediaId)
+  // Der Arbeitsspeicher zuerst, dann die Ablage: was einmal geholt wurde,
+  // liegt dauerhaft auf diesem Gerät und braucht weder Netz noch Server.
+  const zwischengespeichert = await holeMedium(zeiger.mediaId)
   if (zwischengespeichert) return zwischengespeichert
   try {
     const klartext = await ladeAnhangHerunter(zeiger, bindung)
@@ -195,7 +198,7 @@ export function ChatMediaImage({ attachment, bindung, onViewImage }: ChatMediaIm
     setLoading(true)
     setError(false)
     try {
-      const cachedItem = chatMediaBlobCache.get(mediaId)
+      const cachedItem = await holeMedium(mediaId)
       if (cachedItem) {
         setDecryptedUrl(cachedItem)
         setLoading(false)
@@ -304,7 +307,7 @@ export function ChatMediaFile({ attachment, bindung, isSelf = false }: ChatMedia
     if (attachment.mediaId && (!directSafeHref || directSafeHref === '#')) {
       setIsDownloading(true)
       try {
-        let decrypted = chatMediaBlobCache.get(attachment.mediaId)
+        let decrypted = await holeMedium(attachment.mediaId)
         if (!decrypted) {
           const zeiger = medienZeiger(attachment)
           if (!zeiger) {

@@ -99,7 +99,10 @@ export { abonniereBekannteGespraeche } from './gruppen/gespraechsAbo'
 
 export { dmZiele, fordereDmGeheimnis } from './gruppen/dmGeheimnis'
 
-export { erzeugeGruppenSchluessel } from './gruppen/gruppenVerteilung'
+export {
+  erzeugeGruppenSchluessel,
+  verteileOffeneZustellungenAller,
+} from './gruppen/gruppenVerteilung'
 
 export {
   entschluesseleGruppenUmschlag,

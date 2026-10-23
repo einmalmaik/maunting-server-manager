@@ -3560,7 +3560,7 @@
       "readme": {
         "title": "Data export from Maunting Server Manager",
         "intro": "This archive contains your account data in plain text. Keep it as safe as a password.",
-        "structure": "server/ holds one JSON file per table with everything the server stores for your account. geraet/ holds what only this device can read (messenger history, conversations, drafts). tresor/ holds the vault if it was unlocked in the app. dateien/ holds your profile picture and AI attachments. manifest.json lists every table with its row count.",
+        "structure": "server/ holds one JSON file per table with everything the server stores for your account. geraet/ holds what only this device can read (messenger history, conversations, drafts and the attachments this device keeps). tresor/ holds the vault if it was unlocked in the app. dateien/ holds your profile picture and AI attachments. manifest.json lists every table with its row count.",
         "secretsIncluded": "Stored credentials (GitHub, Steam, mailboxes, calendars) are in plain text in server/user_credentials.json, server/user_mailboxes.json and server/user_calendars.json.",
         "secretsMissing": "Stored credentials are missing because your account has neither a password nor 2FA.",
         "notesLocked_one": "{{count}} field from personal notes or events stayed encrypted because the exporting device did not have the key.",

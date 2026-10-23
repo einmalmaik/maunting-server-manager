@@ -23,7 +23,6 @@ import { NotificationService } from '@/services/notificationService'
 import { loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
 import { erinnerungenAus, PLAN_TAGE, type GeplanteErinnerung } from '@/lib/erinnerungsplan'
 import { CALENDAR_CIPHERTEXT_PREFIX } from '@/services/notesCalendarCrypto'
-import { sendE2eeDeliveryReceipt, checkAndDispatchPendingDeliveryReceipts } from '@/services/deliveryReceiptService'
 
 interface IncidentAlert {
   id: number
@@ -320,9 +319,12 @@ export function ServerIncidentNotifier() {
     // Hintergrund-Synchronisierung für Blockierungen und bekannte Mailboxen
     void useMessengerNotificationStore.getState().syncBlockedFromBackend()
     if (user?.id) {
-      void useMessengerNotificationStore.getState().syncMailboxDirectoryFromBackend(user.id).then(() => {
-        void checkAndDispatchPendingDeliveryReceipts(user.id)
-      })
+      // Nur die Liste der Mailboxen auffrischen. **Keine Quittung hier**: ein
+      // Wecksignal sagt nicht, ob der Umschlag für dieses Gerät war, ob er
+      // sich öffnen ließ oder ob er überhaupt eine Nachricht ist. Eine
+      // Zustellquittung entsteht deshalb erst nach dem lokalen Commit im
+      // Lesepfad (`useNachrichtenLaden`), nie aus einer Umschlagliste.
+      void useMessengerNotificationStore.getState().syncMailboxDirectoryFromBackend(user.id)
     }
 
     // Sofortiger initialer Check nach Login
@@ -395,29 +397,6 @@ export function ServerIncidentNotifier() {
             )
           }
           return
-        }
-
-        // Automatische Zustellbestätigung (2 graue Häkchen beim Absender):
-        // Sobald das Gerät des Empfängers die Nachricht via SSE erhalten hat (Empfänger hat Internet/Online-Status),
-        // wird unmittelbar eine Zustellquittung (delivery_receipt) an die Mailbox übermittelt — auch wenn der
-        // Chat noch nicht geöffnet wurde!
-        const incomingSenderId = Number(senderId)
-        const recipientUserId = Number(user?.id)
-        const isGroup = Boolean(detail.is_group || store.mailboxDirectory[mid]?.isGroup)
-        if (
-          !isGroup &&
-          incomingSenderId &&
-          recipientUserId &&
-          incomingSenderId !== recipientUserId &&
-          detail.id &&
-          !store.isBlocked(incomingSenderId)
-        ) {
-          void sendE2eeDeliveryReceipt({
-            blindMailboxId: mid,
-            envelopeId: Number(detail.id),
-            senderUserId: incomingSenderId,
-            currentUserId: recipientUserId,
-          })
         }
 
         // 4. Mailbox-Metadaten abrufen oder bei Bedarf nachsynchronisieren

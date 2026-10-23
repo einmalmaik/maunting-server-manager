@@ -132,8 +132,8 @@ async function verteileDmGeheimnis(
   try {
     gegenstelle = (await anJedesGeraet(kontext, [peerId], text, DM_GEHEIMNIS_TYP)).anzahl
   } catch {
-    // `anJedesGeraet` wirft, wenn es Ziele gab und keines erreicht wurde. Für
-    // die Gruppe ist das ein Abbruch; hier ist es schlicht eine Null.
+    // Kein Ziel erreicht oder ein Fehler unterwegs: für die Gruppe ist das ein
+    // Abbruch, hier ist es schlicht eine Null.
     gegenstelle = 0
   }
 

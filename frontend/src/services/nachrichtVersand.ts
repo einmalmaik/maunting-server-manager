@@ -30,6 +30,30 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
+import { speichereMedium } from './messengerLocalStore'
+
+/**
+ * Legt den Anhang zusätzlich dauerhaft ab.
+ *
+ * Der Arbeitsspeicher allein reicht nicht: bis 10/2026 lag ein gesendetes Bild
+ * nur im RAM und war nach dem Neuladen weg, obwohl der Server es noch 30 Tage
+ * hält. Der lokale Bestand ist die Zusage, und der Arbeitsspeicher ist nur die
+ * Optimierung darüber.
+ *
+ * Scheitert das Ablegen, geht die Nachricht trotzdem raus: der Anhang liegt
+ * beim Server, und der Empfänger holt ihn sich von dort.
+ */
+async function sichereLokal(
+  mediaId: string,
+  klartext: string,
+  name?: string,
+): Promise<void> {
+  try {
+    await speichereMedium(mediaId, klartext, name ?? null)
+  } catch {
+    // Kein Grund, das Senden abzubrechen.
+  }
+}
 
 /** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
 function blobAlsDataUrl(blob: Blob): Promise<string> {
@@ -116,6 +140,7 @@ export async function ladeAnhaengeHoch(
         const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
         const zeiger = await anhangHochladen(img.dataUrl, img.name || 'bild.png', mimeType)
         chatMediaBlobCache.set(zeiger.mediaId, img.dataUrl)
+        await sichereLokal(zeiger.mediaId, img.dataUrl, img.name)
         finalImg = { ...zeiger, name: img.name }
       } catch {
         finalImg = { name: img.name }
@@ -141,6 +166,7 @@ export async function ladeAnhaengeHoch(
           file.mimeType || 'application/octet-stream'
         )
         chatMediaBlobCache.set(zeiger.mediaId, file.dataUrl)
+        await sichereLokal(zeiger.mediaId, file.dataUrl, file.name)
         finalFile = {
           ...zeiger,
           name: file.name,
@@ -163,6 +189,7 @@ export async function ladeAnhaengeHoch(
       audio.mimeType || 'audio/webm'
     )
     chatMediaBlobCache.set(zeiger.mediaId, audio.dataUrl)
+    await sichereLokal(zeiger.mediaId, audio.dataUrl, 'sprachnachricht.webm')
     finalAudio = {
       ...zeiger,
       durationSeconds: audio.durationSeconds,
@@ -174,6 +201,7 @@ export async function ladeAnhaengeHoch(
     const dataUrl = await blobAlsDataUrl(videoNote.blob)
     const zeiger = await anhangHochladen(dataUrl, 'videonotiz.webm', videoNote.mimeType)
     chatMediaBlobCache.set(zeiger.mediaId, dataUrl)
+    await sichereLokal(zeiger.mediaId, dataUrl, 'videonotiz.webm')
     finalVideoNote = {
       ...zeiger,
       durationSeconds: videoNote.durationSeconds,

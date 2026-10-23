@@ -120,12 +120,34 @@ export async function liesDrUmschlag(
 
   try {
     const text = await schritt<string>(id, async (zustand) => {
-      // Hat ihn ein anderer Durchlauf in der Zwischenzeit geöffnet? Dann ist
-      // sein Nachrichtenschlüssel verbraucht, und ein zweiter Versuch wäre
-      // nicht bloß vergeblich: er sähe aus wie eine Fälschung und kostete die
-      // Sitzung. Ohne `naechster` bleibt der abgelegte Zustand unangetastet.
       const schon = await klartext.lies()
-      if (schon !== null) return { ergebnis: schon }
+      const etabliert = [{ bereich: 'etabliert' as const, kennung: id }]
+
+      /*
+       * Der Klartext liegt schon — aber der Zustand?
+       *
+       * Klartext und Ratchet-Zustand gehen in zwei Ablagen. Wird zwischen
+       * beiden Schreibvorgängen abgebrochen, liegt der Klartext da und der
+       * Zustand steht noch auf der alten Kettenposition. Bis 10/2026 kehrte
+       * dieser Zweig ohne `naechster` zurück: die Sitzung hatte danach keine
+       * Sendekette, und der nächste Sendevorgang baute sie neu auf — samt
+       * „Die Sicherheitssitzung wurde neu aufgebaut" beim Gegenüber.
+       *
+       * Noch einmal zu entschlüsseln ist gefahrlos: DIS verändert den
+       * Eingangszustand nie, und derselbe Umschlag ergibt denselben
+       * Nachfolger. Hat ein anderer Durchlauf den Zustand inzwischen
+       * fortgeschrieben, scheitert der Tag — dann bleibt die gespeicherte
+       * Zeile die Antwort und der Zustand unberührt.
+       */
+      if (schon !== null) {
+        if (!zustand) return { ergebnis: schon }
+        try {
+          const { nextState } = await decryptMessage(zustand, nachricht)
+          return { naechster: nextState, marken: etabliert, ergebnis: schon }
+        } catch {
+          return { ergebnis: schon }
+        }
+      }
 
       if (!zustand) throw new Error('Sitzung verschwunden')
       const { nextState, plaintext } = await decryptMessage(zustand, nachricht)
@@ -145,7 +167,7 @@ export async function liesDrUmschlag(
        */
       return {
         naechster: nextState,
-        marken: [{ bereich: 'etabliert', kennung: id }],
+        marken: etabliert,
         ergebnis: text,
       }
     })

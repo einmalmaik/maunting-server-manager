@@ -100,7 +100,10 @@ export function leereGeraeteStand(): void {
 export async function holeGeraeteSteuerung(
   eigeneId: number,
   entsiegle: (umschlag: string) => Promise<string>,
-  empfangeSteuerung?: (klartext: string, env: { id: number; created_at: string }) => void,
+  empfangeSteuerung?: (
+    klartext: string,
+    env: { id: number; created_at: string },
+  ) => void | Promise<void>,
 ): Promise<number> {
   if (!Number.isInteger(eigeneId) || eigeneId <= 0) return 0
 
@@ -165,7 +168,10 @@ export async function holeGeraeteSteuerung(
         try {
           if (await beantworteDmAnfrage(eigeneId, roh)) verarbeitet += 1
         } catch {
-          // Eine Anfrage hält die übrigen Zustellungen nicht auf.
+          // Eine Anfrage hält die übrigen Zustellungen nicht auf. **Der Stand
+          // bleibt aber hinter ihr stehen**: bis 10/2026 wanderte er trotzdem
+          // weiter, und die Anfrage war mit dem Cursor endgültig weg.
+          angehalten = true
         }
         if (!angehalten) stand = env.id
         continue
@@ -178,7 +184,9 @@ export async function holeGeraeteSteuerung(
         try {
           verarbeitet += await verarbeiteVerlaufsAbgleich(roh, eigeneId, entsiegle)
         } catch {
-          // Ein kaputtes Paket hält die übrigen Zustellungen nicht auf.
+          // Ein kaputtes Paket hält die übrigen Zustellungen nicht auf — der
+          // Lesestand bleibt aber davor stehen, damit es wiederholt wird.
+          angehalten = true
         }
         if (!angehalten) stand = env.id
         continue
@@ -191,7 +199,9 @@ export async function holeGeraeteSteuerung(
         try {
           if (await nimmDmGeheimnis(eigeneId, roh)) verarbeitet += 1
         } catch {
-          // Wie unten: eine Zustellung hält die übrigen nicht auf.
+          // Wie unten: eine Zustellung hält die übrigen nicht auf, wird aber
+          // beim nächsten Durchlauf erneut versucht.
+          angehalten = true
         }
         if (!angehalten) stand = env.id
         continue
@@ -208,9 +218,11 @@ export async function holeGeraeteSteuerung(
         // Ziel trägt.
         if (empfangeSteuerung && typeof roh.type === 'string') {
           try {
-            empfangeSteuerung(klartext, { id: env.id, created_at: env.created_at })
+            await empfangeSteuerung(klartext, { id: env.id, created_at: env.created_at })
           } catch {
-            // Eine fehlerhafte Wirkung hält die übrigen nicht auf.
+            // Eine fehlerhafte Wirkung hält die übrigen nicht auf, gilt aber
+            // nicht als erledigt: der Cursor bleibt davor stehen.
+            angehalten = true
           }
         }
         if (!angehalten) stand = env.id
@@ -234,7 +246,9 @@ export async function holeGeraeteSteuerung(
         if (ergebnis.art !== 'keine') verarbeitet += 1
       } catch {
         // Eine Zustellung, die sich nicht verarbeiten lässt, hält die übrigen
-        // nicht auf.
+        // nicht auf. Sie gilt aber nicht als gelesen, sonst wäre ein
+        // vorübergehender Ablagefehler ein endgültiger Verlust.
+        angehalten = true
       }
       if (!angehalten) stand = env.id
     } catch {

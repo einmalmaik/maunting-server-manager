@@ -23,7 +23,11 @@
 
 import { loescheBlindeUmschlaege, loescheChatMedium } from '@/api/social'
 import { umgezogeneMailbox } from './gruppenSchluessel'
-import { leereUmschlagKlartext, updateMessageInLocalStore } from './messengerLocalStore'
+import {
+  leereUmschlagKlartext,
+  loescheMedium,
+  updateMessageInLocalStore,
+} from './messengerLocalStore'
 
 /** Ein Anhang, der auf einen hochgeladenen Blob zeigt. */
 interface Medienanhang {
@@ -130,6 +134,21 @@ export async function tilgeNachrichtLokal(
 
   if (msg.id > 0) {
     await leereUmschlagKlartext(blindMailboxId, msg.id)
+  }
+
+  /*
+   * Und der Anhang selbst.
+   *
+   * Seit 10/2026 liegt ein geholter Anhang dauerhaft in der Ablage dieses
+   * Geräts (`medienSicherung.ts`). Bliebe er dort stehen, wäre die gelöschte
+   * Nachricht nur im Text verschwunden, ihr Bild aber weiterhin auf diesem
+   * Gerät — und die Zusage „für alle gelöscht" wäre falsch.
+   *
+   * Der Serverteil ist eine eigene Angelegenheit: dort darf nur der Absender
+   * löschen, und das steht in `tilgeNachrichtBeimServer`.
+   */
+  for (const mediaId of medienKennungen(msg)) {
+    await loescheMedium(mediaId).catch(() => {})
   }
 }
 
