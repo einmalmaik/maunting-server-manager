@@ -88,12 +88,22 @@ export function useWidget(adresszeile: () => void, startseite: () => void): void
         })
         .catch(() => null)
     abholen()
+    // Kommt der Link, während die Oberfläche im Hintergrund ist, kann das
+    // Ereignis verloren gehen. Beim Zurückkommen noch einmal nachsehen; der
+    // wartende Link liegt bis dahin in der App.
+    const beiSicht = () => {
+      if (document.visibilityState === 'visible') abholen()
+    }
+    document.addEventListener('visibilitychange', beiSicht)
+    window.addEventListener('focus', beiSicht)
     let aus = () => {}
     let weg = false
     void widgetAnstoesse(abholen).then((f) => (weg ? f() : (aus = f)))
     return () => {
       weg = true
       aus()
+      document.removeEventListener('visibilitychange', beiSicht)
+      window.removeEventListener('focus', beiSicht)
     }
   }, [adresszeile, startseite])
 }

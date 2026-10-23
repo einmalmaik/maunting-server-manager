@@ -17,7 +17,7 @@ use tauri::AppHandle;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{
     BasicAuthenticationRequestedEventHandler, ContextMenuRequestedEventHandler, PermissionRequestedEventHandler,
-    ScriptDialogOpeningEventHandler,
+    ScriptDialogOpeningEventHandler, SetPermissionStateCompletedHandler,
 };
 use windows::core::{Interface, BOOL, HSTRING};
 use windows::Win32::Foundation::POINT;
@@ -28,8 +28,24 @@ use crate::tabs::{melden, Antwort, MenueEintrag, TabEreignis};
 enum Anfrage {
     Menue(ICoreWebView2ContextMenuRequestedEventArgs),
     Dialog(ICoreWebView2ScriptDialogOpeningEventArgs),
-    Recht(ICoreWebView2PermissionRequestedEventArgs),
+    Recht {
+        args: ICoreWebView2PermissionRequestedEventArgs,
+        art: COREWEBVIEW2_PERMISSION_KIND,
+        herkunft: String,
+        /// Nur bei ausdrücklicher Antwort speichern; private Profile nie.
+        profil: Option<ICoreWebView2Profile4>,
+    },
     Anmeldung(ICoreWebView2BasicAuthenticationRequestedEventArgs),
+}
+
+/// `Some`: ausdrücklich erlaubt/blockiert und dauerhaft merken.
+/// `None`: Dialog geschlossen; nur für diese eine Anfrage ablehnen.
+fn recht_zustand(erlauben: Option<bool>) -> (COREWEBVIEW2_PERMISSION_STATE, bool) {
+    match erlauben {
+        Some(true) => (COREWEBVIEW2_PERMISSION_STATE_ALLOW, true),
+        Some(false) => (COREWEBVIEW2_PERMISSION_STATE_DENY, true),
+        None => (COREWEBVIEW2_PERMISSION_STATE_DENY, false),
+    }
 }
 
 struct Offen {
@@ -62,18 +78,28 @@ pub fn erledigen(nr: u64, antwort: Antwort) {
                 }
                 args.Accept()
             }
-            (Anfrage::Recht(args), Antwort::Recht { erlauben }) => args.SetState(if erlauben {
-                COREWEBVIEW2_PERMISSION_STATE_ALLOW
-            } else {
-                COREWEBVIEW2_PERMISSION_STATE_DENY
-            }),
+            (Anfrage::Recht { args, art, herkunft, profil }, Antwort::Recht { erlauben }) => {
+                let (zustand, dauerhaft) = recht_zustand(erlauben);
+                let _ = args.SetState(zustand);
+                if dauerhaft {
+                    if let Some(profil) = profil {
+                        let _ = profil.SetPermissionState(
+                            art,
+                            &HSTRING::from(herkunft),
+                            zustand,
+                            &SetPermissionStateCompletedHandler::create(Box::new(|_| Ok(()))),
+                        );
+                    }
+                }
+                Ok(())
+            }
             (Anfrage::Anmeldung(args), Antwort::Anmeldung { benutzer: Some(benutzer), passwort }) => {
                 args.Response().and_then(|r| {
                     r.SetUserName(&HSTRING::from(benutzer))?;
                     r.SetPassword(&HSTRING::from(passwort.unwrap_or_default()))
                 })
             }
-            (Anfrage::Recht(args), _) => args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY),
+            (Anfrage::Recht { args, .. }, _) => args.SetState(COREWEBVIEW2_PERMISSION_STATE_DENY),
             (Anfrage::Anmeldung(args), _) => args.SetCancel(true),
             // Menü ohne Wahl, Dialog abgelehnt: nichts setzen heißt abbrechen.
             _ => Ok(()),
@@ -88,6 +114,21 @@ pub fn vergessen(tab: &str) {
         OFFEN.with(|o| o.borrow().iter().filter(|(_, v)| v.tab == tab).map(|(nr, _)| *nr).collect());
     for nr in nummern {
         erledigen(nr, Antwort::Menue { befehl: None });
+    }
+}
+
+/// Eine neue Seite im selben Tab: offene Rechte gelten nicht mehr, Menüs und
+/// Dialoge der alten Seite können dagegen noch beantwortet werden.
+pub fn rechte_vergessen(tab: &str) {
+    let nummern: Vec<u64> = OFFEN.with(|o| {
+        o.borrow()
+            .iter()
+            .filter(|(_, v)| v.tab == tab && matches!(v.anfrage, Anfrage::Recht { .. }))
+            .map(|(nr, _)| *nr)
+            .collect()
+    });
+    for nr in nummern {
+        erledigen(nr, Antwort::Recht { erlauben: None });
     }
 }
 
@@ -112,6 +153,18 @@ pub(crate) fn recht_name(art: COREWEBVIEW2_PERMISSION_KIND) -> &'static str {
 
 pub(crate) fn recht_art(name: &str) -> Option<COREWEBVIEW2_PERMISSION_KIND> {
     RECHTE.iter().find(|(_, n)| *n == name).map(|(a, _)| *a)
+}
+
+/// Das Profil, in dem eine ausdrückliche Entscheidung gespeichert werden darf.
+/// Private Tabs haben kein dauerhaftes Profil.
+unsafe fn profil_von(core: &ICoreWebView2) -> Option<ICoreWebView2Profile4> {
+    let profil = core.cast::<ICoreWebView2_13>().ok()?.Profile().ok()?;
+    let mut privat = BOOL::default();
+    profil.IsInPrivateModeEnabled(&mut privat).ok()?;
+    if privat.as_bool() {
+        return None;
+    }
+    profil.cast::<ICoreWebView2Profile4>().ok()
 }
 
 /// Höchstens so viel markierten Text gibt das Menü weiter (für „Suchen nach …“).
@@ -210,13 +263,30 @@ pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windo
 
     {
         let (app, id) = (app.clone(), id.to_string());
+        let core_fuer_profil = core.clone();
         core.add_PermissionRequested(
             &PermissionRequestedEventHandler::create(Box::new(move |_, args| {
                 let Some(args) = args else { return Ok(()) };
                 let mut art = COREWEBVIEW2_PERMISSION_KIND_UNKNOWN_PERMISSION;
                 args.PermissionKind(&mut art)?;
                 let herkunft = text(|p| args.Uri(p));
-                let nr = ablegen(&id, Anfrage::Recht(args.clone()), args.GetDeferral()?);
+                // WebView2 würde sonst jede Entscheidung still im Profil
+                // ablegen, auch ein Schließen des Dialogs. Wir speichern nur
+                // eine ausdrückliche Antwort selbst (`erledigen`).
+                if let Ok(args3) = args.cast::<ICoreWebView2PermissionRequestedEventArgs3>() {
+                    let _ = args3.SetSavesInProfile(false);
+                }
+                let profil = profil_von(&core_fuer_profil);
+                let nr = ablegen(
+                    &id,
+                    Anfrage::Recht {
+                        args: args.clone(),
+                        art,
+                        herkunft: herkunft.clone(),
+                        profil,
+                    },
+                    args.GetDeferral()?,
+                );
                 melden(&app, TabEreignis::Recht { id: id.clone(), nr, recht: recht_name(art).into(), herkunft });
                 Ok(())
             })),
@@ -240,4 +310,16 @@ pub unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -> windo
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nur_eine_ausdrueckliche_antwort_wird_gespeichert() {
+        assert!(recht_zustand(Some(true)).1);
+        assert!(recht_zustand(Some(false)).1);
+        assert!(!recht_zustand(None).1);
+    }
 }

@@ -3,8 +3,8 @@
  * die Pfeilknöpfe mit der Tastatur, der Schalter blendet aus. Für die Einträge
  * der Leiste (`Anordnung.tsx`) und die Widgets der Startseite.
  */
-import { useState, type DragEvent } from 'react'
-import { ArrowDown, ArrowUp, GripVertical, type LucideIcon } from 'lucide-react'
+import { useState, type DragEvent, type ElementType } from 'react'
+import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Kurzinfo, Switch } from '@/Singra/UI'
@@ -12,7 +12,7 @@ import { Kurzinfo, Switch } from '@/Singra/UI'
 export interface Ordnungseintrag {
   schluessel: string
   name: string
-  symbol: LucideIcon
+  symbol: ElementType
   an: boolean
 }
 

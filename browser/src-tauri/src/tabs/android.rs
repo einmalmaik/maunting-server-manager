@@ -66,22 +66,23 @@ pub fn laden(app: &AppHandle, tabs: &Tabs, id: &str, ziel: url::Url, privat: boo
 
 /// Vorne liegt der aktive Tab (oder bei Split beide Tabs), außer die Oberfläche legt gerade etwas darüber.
 pub fn sichtbarkeit(app: &AppHandle, tabs: &Tabs) {
-    let (vorne, sekundaer) = {
+    let (vorne, sekundaer, panel) = {
         let z = tabs.0.lock().unwrap();
+        let panel = z.panel.as_ref().and_then(|p| z.sichtbar(&p.id).then(|| p.id.clone()));
         if z.verdeckt {
-            (None, None)
+            (None, None, None)
         } else {
-            (z.aktiv.clone(), z.split.as_ref().map(|s| s.sekundaer_id.clone()))
+            (z.aktiv.clone(), z.split.as_ref().map(|s| s.sekundaer_id.clone()), panel)
         }
     };
-    senden(app, "sichtbarkeit", json!({ "vorne": vorne, "sekundaer": sekundaer }));
+    senden(app, "sichtbarkeit", json!({ "vorne": vorne, "sekundaer": sekundaer, "panel": panel }));
 }
 
 /// Der Inhaltsbereich in CSS-Pixeln der Oberfläche; Kotlin rechnet um.
 pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
-    let (r, split, aktiv) = {
+    let (r, split, aktiv, panel) = {
         let z = tabs.0.lock().unwrap();
-        (z.rahmen, z.split.clone(), z.aktiv.clone())
+        (z.rahmen, z.split.clone(), z.aktiv.clone(), z.panel.clone())
     };
     if let Some(s) = split {
         let primaer_id = aktiv.unwrap_or_default();
@@ -105,6 +106,13 @@ pub fn rahmen_anwenden(app: &AppHandle, tabs: &Tabs) {
         senden(app, "splitAufheben", json!({}));
         senden(app, "rahmen", json!({ "x": r.x, "y": r.y, "breite": r.breite, "hoehe": r.hoehe }));
     }
+    if let Some(p) = panel {
+        senden(
+            app,
+            "panelRahmen",
+            json!({ "id": p.id, "x": p.rahmen.x, "y": p.rahmen.y, "breite": p.rahmen.breite, "hoehe": p.rahmen.hoehe }),
+        );
+    }
 }
 
 pub fn schliessen(app: &AppHandle, id: &str) {
@@ -114,6 +122,12 @@ pub fn schliessen(app: &AppHandle, id: &str) {
 /// Kotlin holt das Skript je Tab über `TabsBruecke.cookiesskript`.
 pub fn cookies_erneuern(app: &AppHandle) {
     senden(app, "cookies", json!({}));
+}
+
+/// Einstellungen → Design: Seiten in allen Tabs dunkel rendern.
+pub fn seiten_dunkel(app: &AppHandle, an: bool) -> Result<(), String> {
+    senden(app, "dunkel", json!({ "an": an }));
+    Ok(())
 }
 
 /// Zurück, Vor, Neu laden, Anhalten (`tab_aktion`).
@@ -128,8 +142,11 @@ struct Bild {
 }
 
 /// Bild des vorderen Tabs für die Oberfläche, solange sie etwas darüberlegt.
-pub fn standbild(app: &AppHandle, tabs: &Tabs) -> Result<Vec<u8>, String> {
-    let id = tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?;
+pub fn standbild(app: &AppHandle, tabs: &Tabs, id: Option<&str>) -> Result<Vec<u8>, String> {
+    let id = match id {
+        Some(id) => id.to_string(),
+        None => tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?,
+    };
     let bild: Bild = rufen(app, "standbild", json!({ "id": id, "png": false }))?;
     base64::engine::general_purpose::STANDARD.decode(bild.bild).map_err(|e| e.to_string())
 }

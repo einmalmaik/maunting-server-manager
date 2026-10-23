@@ -19,7 +19,7 @@ import { nativ } from '../services/nativ'
 import { useTabsStore, useSplitZustand, type Tab, type SplitRichtung } from '../services/tabsStore'
 import { useEinstellungenStore } from '../services/einstellungenStore'
 import { beendeTabDrag, entpackeTabTransfer, FENSTER_ID, holeAktivenTabDrag, lauscheTabZiehNachrichten, markiereTabFuerSplitVerwendet, type TabZiehNachricht } from '../services/tabTransfer'
-import { bildSetzen, useStandbild } from '../services/ueberdeckung'
+import { bilderEntfernen, useStandbild } from '../services/ueberdeckung'
 import { SeitenDialoge } from './SeitenDialoge'
 import { SeitenMenue } from './SeitenMenue'
 import { Sperrseite } from './Sperrseite'
@@ -34,7 +34,8 @@ const EinstellungenSeite = lazy(() => import('../einstellungen/EinstellungenSeit
 
 function EinzelInhalt({ tab, aktion }: { tab?: Tab; aktion: (a: 'zurueck' | 'vor' | 'neu_laden' | 'anhalten', id?: string) => void }) {
   const { t } = useTranslation()
-  const standbild = useStandbild((s) => s.bild)
+  const bilder = useStandbild((s) => s.bilder)
+  const standbild = tab ? bilder[tab.id] : undefined
   const intern = tab ? interneSeite(tab.url) : null
 
   if (!tab?.url) {
@@ -85,15 +86,15 @@ function EinzelInhalt({ tab, aktion }: { tab?: Tab; aktion: (a: 'zurueck' | 'vor
   if (tab.lesemodus) {
     return <LesemodusAnsicht tab={tab} />
   }
-  if (standbild?.tab === tab.id) {
+  if (standbild) {
     return (
       <img
-        src={standbild.url}
+        src={standbild}
         alt=""
         aria-hidden="true"
         draggable={false}
         className="h-full w-full select-none object-contain"
-        onError={() => bildSetzen(null)}
+        onError={() => tab && bilderEntfernen(tab.id)}
       />
     )
   }

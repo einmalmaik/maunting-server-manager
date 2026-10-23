@@ -71,6 +71,18 @@ describe('TabBar', () => {
     expect(screen.getByRole('tab', { name: /^mss\.vault\.papierkorb,\s?1$/ })).toBeInTheDocument()
   })
 
+  it('scrollt den aktiven Reiter beim Öffnen in die wischbare Handy-Leiste', () => {
+    const scrollen = vi.fn()
+    const vorher = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollen
+    try {
+      render(<TabBar tabs={tabs} active="email" onChange={() => {}} ariaLabel="Settings" einzeilig />)
+      expect(scrollen).toHaveBeenCalled()
+    } finally {
+      HTMLElement.prototype.scrollIntoView = vorher
+    }
+  })
+
   it('kompakt: Reiter mit Symbol behalten ihren Namen und bleiben beim Wechsel derselbe Knopf', () => {
     const { rerender } = render(<TabBar tabs={tabs} active="general" onChange={() => {}} ariaLabel="Werkzeuge" embedded kompakt />)
     const email = screen.getByRole('tab', { name: 'settings.tabs.email' })

@@ -8,13 +8,15 @@
  * wird: die Reihenfolge einer gefilterten Liste ist nicht die ganze.
  */
 import { useState, type DragEvent, type ReactNode } from 'react'
-import { Globe, MoreHorizontal, Search, Trash2 } from 'lucide-react'
+import { Folder, Globe, MoreHorizontal, Search, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Input, Kurzinfo, type ActionMenuItem } from '@/Singra/UI'
 import { Kontextmenue } from '@/Singra/UI/Kontextmenue'
 import { Zustandsflaeche } from '@/Singra/UI/Zustandsflaeche'
 
+import { useBildStore } from '../services/bildStore'
+import { herkunft, ordnerPfad } from '../services/importDaten'
 import { seiteOeffnen } from '../services/tabsStore'
 import type { Eintrag } from '../services/verlaufStore'
 
@@ -33,10 +35,18 @@ const ZIEHEN = 'text/msb-eintrag'
 
 export function Eintragsliste({ eintraege, leer, entfernen, ueberschrift, kopf, aktionen, verschieben }: Props) {
   const { t } = useTranslation()
+  const bilder = useBildStore((s) => s.bilder)
   const [suche, setSuche] = useState('')
   const [menue, setMenue] = useState<{ ort: { x: number; y: number }; items: ActionMenuItem[]; ausloeser: HTMLElement | null } | null>(null)
   const s = suche.trim().toLowerCase()
-  const sichtbar = s ? eintraege.filter((e) => e.url.toLowerCase().includes(s) || e.titel.toLowerCase().includes(s)) : eintraege
+  const sichtbar = s
+    ? eintraege.filter(
+        (e) =>
+          e.url.toLowerCase().includes(s) ||
+          e.titel.toLowerCase().includes(s) ||
+          ordnerPfad(e.ordner).some((teil) => teil.toLowerCase().includes(s)),
+      )
+    : eintraege
   // Mehr zeichnet niemand durch; die Suche findet den Rest.
   const gezeigt = sichtbar.slice(0, 300)
   const ziehbar = !!verschieben && !s
@@ -66,9 +76,12 @@ export function Eintragsliste({ eintraege, leer, entfernen, ueberschrift, kopf, 
         <ul className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {gezeigt.map((e, i) => {
             const name = e.titel || e.url
+            const ordner = ordnerPfad(e.ordner)
+            const schluessel = e.favicon ?? herkunft(e.url)
+            const bild = schluessel ? bilder[schluessel] : undefined
             return (
               <li
-                key={`${e.url}-${e.zeit}`}
+                key={`${e.url}-${e.zeit}-${ordner.join('/')}`}
                 draggable={ziehbar}
                 onDragStart={ziehbar ? (ev) => ev.dataTransfer.setData(ZIEHEN, String(i)) : undefined}
                 onDragOver={ziehbar ? (ev) => ev.preventDefault() : undefined}
@@ -90,10 +103,22 @@ export function Eintragsliste({ eintraege, leer, entfernen, ueberschrift, kopf, 
                     onAuxClick={(ev) => ev.button === 1 && seiteOeffnen(e.url, true)}
                     className="flex min-w-0 flex-1 items-center gap-3 px-2 py-2 text-left"
                   >
-                    <Globe className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                    {bild ? (
+                      <img src={bild} alt="" className="h-4 w-4 shrink-0 rounded-sm object-contain" />
+                    ) : (
+                      <Globe className="h-4 w-4 shrink-0 text-on-surface-variant" aria-hidden="true" />
+                    )}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-body-sm text-on-surface">{name}</span>
                       <span className="block truncate text-label-sm text-on-surface-variant">{e.url}</span>
+                      {ordner.length > 0 && (
+                        <Kurzinfo text={ordner.join(' › ')} aussen="w-full min-w-0">
+                          <span className="flex w-full min-w-0 items-center gap-1 text-label-sm text-on-surface-variant">
+                            <Folder className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            <span className="truncate">{ordner.join(' › ')}</span>
+                          </span>
+                        </Kurzinfo>
+                      )}
                     </span>
                   </button>
                   {aktionen ? (

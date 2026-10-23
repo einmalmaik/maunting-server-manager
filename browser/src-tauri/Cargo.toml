@@ -1,6 +1,6 @@
 [package]
 name = "maunting-secure-browser"
-version = "5.6.0"
+version = "5.7.0"
 description = "Maunting Pontis auf Tauri v2"
 edition = "2021"
 rust-version = "1.88"
@@ -50,6 +50,11 @@ keyring = "4"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(windows)'.dependencies]
+# Liest die Profildaten fremder Browser (`browserimport/`). Nur unter Windows:
+# dort liegen Chromium- und Firefox-Profile als SQLite-Dateien. Gebündelt, damit
+# die Fassung der Bibliothek nicht von der Installation des Rechners abhängt;
+# der Import öffnet ausschließlich Kopien im eigenen Datenordner.
+rusqlite = { version = "0.31", features = ["bundled"] }
 # Dieselben Versionen, die wry mitbringt: die Schnittstellen der WebView2
 # (Anfragen filtern, Adresse, Verlauf, Favicon) gibt Tauri nicht selbst heraus.
 webview2-com = "0.39"

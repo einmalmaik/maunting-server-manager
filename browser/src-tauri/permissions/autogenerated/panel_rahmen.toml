@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-panel-rahmen"
+description = "Enables the panel_rahmen command without any pre-configured scope."
+commands.allow = ["panel_rahmen"]
+
+[[permission]]
+identifier = "deny-panel-rahmen"
+description = "Denies the panel_rahmen command without any pre-configured scope."
+commands.deny = ["panel_rahmen"]

@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: () => Promise.resolve(null) }))
@@ -24,6 +24,7 @@ const { useToastStore } = await import('@/stores/toastStore')
 const { usePermissionsStore } = await import('@/stores/permissionsStore')
 
 const zeigen = (inhalt: React.ReactNode) => render(<MemoryRouter>{inhalt}</MemoryRouter>)
+const OrtProbe = () => <span data-testid="pfad">{useLocation().pathname}</span>
 const kacheln = () => screen.getAllByRole('button').filter((b) => b.hasAttribute('data-kachel'))
 const urls = () => useEinstellungenStore.getState().schnellzugriffe.map((s) => s.url)
 
@@ -119,10 +120,18 @@ describe('Widgets', () => {
     for (const text of zeile.querySelectorAll('span')) expect(text).toHaveClass('max-w-full', 'truncate')
   })
 
+  it('öffnet beim Wetter-Koppeln den Kopplungsbereich', () => {
+    useSitzung.setState({ stand: 'aus' })
+    useEinstellungenStore.setState({ widgetsAus: [], wetterOrt: null })
+    zeigen(<><OrtProbe /><Widgets privat={false} /></>)
+    fireEvent.click(screen.getByRole('button', { name: 'MSM koppeln' }))
+    expect(screen.getByTestId('pfad')).toHaveTextContent('/koppeln')
+  })
+
   it('folgt der Reihenfolge aus den Einstellungen', () => {
     useEinstellungenStore.setState({ widgetsAus: [], widgetOrdnung: ['zuletzt'] })
     zeigen(<Widgets privat={false} />)
-    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual(['Zuletzt besucht', 'Uhr', 'Nachrichten'])
+    expect(screen.getAllByRole('heading').map((h) => h.textContent)).toEqual(['Zuletzt besucht', 'Wetter', 'Uhr', 'Nachrichten'])
   })
 
   it('liest Termine zuerst aus dem Spiegel und fragt das Panel höchstens alle fünf Minuten', async () => {

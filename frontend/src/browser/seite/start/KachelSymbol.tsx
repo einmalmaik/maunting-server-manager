@@ -11,6 +11,11 @@ import { nativ } from '../../services/nativ'
 /** Ein Aufruf je Adresse und Sitzung, auch wenn mehrere Kacheln sie zeigen. */
 const geholt = new Map<string, Promise<string | null>>()
 
+/** Nach einem Import liegen neue Dateien im Kachelcache; beim nächsten Zeigen neu fragen. */
+export function kachelnNeuLaden(): void {
+  geholt.clear()
+}
+
 function holen(url: string): Promise<string | null> {
   let laufend = geholt.get(url)
   if (!laufend) {

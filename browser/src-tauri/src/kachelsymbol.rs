@@ -36,14 +36,14 @@ const GILT: Duration = Duration::from_secs(30 * 24 * 3600);
 const LEER_GILT: Duration = Duration::from_secs(7 * 24 * 3600);
 
 /// Herkunft (Schema, Host, Port) einer Kachel, so wie sie geladen würde.
-fn herkunft(url: &str) -> Option<url::Url> {
+pub(crate) fn herkunft(url: &str) -> Option<url::Url> {
     let u = url::Url::parse(&crate::downloads::netzadresse(url)?).ok()?;
     u.host_str()?;
     url::Url::parse(&u.origin().ascii_serialization()).ok()
 }
 
 /// Dateiname im Cache: nur Kleinbuchstaben, Ziffern, Punkt und Bindestrich.
-fn schluessel(herkunft: &url::Url) -> String {
+pub(crate) fn schluessel(herkunft: &url::Url) -> String {
     herkunft
         .origin()
         .ascii_serialization()
@@ -204,6 +204,11 @@ fn kandidaten(html: &str) -> Vec<Kandidat> {
 /// Dekodiert PNG oder ICO mit Grenzen und gibt ein PNG von höchstens 64 px
 /// mit dem ursprünglichen Seitenverhältnis zurück.
 fn umwandeln(bytes: &[u8]) -> Option<Vec<u8>> {
+    umwandeln_auf(bytes, GROESSE)
+}
+
+/// Wie `umwandeln`, für die 32-px-Symbole der Lesezeichen (`browserimport/`).
+pub(crate) fn umwandeln_auf(bytes: &[u8], groesse: u32) -> Option<Vec<u8>> {
     let mut leser = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format().ok()?;
     if !matches!(leser.format(), Some(image::ImageFormat::Png | image::ImageFormat::Ico)) {
         return None;
@@ -217,8 +222,8 @@ fn umwandeln(bytes: &[u8]) -> Option<Vec<u8>> {
     if bild.width().min(bild.height()) < KLEINSTE {
         return None;
     }
-    let bild = if bild.width().max(bild.height()) > GROESSE {
-        bild.resize(GROESSE, GROESSE, image::imageops::FilterType::Lanczos3)
+    let bild = if bild.width().max(bild.height()) > groesse {
+        bild.resize(groesse, groesse, image::imageops::FilterType::Lanczos3)
     } else {
         bild
     };
@@ -263,7 +268,7 @@ async fn suchen(start: url::Url) -> Option<Vec<u8>> {
     None
 }
 
-fn ordner(app: &AppHandle) -> Option<PathBuf> {
+pub(crate) fn ordner(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_local_data_dir().ok()?.join("kachelsymbole"))
 }
 
@@ -272,7 +277,7 @@ fn alter(pfad: &Path) -> Option<Duration> {
     Some(SystemTime::now().duration_since(geaendert).unwrap_or_default())
 }
 
-fn als_data(png: &[u8]) -> String {
+pub(crate) fn als_data(png: &[u8]) -> String {
     format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png))
 }
 
@@ -336,7 +341,7 @@ mod tests {
         assert_eq!(h("https://de.wikipedia.org/wiki/Hauptseite?x=1").as_deref(), Some("https://de.wikipedia.org/"));
         assert_eq!(h("http://github.com/").as_deref(), Some("https://github.com/"));
         assert_eq!(h("http://192.168.1.10:8080/a").as_deref(), Some("http://192.168.1.10:8080/"));
-        for schlecht in ["javascript:alert(1)", "file:///C:/a.png", "data:text/html,x", "msb://einstellungen", ""] {
+        for schlecht in ["javascript:alert(1)", "file:///C:/a.png", "data:text/html,x", "msb://einstellungen", "pontis://einstellungen", ""] {
             assert_eq!(h(schlecht), None, "{schlecht}");
         }
         assert_eq!(schluessel(&herkunft("https://Example.org:8443/x").unwrap()), "https___example.org_8443");
@@ -372,6 +377,8 @@ mod tests {
         assert_eq!((bild.width(), bild.height()), (64, 32));
         let klein = image::load_from_memory(&umwandeln(&png(32, 32)).unwrap()).unwrap();
         assert_eq!((klein.width(), klein.height()), (32, 32));
+        let lesezeichen = image::load_from_memory(&umwandeln_auf(&png(180, 180), 32).unwrap()).unwrap();
+        assert_eq!((lesezeichen.width(), lesezeichen.height()), (32, 32));
         let mut ico = Vec::new();
         image::RgbaImage::from_pixel(48, 48, image::Rgba([1, 2, 3, 255])).write_to(&mut Cursor::new(&mut ico), image::ImageFormat::Ico).unwrap();
         let aus_ico = image::load_from_memory(&umwandeln(&ico).unwrap()).unwrap();

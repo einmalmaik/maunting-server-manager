@@ -75,6 +75,7 @@ from routers import (
     social_calls_router,
     livekit_admin_router,
     browser_suche_router,
+    browser_wetter_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -1017,6 +1018,7 @@ app.include_router(social_router)
 app.include_router(social_calls_router)
 app.include_router(livekit_admin_router)
 app.include_router(browser_suche_router)
+app.include_router(browser_wetter_router)
 
 
 
@@ -1051,7 +1053,7 @@ def redoc_ui(_: object = Depends(require_global("panel.settings.read"))):
 
 @app.get("/api/version")
 def app_version():
-    return {"name": settings.app_name, "version": "5.6.0"}
+    return {"name": settings.app_name, "version": "5.7.0"}
 
 
 @app.get("/api/health")

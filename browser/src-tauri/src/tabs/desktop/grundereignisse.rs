@@ -29,6 +29,8 @@ struct Anstehend {
     eltern: String,
     url: String,
     privat: bool,
+    /// Benanntes Profil des Eltern-Tabs, damit das Popup dieselbe Sitzung erbt.
+    profil: Option<String>,
     neue_id: String,
     umgebung: Option<ICoreWebView2Environment>,
     controller: Option<ICoreWebView2Controller>,
@@ -59,8 +61,8 @@ fn popup_scheitern(schluessel: u64, grund: String) {
 /// danach zurück, und die Fortsetzung läuft als Abschlussrückruf.
 fn popup_beginnen(app: &AppHandle, schluessel: u64) {
     let gestartet: Result<(), String> = (|| {
-        let (privat, neue_id) = ANSTEHEND
-            .with(|m| m.borrow().get(&schluessel).map(|a| (a.privat, a.neue_id.clone())))
+        let (privat, neue_id, profil) = ANSTEHEND
+            .with(|m| m.borrow().get(&schluessel).map(|a| (a.privat, a.neue_id.clone(), a.profil.clone())))
             .ok_or("Popup-Anfrage schon weg")?;
         // Einen Popup-Tab gibt es nur aus einem offenen Tab heraus: dessen Aufbau
         // hat das Profil längst gewärmt. Wäre es doch kalt, fällt das Fenster
@@ -80,6 +82,11 @@ fn popup_beginnen(app: &AppHandle, schluessel: u64) {
             let u10 = umgebung.cast::<ICoreWebView2Environment10>().map_err(super::fehler)?;
             let optionen = u10.CreateCoreWebView2ControllerOptions().map_err(super::fehler)?;
             optionen.SetIsInPrivateModeEnabled(privat).map_err(super::fehler)?;
+            if !privat {
+                if let Some(p) = &profil {
+                    optionen.SetProfileName(&HSTRING::from(p)).map_err(super::fehler)?;
+                }
+            }
             u10.CreateCoreWebView2ControllerWithOptions(
                 hwnd,
                 &optionen,
@@ -190,7 +197,7 @@ fn popup_fertigstellen(schluessel: u64) {
     let tabs = anstehend.app.state::<crate::tabs::Tabs>();
     // Erweiterungen gleicht nur der erste normale Tab ab (`anlegen`); ein Popup
     // hat stets einen offenen Ursprungstab und braucht das nie.
-    match super::popup_einrichten(&anstehend.app, &anstehend.neue_id, controller, &core, umgebung, anstehend.privat)
+    match super::popup_einrichten(&anstehend.app, &anstehend.neue_id, controller, &core, umgebung, anstehend.privat, anstehend.profil.clone())
     {
         Ok(()) => {
             super::rahmen_anwenden(&anstehend.app, &tabs);
@@ -350,6 +357,7 @@ pub(super) unsafe fn anbinden(app: &AppHandle, id: &str, core: &ICoreWebView2) -
                         eltern: id.clone(),
                         url,
                         privat: super::tab_privat(&id),
+                        profil: super::tab_profil(&id),
                         neue_id: super::popup_id(),
                         umgebung: None,
                         controller: None,

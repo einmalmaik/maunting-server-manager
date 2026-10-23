@@ -12,7 +12,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   ArrowRight,
-  Bot,
   ClipboardPaste,
   Code,
   Copy,
@@ -33,7 +32,6 @@ import { Kontextmenue } from '@/Singra/UI'
 import type { ActionMenuItem } from '@/Singra/UI/ActionMenu'
 
 import { useAnsicht } from '../entwickler/werkzeuge'
-import { useAnSingra } from '../services/anSingra'
 import { useEinstellungenStore, useWirksameSuche } from '../services/einstellungenStore'
 import { kopiereSauberenLink } from '../services/linkReiniger'
 import { nativ } from '../services/nativ'
@@ -41,7 +39,8 @@ import { istAndroid } from '../services/plattform'
 import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
 import { baueZielUrl, suchmaschine } from '../services/searchEngines'
 import { suchName } from '../services/suchwahl'
-import { useAktiverTab, useTabsStore } from '../services/tabsStore'
+import { useAktiverTab, useSplitZustand, useTabsStore } from '../services/tabsStore'
+import type { Tab } from '../services/tab'
 import { useUebersetzen } from '../uebersetzung/ablauf'
 
 /** Befehle der WebView2, die das Menü anbietet, in dieser Reihenfolge. */
@@ -62,17 +61,19 @@ const NATIV: Record<string, ReactNode> = {
 
 const symbol = (s: ReactNode) => <span className="[&>svg]:h-4 [&>svg]:w-4">{s}</span>
 
-export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement | null> }) {
+export function SeitenMenue({ flaeche, tab: externerTab }: { flaeche: React.RefObject<HTMLElement | null>; tab?: Tab }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const tab = useAktiverTab()
+  const tab = externerTab ?? useAktiverTab()
   const frage = useFrageDesTabs(tab?.id)
   const antworten = useRueckfragen((s) => s.antworten)
   const neuerTab = useTabsStore((s) => s.neuerTab)
   const maschine = useWirksameSuche()
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
-  const anSingra = useAnSingra(tab)
   const uebersetzen = useUebersetzen(tab)
+  // In der geteilten Ansicht darf das Menü die Seite daneben nicht
+  // verdecken: Es bleibt auf die halbe Höhe begrenzt und durchscheinend.
+  const geteilt = Boolean(useSplitZustand().split)
 
   if (!tab || frage?.art !== 'kontextmenue') return null
   const menue = frage
@@ -150,7 +151,6 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
     items.push(...nativEintrag('back', items.length > 0), ...nativEintrag('forward'), ...nativEintrag('reload'), ...nativEintrag('saveAs'))
     items.push(eigen('drucken', t('browser.menue.drucken'), <Printer />, () => void nativ.tabDrucken(tab.id)))
     if (uebersetzen) items.push(eigen('uebersetzen', t('browser.menue.uebersetzen'), <Languages />, uebersetzen))
-    if (anSingra) items.push(eigen('singra', t('browser.menue.anSingra'), <Bot />, anSingra))
   }
   // Entwicklerwerkzeuge gibt es auf Android nicht.
   if (!istAndroid()) items.push(
@@ -175,6 +175,8 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
       items={items}
       label={t('browser.menue.name')}
       onSchliessen={() => antworten(menue.nr, { art: 'menue', befehl: null })}
+      maxHoehe={geteilt ? '40dvh' : undefined}
+      durchsichtig={geteilt}
     />
   )
 }

@@ -83,13 +83,13 @@ pub fn ruhen(app: &AppHandle, faellig: Vec<(String, Ruhe)>, ausnahmen: Vec<Strin
         let mut verworfen = Vec::new();
         // Seit der Auswahl kann ein Tab nach vorne gekommen sein.
         let tabs = app2.state::<Tabs>();
-        let (aktiv, vollbild) = {
+        let (aktiv, vollbild, panel) = {
             let z = tabs.0.lock().unwrap();
-            (z.aktiv.clone(), z.vollbild.clone())
+            (z.aktiv.clone(), z.vollbild.clone(), z.panel.as_ref().map(|p| p.id.clone()))
         };
         NATIV.with(|n| {
             for (id, ruhe) in &faellig {
-                if aktiv.as_deref() == Some(id.as_str()) || vollbild.as_deref() == Some(id.as_str()) {
+                if aktiv.as_deref() == Some(id.as_str()) || vollbild.as_deref() == Some(id.as_str()) || panel.as_deref() == Some(id.as_str()) {
                     continue;
                 }
                 let n = n.borrow();

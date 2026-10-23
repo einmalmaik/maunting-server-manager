@@ -156,9 +156,7 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={`group relative z-30 flex shrink-0 items-center justify-center select-none outline-none focus-visible:ring-2 focus-visible:ring-primary bg-surface-container ${
-        istHorizontal
-          ? 'h-full w-2 cursor-col-resize touch-none'
-          : 'w-full h-2 cursor-row-resize touch-none'
+        istHorizontal ? 'h-full w-10 cursor-col-resize touch-none' : 'w-full h-10 cursor-row-resize touch-none'
       }`}
       style={{
         WebkitUserSelect: 'none',
@@ -177,10 +175,13 @@ export function SplitTrenner({ richtung, anteil, onAnteilAendern, containerRef }
         }`}
       />
 
-      {/* Schwebe-Leiste mit Schnell-Aktionen in der Mitte des Trenners */}
+      {/* Die Knöpfe stehen fest im Griff des Trenners: dort liegt die
+          Oberfläche, nicht die Seite. So sind sie auf jeder Fenstergröße
+          sichtbar, ohne auf Hover oder einen Treffer im schmalen Spalt zu
+          warten. */}
       <div
-        className={`absolute z-40 flex items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high/95 p-1 shadow-lg backdrop-blur-md transition-all duration-200 ${
-          hover || istAmZiehen ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'
+        className={`absolute left-1/2 top-1/2 z-40 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1 rounded-full border border-outline-variant/40 bg-surface-container-high/95 p-1 shadow-lg backdrop-blur-md ${
+          istHorizontal ? 'flex-col rounded-2xl' : 'flex-row'
         }`}
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}

@@ -8,7 +8,7 @@
 ## Was es ist
 
 Maunting Search ist die Suchseite von Maunting Pontis
-(`msb://suche?q=…`). Sie ist ein eigener Dienst des Browsers, kein eingebettetes
+(`pontis://suche?q=…`). Sie ist ein eigener Dienst des Browsers, kein eingebettetes
 Fenster auf eine fremde Suchmaschine: Layout, Suchleiste, Kategorien, Dropdowns,
 Kacheln und Fußzeile sind Bausteine der MSM-Design-DNA.
 
@@ -53,7 +53,7 @@ Quellen-Karten lassen sich seitlich wischen. Es gibt nie waagerechtes Scrollen.
 ## Datenfluss
 
 ```text
-Browser: msb://suche?q=…
+Browser: pontis://suche?q=…
   │  POST /api/browser/suche          { q, seite, sicher, sprache, kategorie }
   │  POST /api/browser/suche/autocomplete
   │  POST /api/browser/suche/wissen

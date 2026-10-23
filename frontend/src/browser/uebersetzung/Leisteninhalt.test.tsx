@@ -21,8 +21,19 @@ describe('Übersetzungsleiste', () => {
 
   it('lässt ohne bekannte Sprache nicht übersetzen', () => {
     render(<Leisteninhalt tab="tab-a" e={eintrag({ art: 'wahl', fehlt: null }, '')} />)
-    expect(screen.getByText('Wähle die Sprache der Seite und die Zielsprache.')).toBeTruthy()
+    expect(screen.getByText('Die Sprache der Seite wurde nicht erkannt. Wähle sie selbst.')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Übersetzen' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('sagt, wenn es für die erkannte Sprache keine Daten gibt', () => {
+    render(<Leisteninhalt tab="tab-a" e={eintrag({ art: 'wahl', fehlt: null, seitenSprache: 'xx' }, '')} />)
+    expect(screen.getByText('Für xx gibt es keine Sprachdaten. Übersetzen ist für diese Seite nicht möglich.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Übersetzen' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('verlangt ein anderes Ziel, wenn Quell- und Zielsprache gleich sind', () => {
+    render(<Leisteninhalt tab="tab-a" e={eintrag({ art: 'wahl', fehlt: 0 }, 'de')} />)
+    expect(screen.getByText('Wähle eine andere Zielsprache.')).toBeTruthy()
   })
 
   it('bietet nach dem Übersetzen das Original an', () => {

@@ -43,17 +43,21 @@ pub fn link_aus(argument: &str) -> Option<String> {
         return None;
     }
     let url = url::Url::parse(argument).ok()?;
-    matches!(url.scheme(), "http" | "https" | "msb").then(|| url.to_string())
+    matches!(url.scheme(), "http" | "https" | "msb" | "pontis").then(|| url.to_string())
 }
 
-pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {
-    Ok(LINK.lock().unwrap().take().map(|info| {
+pub fn start(_: &AppHandle) -> Result<Option<Value>, String> {    Ok(LINK.lock().unwrap().take().map(|info| {
         json!({
             "art": "link",
             "url": info.url,
             "privat": info.privat,
         })
     }))
+}
+
+/// Die System-Spracherkennung gibt es nur unter Android.
+pub fn sprache(_: &AppHandle) -> Result<super::SprachEingabe, String> {
+    Err("nur_android".into())
 }
 
 pub fn stand(_: &AppHandle, _: bool) -> Result<(), String> {
@@ -68,6 +72,27 @@ pub fn anheften(_: &AppHandle) -> Result<bool, String> {
     Ok(false)
 }
 
+/// Das Wetter-Widget gibt es nur unter Android.
+pub fn wetter_setzen(
+    _: &AppHandle,
+    _ort: &str,
+    _land: &str,
+    _lat: f64,
+    _lon: f64,
+    _einheit: &str,
+    _token: &str,
+) -> Result<(), String> {
+    Err("Das Wetter-Widget gibt es nur unter Android".into())
+}
+
+pub fn wetter_lage(_: &AppHandle) -> Result<String, String> {
+    Ok("nein".into())
+}
+
+pub fn wetter_anheften(_: &AppHandle) -> Result<bool, String> {
+    Ok(false)
+}
+
 #[cfg(windows)]
 pub fn standardbrowser(_: &AppHandle) -> Result<bool, String> {
     Ok(windows_standard::ist_standard())
@@ -75,8 +100,9 @@ pub fn standardbrowser(_: &AppHandle) -> Result<bool, String> {
 
 /// Meldet den Browser bei Windows als `StartMenuInternet`-Client an. Das
 /// gehörte bis 10/2026 in den NSIS-Installer; seit Velopack der einzige
-/// Installer ist, rufen es dessen Hooks (`main.rs`) und der Knopf
-/// „Standardbrowser werden“. Ohne Anmeldung listet Windows den Browser nicht.
+/// Installer ist, rufen es dessen Hooks (`main.rs`), der Start (`lib.rs`) und
+/// der Knopf „Standardbrowser werden“. Ohne Anmeldung listet Windows den
+/// Browser nicht.
 #[cfg(windows)]
 pub fn standardbrowser_registrieren() -> Result<(), String> {
     // Ein Debug-Bau fässt die installierte App nicht an (AGENTS.md, Punkt 67):
@@ -143,9 +169,31 @@ mod tests {
     fn nimmt_nur_webadressen_von_aussen() {
         assert_eq!(link_aus("https://example.org/a?b=1").as_deref(), Some("https://example.org/a?b=1"));
         assert_eq!(link_aus("http://example.org").as_deref(), Some("http://example.org/"));
-        for fremd in ["--remote-debugging-port=1", "file:///C:/Windows/win.ini", "javascript:alert(1)", "C:\\a.html", "ms-settings:"] {
+        // Beide eigenen Schemata dürfen von außen kommen; `msb` bleibt für
+        // bestehende Verknüpfungen lesbar, `pontis` ist der neue Name.
+        assert!(link_aus("pontis://einstellungen/suche").is_some());
+        assert!(link_aus("msb://einstellungen").is_some());
+        // Groß-/Kleinschreibung des Schemas ist für URLs unerheblich.
+        assert_eq!(link_aus("HTTPS://Example.ORG/A").as_deref(), Some("https://example.org/A"));
+        for fremd in [
+            "--remote-debugging-port=1",
+            "file:///C:/Windows/win.ini",
+            "javascript:alert(1)",
+            "data:text/html,<b>x</b>",
+            "ftp://example.org/a",
+            "mailto:hilfe@example.org",
+            "tel:+4930123456",
+            "//example.org/ohne-schema",
+            "https://",
+            "C:\\a.html",
+            "ms-settings:",
+        ] {
             assert_eq!(link_aus(fremd), None, "{fremd}");
         }
         assert_eq!(link_aus(&format!("https://example.org/{}", "a".repeat(9000))), None);
+        // Genau an der Grenze bleibt die Adresse erhalten.
+        let grenze = format!("https://example.org/{}", "a".repeat(super::LINK_MAX - "https://example.org/".len()));
+        assert_eq!(grenze.len(), super::LINK_MAX);
+        assert!(link_aus(&grenze).is_some());
     }
 }

@@ -11,24 +11,24 @@ export function LesezeichenPanel() {
   const lesezeichen = useVerlaufStore((s) => s.lesezeichen)
   const { lesezeichenEntfernen, lesezeichenUmbenennen, lesezeichenVerschieben } = useVerlaufStore.getState()
 
-  const umbenennen = async (url: string, titel: string) => {
+  const umbenennen = async (url: string, titel: string, ordner?: string[]) => {
     const neu = await prompt({
       title: t('browser.lesezeichen.umbenennenTitel'),
       message: t('browser.lesezeichen.umbenennenText'),
       defaultValue: titel,
       confirmText: t('browser.lesezeichen.umbenennen'),
     })
-    if (neu !== null) lesezeichenUmbenennen(url, neu)
+    if (neu !== null) lesezeichenUmbenennen(url, neu, ordner)
   }
 
   return (
     <Eintragsliste
       eintraege={lesezeichen}
       leer={t('browser.lesezeichen.leer')}
-      entfernen={(e) => lesezeichenEntfernen(e.url)}
+      entfernen={(e) => lesezeichenEntfernen(e.url, e.ordner)}
       verschieben={lesezeichenVerschieben}
       aktionen={(e, i) => [
-        { key: 'umbenennen', label: t('browser.lesezeichen.umbenennen'), icon: <Pencil className="h-4 w-4" />, onSelect: () => void umbenennen(e.url, e.titel) },
+        { key: 'umbenennen', label: t('browser.lesezeichen.umbenennen'), icon: <Pencil className="h-4 w-4" />, onSelect: () => void umbenennen(e.url, e.titel, e.ordner) },
         { key: 'hoch', label: t('browser.lesezeichen.nachOben'), icon: <ArrowUp className="h-4 w-4" />, disabled: i === 0, onSelect: () => lesezeichenVerschieben(i, i - 1) },
         {
           key: 'runter',
@@ -43,7 +43,7 @@ export function LesezeichenPanel() {
           icon: <Trash2 className="h-4 w-4" />,
           destructive: true,
           separatorBefore: true,
-          onSelect: () => lesezeichenEntfernen(e.url),
+          onSelect: () => lesezeichenEntfernen(e.url, e.ordner),
         },
       ]}
     />

@@ -8,11 +8,19 @@ import { persist } from 'zustand/middleware'
 
 import { ablage, ADRESSE_MAX, kurzerTitel } from './ablage'
 import { useEinstellungenStore, type VerlaufFrist } from './einstellungenStore'
+import { lesezeichenZusammenfuehren, verlaufZusammenfuehren } from './importDaten'
+import type { ImportLesezeichen, ImportVerlauf } from './nativ'
 
 export interface Eintrag {
   url: string
   titel: string
   zeit: number
+  /** Ordnerpfad aus einem Browserimport, Wurzel zuerst. */
+  ordner?: string[]
+  /** Herkunft als Schlüssel in `msb:bilder`. */
+  favicon?: string
+  /** Besuche aus dem Quell-Browser. */
+  anzahl?: number
 }
 
 /** Mehr hält der Verlauf nicht; das Älteste fällt zuerst. */
@@ -29,10 +37,23 @@ interface VerlaufZustand {
   /** Löscht alles, was älter ist als `grenze`. */
   aelterLoeschen: (grenze: number) => void
   lesezeichenUmschalten: (url: string, titel: string) => void
-  lesezeichenEntfernen: (url: string) => void
-  lesezeichenUmbenennen: (url: string, titel: string) => void
+  /** Ohne `ordner` gilt die Adresse für alle Ordner (alte Aufrufe und der Stern). */
+  lesezeichenEntfernen: (url: string, ordner?: string[]) => void
+  lesezeichenUmbenennen: (url: string, titel: string, ordner?: string[]) => void
   /** Ordnet um: der Eintrag an `von` landet an `nach`. */
   lesezeichenVerschieben: (von: number, nach: number) => void
+  /**
+   * Ein Browserimport in einem Schritt; die importierten Lesezeichen stehen
+   * als Block vor den vorhandenen. Meldet die tatsächlich übernommenen Zahlen.
+   */
+  importieren: (daten: {
+    lesezeichen: ImportLesezeichen[]
+    verlauf: ImportVerlauf[]
+  }) => { lesezeichen: number; verlauf: number; lesezeichenGekuerzt: boolean; verlaufGekuerzt: boolean }
+}
+
+function gleicherOrdner(a: string[] | undefined, b: string[]): boolean {
+  return Array.isArray(a) && a.length === b.length && a.every((teil, i) => teil === b[i])
 }
 
 /** Zwei Besuche derselben Adresse binnen einer Minute sind einer (Neuladen, Weiterleitung). */
@@ -82,10 +103,21 @@ export const useVerlaufStore = create<VerlaufZustand>()(
             : { lesezeichen: [{ url, titel: titel || url, zeit: Date.now() }, ...s.lesezeichen] },
         ),
 
-      lesezeichenEntfernen: (url) => set((s) => ({ lesezeichen: s.lesezeichen.filter((e) => e.url !== url) })),
+      lesezeichenEntfernen: (url, ordner) =>
+        set((s) => ({
+          lesezeichen: s.lesezeichen.filter(
+            (e) => !(e.url === url && (ordner === undefined || gleicherOrdner(e.ordner, ordner))),
+          ),
+        })),
 
-      lesezeichenUmbenennen: (url, titel) =>
-        set((s) => ({ lesezeichen: s.lesezeichen.map((e) => (e.url === url ? { ...e, titel: titel.trim() || e.url } : e)) })),
+      lesezeichenUmbenennen: (url, titel, ordner) =>
+        set((s) => ({
+          lesezeichen: s.lesezeichen.map((e) =>
+            e.url === url && (ordner === undefined || gleicherOrdner(e.ordner, ordner))
+              ? { ...e, titel: titel.trim() || e.url }
+              : e,
+          ),
+        })),
 
       lesezeichenVerschieben: (von, nach) =>
         set((s) => {
@@ -95,6 +127,22 @@ export const useVerlaufStore = create<VerlaufZustand>()(
           lesezeichen.splice(Math.max(0, Math.min(nach, lesezeichen.length)), 0, eintrag)
           return { lesezeichen }
         }),
+
+      importieren: (daten) => {
+        let ergebnis = { lesezeichen: 0, verlauf: 0, lesezeichenGekuerzt: false, verlaufGekuerzt: false }
+        set((s) => {
+          const l = lesezeichenZusammenfuehren(s.lesezeichen, daten.lesezeichen)
+          const v = verlaufZusammenfuehren(s.verlauf, daten.verlauf)
+          ergebnis = {
+            lesezeichen: l.uebernommen,
+            verlauf: v.uebernommen,
+            lesezeichenGekuerzt: l.gekuerzt,
+            verlaufGekuerzt: v.gekuerzt,
+          }
+          return { lesezeichen: l.lesezeichen, verlauf: v.verlauf }
+        })
+        return ergebnis
+      },
     }),
     { name: 'msb:verlauf', version: 1, storage: ablage },
   ),

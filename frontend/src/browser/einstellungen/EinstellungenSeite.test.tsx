@@ -38,13 +38,22 @@ describe('Einstellungsseite', () => {
     useTabsStore.getState().einstellungen()
   })
 
-  it('wechselt die Kategorie über die Adresse des Tabs', () => {
+  it('wechselt die Kategorie über die Adresse des Tabs', async () => {
     zeigen()
     const liste = screen.getByRole('navigation', { name: 'Einstellungen' })
     expect(within(liste).getByRole('button', { name: 'Allgemein' })).toHaveAttribute('aria-current', 'page')
     fireEvent.click(within(liste).getByRole('button', { name: 'Verlauf und Daten' }))
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/verlauf')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/verlauf')
     expect(screen.getByText('Verlauf automatisch löschen')).toBeInTheDocument()
+    // Der Import fragt die Profile asynchron ab; ohne Warten endete der Test mitten im setState.
+    await screen.findByText('Kein unterstützter Browser mit einem benutzbaren Profil gefunden.')
+  })
+
+  it('zeigt den Browserimport unter Verlauf und Daten und fragt die Profile ab', async () => {
+    useTabsStore.getState().einstellungen('verlauf')
+    zeigen()
+    expect(await screen.findByText('Browser-Daten importieren')).toBeInTheDocument()
+    expect(gerufen.some((g) => g.befehl === 'detect_installed_browsers')).toBe(true)
   })
 
   it('löscht Browserdaten nur für den gewählten Zeitraum, erst nach der Rückfrage', async () => {
@@ -81,11 +90,11 @@ describe('Einstellungsseite', () => {
     useTabsStore.getState().einstellungen('ueber')
     zeigen()
     fireEvent.click(screen.getByRole('button', { name: 'Öffnen' }))
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/datenschutzerklaerung')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/datenschutzerklaerung')
     const zurueck = await screen.findByRole('link', { name: /Zurück/ })
     await act(async () => {
       fireEvent.click(zurueck)
     })
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/ueber')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/ueber')
   })
 })

@@ -65,6 +65,33 @@ describe('Gespeicherter Stand mit falschen Typen', () => {
     expect('unbekannt' in useEinstellungenStore.getState()).toBe(false)
   })
 
+  it('übernimmt nur einen vollständigen Wetterort und bekannte Einheiten', async () => {
+    const ort = { name: 'Berlin', land: 'DE', lat: 52.52, lon: 13.41 }
+    useEinstellungenStore.setState({ wetterOrt: null, wetterEinheit: 'celsius', seitenDunkel: false })
+    localStorage.setItem(
+      'msb:einstellungen',
+      JSON.stringify({ state: { wetterOrt: ort, wetterEinheit: 'fahrenheit', seitenDunkel: true }, version: 2 }),
+    )
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState()).toMatchObject({ wetterOrt: ort, wetterEinheit: 'fahrenheit', seitenDunkel: true })
+
+    useEinstellungenStore.setState({ wetterOrt: null, wetterEinheit: 'celsius', seitenDunkel: false })
+    localStorage.setItem(
+      'msb:einstellungen',
+      JSON.stringify({ state: { wetterOrt: 'kaputt', wetterEinheit: 'kelvin', seitenDunkel: 'ja' }, version: 2 }),
+    )
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState()).toMatchObject({ wetterOrt: null, wetterEinheit: 'celsius', seitenDunkel: false })
+
+    useEinstellungenStore.setState({ wetterOrt: null })
+    localStorage.setItem(
+      'msb:einstellungen',
+      JSON.stringify({ state: { wetterOrt: { name: 'Berlin', land: 'DE', lat: '52.5', lon: 13.41 } }, version: 2 }),
+    )
+    await useEinstellungenStore.persist.rehydrate()
+    expect(useEinstellungenStore.getState().wetterOrt).toBeNull()
+  })
+
   it('macht aus der alten Vorgabe DuckDuckGo die Werkseinstellung und behält eine andere Wahl', async () => {
     localStorage.setItem('msb:einstellungen', JSON.stringify({ state: { suchmaschine: 'duckduckgo' }, version: 1 }))
     await useEinstellungenStore.persist.rehydrate()

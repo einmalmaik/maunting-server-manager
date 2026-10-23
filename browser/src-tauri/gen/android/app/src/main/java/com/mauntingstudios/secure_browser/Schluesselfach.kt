@@ -54,10 +54,11 @@ object Schluesselfach {
         "messenger_biometric_key",
         "messenger_device_secret",
         "session_refresh_token",
+        "widget_wetter_token",
     )
 
     /** Diese Fächer werden ohne Abfrage gelesen. Siehe Klassenkommentar. */
-    private val FAECHER_OHNE_ABFRAGE = setOf("messenger_device_secret", "session_refresh_token")
+    private val FAECHER_OHNE_ABFRAGE = setOf("messenger_device_secret", "session_refresh_token", "widget_wetter_token")
 
     fun brauchtBestaetigung(fach: String): Boolean = fach !in FAECHER_OHNE_ABFRAGE
 

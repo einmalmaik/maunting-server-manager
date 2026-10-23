@@ -22,6 +22,16 @@ export interface KontextmenueProps {
   /** Element, das den Fokus nach Escape zurückbekommt. */
   ausloeser?: HTMLElement | null
   onSchliessen: () => void
+  /**
+   * Höchsthöhe, etwa `40dvh`. Als Stil, weil eine Klasse mit `dvh` nicht in
+   * jeder Tailwind-Fassung entsteht.
+   */
+  maxHoehe?: string
+  /**
+   * Durchsichtiger Hintergrund: In der geteilten Ansicht bleibt die Seite
+   * hinter dem Menü sichtbar.
+   */
+  durchsichtig?: boolean
 }
 
 /** Wohin das Menü am Zeiger passt, ohne über den Fensterrand zu ragen. */
@@ -29,7 +39,7 @@ export function menueLage(x: number, y: number, breite: number, hoehe: number, f
   return ankerLage({ left: x, right: x, top: y, bottom: y }, breite, hoehe, fenster)
 }
 
-export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: KontextmenueProps) {
+export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen, maxHoehe, durchsichtig = false }: KontextmenueProps) {
   const menue = useRef<HTMLDivElement>(null)
   const [lage, setLage] = useState<CSSProperties | null>(null)
   const schliessenRef = useRef(onSchliessen)
@@ -106,10 +116,16 @@ export function Kontextmenue({ ort, items, label, ausloeser, onSchliessen }: Kon
       ref={menue}
       role="menu"
       aria-label={label}
-      className="fixed min-w-48 max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high p-1.5 shadow-panel"
+      className={`fixed min-w-48 overflow-y-auto rounded-lg border border-outline-variant ${
+        durchsichtig ? 'bg-surface-container-high/85 backdrop-blur-md' : 'bg-surface-container-high'
+      } p-1.5 shadow-panel`}
       // Bis gemessen ist, unsichtbar in der Ecke: dort hat es seine volle Breite.
       // Am Zeiger nahe dem Rand würde es schmaler gemessen, als es ist.
-      style={{ zIndex: SCHICHT.kontextmenue, ...(lage ?? { left: 0, top: 0, visibility: 'hidden' }) }}
+      style={{
+        zIndex: SCHICHT.kontextmenue,
+        maxHeight: maxHoehe ?? 'calc(100dvh - 1rem)',
+        ...(lage ?? { left: 0, top: 0, visibility: 'hidden' }),
+      }}
       onClick={(event) => event.stopPropagation()}
       onContextMenu={(event) => event.preventDefault()}
     >

@@ -1,10 +1,21 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useToastStore } from '@/stores/toastStore'
 import { fehlerKurztext, istSprachsucheMoeglich, useSprachsuche } from './sprachsuche'
 import { istLokalesWhisperMoeglich, starteAudioAufnahme } from './lokalesWhisper'
 import { SprachsucheKnopf } from '../kopf/SprachsucheKnopf'
+
+const { android, sprachEingabe } = vi.hoisted(() => ({
+  android: { wert: false },
+  sprachEingabe: vi.fn(),
+}))
+
+vi.mock('./plattform', () => ({ istAndroid: () => android.wert }))
+vi.mock('./nativ', () => ({
+  istTauri: () => true,
+  nativ: { sprachEingabe },
+}))
 
 vi.mock('./lokalesWhisper', () => ({
   istLokalesWhisperMoeglich: vi.fn(() => false),
@@ -41,6 +52,9 @@ class FakeSpeechRecognition {
 describe('Sprachsuche Hook & Knopf', () => {
   beforeEach(() => {
     FakeSpeechRecognition.instanz = null
+    android.wert = false
+    sprachEingabe.mockReset()
+    vi.mocked(starteAudioAufnahme).mockReset()
     ;(window as any).SpeechRecognition = FakeSpeechRecognition
     delete (window as any).webkitSpeechRecognition
     useToastStore.getState().clearAll()
@@ -135,6 +149,39 @@ describe('Sprachsuche Hook & Knopf', () => {
     } finally {
       Object.defineProperty(window.navigator, 'onLine', { value: true, configurable: true })
     }
+  })
+
+  it('nutzt auf Android die System-Spracherkennung statt Whisper', async () => {
+    android.wert = true
+    vi.mocked(istLokalesWhisperMoeglich).mockReturnValue(true)
+    sprachEingabe.mockResolvedValue({ text: 'Hallo vom Telefon', fehler: null })
+    const onErgebnis = vi.fn()
+    render(<SprachsucheKnopf onErgebnis={onErgebnis} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Sprachsuche starten/i }))
+    await waitFor(() => expect(onErgebnis).toHaveBeenCalledWith('Hallo vom Telefon'))
+    expect(sprachEingabe).toHaveBeenCalledTimes(1)
+    expect(starteAudioAufnahme).not.toHaveBeenCalled()
+  })
+
+  it('meldet auf Android einen fehlenden Erkenner und schweigt bei Abbruch', async () => {
+    android.wert = true
+    sprachEingabe.mockResolvedValue({ text: null, fehler: 'kein_erkenner' })
+    const onErgebnis = vi.fn()
+    render(<SprachsucheKnopf onErgebnis={onErgebnis} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Sprachsuche starten/i }))
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => t.message.includes('Keine Spracherkennungs-App'))).toBe(true),
+    )
+    expect(onErgebnis).not.toHaveBeenCalled()
+
+    useToastStore.getState().clearAll()
+    sprachEingabe.mockResolvedValue({ text: null, fehler: null })
+    fireEvent.click(screen.getByRole('button', { name: /Sprachsuche starten/i }))
+    await waitFor(() => expect(sprachEingabe).toHaveBeenCalledTimes(2))
+    expect(onErgebnis).not.toHaveBeenCalled()
+    expect(useToastStore.getState().toasts).toHaveLength(0)
   })
 
   it('fängt no-speech sauber ab ohne Fehlerzustand', () => {

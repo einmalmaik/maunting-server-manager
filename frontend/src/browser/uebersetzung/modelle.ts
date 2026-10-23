@@ -11,6 +11,7 @@
  * wird sie noch einmal geprüft (AGENTS.md Punkt 81).
  */
 import { nativ } from '../services/nativ'
+import { istAndroid } from '../services/plattform'
 import liste from './modelle.json'
 
 /** Nur der Schlüssel im Cache; geladen wird über Rust. */
@@ -29,7 +30,14 @@ export type Art = 'model' | 'lex' | 'vocab' | 'srcvocab' | 'trgvocab'
 type Paar = Partial<Record<Art, Datei & { name: string }>>
 
 const PAARE = liste.paare as Record<string, Paar>
+/** Dieselben Paare in der Fassung, die Mozilla nur für Android anbietet. */
+const ANDROID = (liste.android ?? {}) as Record<string, Paar>
 export const WASM: Datei = liste.wasm
+
+/** Die Dateien eines Paares für diese Plattform; Android hat eigene, kleinere. */
+function dateien(paar: string): Paar | undefined {
+  return (istAndroid() ? ANDROID[paar] : undefined) ?? PAARE[paar]
+}
 
 /** Die Modelle von `von` nach `nach`: direkt oder über Englisch, sonst `null`. */
 export function weg(von: string, nach: string): string[] | null {
@@ -49,21 +57,22 @@ export function quellen(nach: string): string[] {
 /** Die Sprache eines `lang`-Attributs, wie sie die Liste nennt (`de-DE` → `de`), oder `''`. */
 export function spracheVon(lang: string): string {
   const [haupt, ...rest] = lang.toLowerCase().split(/[-_]/)
-  if (haupt === 'zh') return rest.some((r) => ['hant', 'tw', 'hk', 'mo'].includes(r)) ? 'zh-Hant' : ''
-  // Norwegisch ohne Angabe ist meist Bokmål.
-  const sprache = haupt === 'no' ? 'nb' : haupt
+  let sprache = haupt === 'no' ? 'nb' : haupt
+  // Chinesisch: traditionell nur mit Taiwan/Hongkong/Macau oder Hant; ohne
+  // Angabe und mit CN/SG ist es vereinfacht.
+  if (haupt === 'zh') sprache = rest.some((r) => ['hant', 'tw', 'hk', 'mo'].includes(r)) ? 'zh-Hant' : 'zh-Hans'
   return quellen(MITTE).includes(sprache) || sprache === MITTE ? sprache : ''
 }
 
 /** Die Dateien eines Paares mit dem Namen, an dem die Engine die Genauigkeit erkennt. */
 export function dateienVon(paar: string): { dateien: Partial<Record<Art, Datei>>; name: string } {
-  const p = PAARE[paar]
+  const p = dateien(paar)
   if (!p?.model) throw new Error('modell')
   return { dateien: p, name: p.model.name }
 }
 
 function alleDateien(paare: string[]): Datei[] {
-  return [WASM, ...paare.flatMap((p) => Object.values(PAARE[p] ?? {}))]
+  return [WASM, ...paare.flatMap((p) => Object.values(dateien(p) ?? {}))]
 }
 
 async function sha256(daten: ArrayBuffer): Promise<string> {
@@ -114,9 +123,10 @@ export async function holen(d: Datei, fortschritt: (bytes: number) => void = () 
 export async function geladen(): Promise<{ paar: string; groesse: number }[]> {
   if (typeof caches === 'undefined') return []
   const da = new Set((await (await caches.open(CACHE)).keys()).map((r) => r.url))
-  return Object.entries(PAARE)
-    .filter(([, p]) => Object.values(p).length > 0 && Object.values(p).every((d) => da.has(CDN + d.ort)))
-    .map(([paar, p]) => ({ paar, groesse: Object.values(p).reduce((n, d) => n + d.groesse, 0) }))
+  return Object.keys(PAARE)
+    .map((paar) => [paar, dateien(paar)] as const)
+    .filter(([, p]) => p && Object.values(p).length > 0 && Object.values(p).every((d) => da.has(CDN + d.ort)))
+    .map(([paar, p]) => ({ paar, groesse: Object.values(p!).reduce((n, d) => n + d.groesse, 0) }))
 }
 
 /** Entfernt ein Paar; ohne Angabe alles samt Engine. */
@@ -126,5 +136,5 @@ export async function entfernen(paar?: string): Promise<void> {
     return
   }
   const cache = await caches.open(CACHE)
-  for (const d of Object.values(PAARE[paar] ?? {})) await cache.delete(CDN + d.ort)
+  for (const d of Object.values(dateien(paar) ?? {})) await cache.delete(CDN + d.ort)
 }

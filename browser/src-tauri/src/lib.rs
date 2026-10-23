@@ -8,6 +8,7 @@
 
 pub mod aktualisieren;
 pub mod browserdaten;
+pub mod browserimport;
 pub mod cookies;
 pub mod datei;
 pub mod downloads;
@@ -15,6 +16,8 @@ pub mod erweiterungen;
 pub mod fenster;
 pub mod kachelsymbol;
 pub mod konfig;
+#[cfg(windows)]
+pub mod medien;
 pub mod kurzinfo;
 #[cfg(windows)]
 pub mod mixer;
@@ -97,6 +100,14 @@ pub fn run() {
         .manage(tabs::Tabs::default())
         .setup(|app| {
             let handle = app.handle();
+            // Die Velopack-Hooks laufen nicht bei jeder Installation (etwa nach
+            // dem Wechsel vom NSIS-Installer). Dann zeigt die Anmeldung noch auf
+            // den alten Programmpfad, und Windows öffnet Links ins Leere. Der
+            // laufende Pfad ist immer der richtige, deshalb hier erneuern.
+            #[cfg(all(windows, not(debug_assertions)))]
+            std::thread::spawn(|| {
+                let _ = widget::standardbrowser_registrieren();
+            });
             let konfig = konfig::laden(handle);
             #[cfg(windows)]
             if !konfig.hardwarebeschleunigung {
@@ -111,6 +122,14 @@ pub fn run() {
                 }
             }
             browserdaten::beim_start(handle, konfig.vergessen_beim_schliessen);
+            browserimport::beim_start(handle);
+            #[cfg(windows)]
+            medien::freigeben(handle);
+            #[cfg(windows)]
+            std::thread::spawn({
+                let app = handle.clone();
+                move || browserdaten::mikrofon_denies_loeschen(&app)
+            });
             schild::konfig_uebernehmen(&konfig);
             app.manage(konfig::KonfigZustand(std::sync::Mutex::new(konfig)));
             schild::listen::starten(handle);
@@ -179,6 +198,8 @@ pub fn run() {
             tabs::tab_aktion,
             tabs::tab_seite_zuruecksetzen,
             tabs::tabs_rahmen,
+            tabs::panel_rahmen,
+            tabs::tabs_darstellung,
             tabs::tabs_split_setzen,
             tabs::tabs_split_aufheben,
             tabs::tabs_verdecken,
@@ -218,9 +239,13 @@ pub fn run() {
             browserdaten::seitenrechte,
             browserdaten::seitenrecht_zuruecksetzen,
             widget::widget_start,
+            widget::widget_sprache,
             widget::widget_stand,
             widget::widget_lage,
             widget::widget_anheften,
+            widget::widget_wetter_setzen,
+            widget::widget_wetter_lage,
+            widget::widget_wetter_anheften,
             widget::bildsuche,
             widget::tastatur_zeigen,
             widget::standardbrowser,
@@ -240,6 +265,8 @@ pub fn run() {
             erweiterungen::erweiterung_popup,
             erweiterungen::erweiterung_popup_schliessen,
             erweiterungen::erweiterung_optionen,
+            browserimport::detect_installed_browsers,
+            browserimport::import_browser_data,
         ])
         .on_window_event(move |fenster, ereignis| {
             // „Beim Schließen vergessen“: erst die Seitendaten löschen, dann
@@ -356,6 +383,33 @@ mod tests {
             for bereich in ["root", "file", "database", "sharedpref", "external"] {
                 assert!(block.contains(&format!("domain=\"{bereich}\" path=\".\"")), "{teil} sichert {bereich}");
             }
+        }
+    }
+
+    /// Links aus anderen Apps kommen nur als http/https in den Browser. Das
+    /// Manifest darf dafür keine lokalen Dateien oder beliebige Schemata öffnen.
+    #[test]
+    fn android_nimmt_nur_web_links_an() {
+        let manifest = include_str!("../gen/android/app/src/main/AndroidManifest.xml");
+        for teil in [
+            "android.intent.action.VIEW",
+            "android.intent.category.DEFAULT",
+            "android.intent.category.BROWSABLE",
+            "android:scheme=\"http\"",
+            "android:scheme=\"https\"",
+            "android:launchMode=\"singleTask\"",
+            "android:name=\".WetterWidget\"",
+            "android:name=\".SuchWidget\"",
+        ] {
+            assert!(manifest.contains(teil), "fehlt: {teil}");
+        }
+        for fremd in [
+            "android:scheme=\"file\"",
+            "android:scheme=\"content\"",
+            "android:scheme=\"*\"",
+            "android:scheme=\"data\"",
+        ] {
+            assert!(!manifest.contains(fremd), "zu weit: {fremd}");
         }
     }
 

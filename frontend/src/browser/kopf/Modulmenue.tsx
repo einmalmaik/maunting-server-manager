@@ -18,7 +18,7 @@ import { useAnSingra } from '../services/anSingra'
 import { istIntern, istWebseite } from '../services/intern'
 import { istGekoppelt, useSitzung } from '../services/sitzung'
 import { useSuche } from '../services/suche'
-import { useAktiverTab, useTabsStore } from '../services/tabsStore'
+import { useAktiverTab, useSplitZustand, useTabsStore } from '../services/tabsStore'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { useUebersetzen } from '../uebersetzung/ablauf'
 import { useAufnahme } from '../aufnahme/ablauf'
@@ -136,6 +136,10 @@ export function Modulmenue({ handy = false }: { handy?: boolean }) {
   const ziele = useZiele()
   const summe = ziele.reduce((n, z) => n + z.zahl, 0)
   const name = t('browser.leiste.menue')
+  // In der geteilten Ansicht liegt das Menü auf einer Seite. Es darf sie nicht
+  // verdecken: höchstens die Höhe einer halben Seite, und die Seite bleibt
+  // durchscheinend sichtbar.
+  const geteilt = Boolean(useSplitZustand().split)
 
   return (
     <>
@@ -151,7 +155,16 @@ export function Modulmenue({ handy = false }: { handy?: boolean }) {
         <Menu className="h-4 w-4" aria-hidden="true" />
         {summe > 0 && <Zahl wert={summe} />}
       </Knopf>
-      <Ankerfenster offen={offen} onSchliessen={() => setOffen(false)} anker={anker} label={name} ausrichtung="ende" className="w-80 p-2">
+      <Ankerfenster
+        offen={offen}
+        onSchliessen={() => setOffen(false)}
+        anker={anker}
+        label={name}
+        ausrichtung="ende"
+        className="w-80 p-2"
+        maxHoehe={geteilt ? '40dvh' : undefined}
+        durchsichtig={geteilt}
+      >
         {handy && <HandyAktionen schliessen={() => setOffen(false)} />}
         <ul className="grid grid-cols-3 gap-1">
           {ziele.map(({ schluessel, eintrag, offen: istOffen, zahl, oeffnen }) => {

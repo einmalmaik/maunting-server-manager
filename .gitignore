@@ -143,3 +143,7 @@ browser/AUDIT_REPORT_PONTIS.md
 test_updater_server/
 Releases/
 
+
+# Wetter-Sidecar: Modell- und Ortsdaten bleiben lokal
+wetter-sidecar/daten/*
+!wetter-sidecar/daten/.gitkeep

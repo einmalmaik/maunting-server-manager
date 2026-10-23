@@ -76,6 +76,36 @@ describe('Fragen einer Seite', () => {
     expect(gerufen).toContainEqual({ befehl: 'tab_antworten', args: { nr: 10, antwort: { art: 'recht', erlauben: true } } })
   })
 
+  it('unterscheidet ausdrückliches Blockieren von einem geschlossenen Dialog', async () => {
+    act(() => useRueckfragen.getState().aufnehmen({ art: 'recht', id: vorne, nr: 11, recht: 'mikrofon', herkunft: 'https://beispiel.de/' }))
+    render(<SeitenDialoge />)
+    spaeter()
+    fireEvent.click(screen.getByRole('button', { name: 'Blockieren' }))
+    await act(() => Promise.resolve())
+    expect(gerufen).toContainEqual({ befehl: 'tab_antworten', args: { nr: 11, antwort: { art: 'recht', erlauben: false } } })
+
+    gerufen.length = 0
+    act(() => useRueckfragen.getState().aufnehmen({ art: 'recht', id: vorne, nr: 12, recht: 'mikrofon', herkunft: 'https://beispiel.de/' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await act(() => Promise.resolve())
+    expect(gerufen).toContainEqual({ befehl: 'tab_antworten', args: { nr: 12, antwort: { art: 'recht', erlauben: null } } })
+  })
+
+  it('zeigt eine Rechte-Frage der zweiten Split-Hälfte', () => {
+    const hinten = useTabsStore.getState().neuerTab('https://hinten.example/', { hintergrund: true })
+    act(() => useTabsStore.getState().splitAktivieren(hinten))
+    try {
+      act(() => useRueckfragen.getState().aufnehmen({ art: 'recht', id: hinten, nr: 13, recht: 'mikrofon', herkunft: 'https://hinten.example/' }))
+      render(<SeitenDialoge />)
+      expect(screen.getByRole('dialog', { name: 'Anfrage von hinten.example' })).toBeInTheDocument()
+    } finally {
+      act(() => {
+        useTabsStore.getState().splitBeenden()
+        useTabsStore.getState().schliessen(hinten)
+      })
+    }
+  })
+
   it('zeigt nicht, was ein Tab im Hintergrund fragt', () => {
     act(() => useRueckfragen.getState().aufnehmen(frage(9, 'tab-hinten')))
     render(<SeitenDialoge />)

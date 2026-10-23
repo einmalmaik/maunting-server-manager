@@ -11,7 +11,7 @@ viele Nodes:
 
 | Rolle | Enthält | Benötigt das vollständige Repository? |
 | --- | --- | --- |
-| Panel/Control Plane | Backend, DIS-Sidecar, LiveKit-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
+| Panel/Control Plane | Backend, DIS-Sidecar, LiveKit-Sidecar, Wetter-Sidecar, Panel-PostgreSQL, Frontend und lokaler Agent | Nein, das Panel-Release enthält nur die benötigten Projektteile. |
 | Separates Frontend | Fertig gebautes statisches Vite-Bundle | Nein, `msm-frontend-<VERSION>.tar.gz` genügt. |
 | Remote-Node | Agent, Rootless Docker, TLS und node-eigene Serverdaten | Nein, der Node lädt sein Agent-Paket direkt vom Panel. |
 
@@ -311,7 +311,7 @@ Tresor. Unter Windows laufen die Seiten getrennt. Auf Android-Geräten die
 ### Maunting Search — die Suchseite des Browsers
 
 Maunting Search ist die eigene Suchseite in Maunting Pontis
-(`msb://suche?q=…`). Sie zeigt KI-Überblick, Quellen, Treffer, ähnliche
+(`pontis://suche?q=…`). Sie zeigt KI-Überblick, Quellen, Treffer, ähnliche
 Suchanfragen und ein Wikipedia-Wissens-Panel. Technisch sucht sie über die
 SearXNG-Instanz deines Servers — dieselbe, die auch Singra benutzt. SearXNG ist
 freie Software unter der GNU Affero General Public License (AGPLv3); der
@@ -542,6 +542,7 @@ bewusste Sicherheitsgrenze.
 - Agent/Node: `msm-agent/.env.example`
 - DIS-Sidecar: `dis-sidecar/.env.example`
 - LiveKit-Sidecar (Messenger-Anrufe): `livekit-sidecar/.env.example`
+- Wetter-Sidecar (Vorhersage für Startseite und Homescreen-Widget): `wetter-sidecar/.env.example`
 
 Jede Vorlage erklärt Status, Zweck, Herkunft und Format aller Betreiberwerte.
 Automatisch erzeugte `.env`-Dateien dürfen niemals committed werden.

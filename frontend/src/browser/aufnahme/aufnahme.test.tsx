@@ -49,7 +49,7 @@ describe('Bilder', () => {
   it('nimmt nur Seiten auf, die zu sehen sind', () => {
     expect(aufnahmeMoeglich({ ...leererTab('a'), url: TAB.url })).toBe(true)
     expect(aufnahmeMoeglich(leererTab('a'))).toBe(false)
-    expect(aufnahmeMoeglich({ ...leererTab('a'), url: 'msb://einstellungen' })).toBe(false)
+    expect(aufnahmeMoeglich({ ...leererTab('a'), url: 'pontis://einstellungen' })).toBe(false)
     expect(aufnahmeMoeglich({ ...leererTab('a'), url: TAB.url, fehler: 'gesperrt' })).toBe(false)
   })
 })

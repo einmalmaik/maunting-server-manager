@@ -169,6 +169,12 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
       WebSettingsCompat.setSafeBrowsingEnabled(s, false)
     }
+    // Einstellungen → Design: Seiten dunkel rendern. Das algorithmische
+    // Abdunkeln greift auch auf Seiten ohne eigene Dark-Fassung; wenn die
+    // WebView es nicht kann, bleibt die Seite unverändert.
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+      WebSettingsCompat.setAlgorithmicDarkeningAllowed(s, seitenDunkel)
+    }
     // Ohne „; wv“ und „Version/4.0“ halten Seiten den Tab für Chrome statt für
     // eine eingebettete WebView, die etwa Google bei der Anmeldung ablehnt.
     s.userAgentString = s.userAgentString.replace("; wv)", ")").replace(Regex("Version/[0-9.]+ "), "")
@@ -179,6 +185,14 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   fun cookiesErneuern() {
     cookies?.remove()
     cookies = WebViewCompat.addDocumentStartJavaScript(webView, TabsBruecke.cookiesskript(), setOf("*"))
+  }
+
+  /** Schaltet das Abdunkeln um; wirkt auf das nächste Rendern der Seite. */
+  fun dunkelSetzen(an: Boolean) {
+    seitenDunkel = an
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+      WebSettingsCompat.setAlgorithmicDarkeningAllowed(webView.settings, an)
+    }
   }
 
   fun laden(url: String) {
@@ -294,6 +308,7 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
     }
 
     override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+      TabChrome.verwerfen(id)
       seite = url
       kanal = null
       kanalHerkunft = ""
@@ -373,6 +388,9 @@ class Tab(private val plugin: TabsPlugin, context: Context, val id: String, val 
   }
 
   companion object {
+    /** Von den Einstellungen gesetzt; gilt für bestehende und neue Tabs. */
+    var seitenDunkel = false
+
     /** Längere Adressen (meist `data:`-Bilder) gehen nicht an die Oberfläche. */
     const val MAX_ADRESSE = 8192
 

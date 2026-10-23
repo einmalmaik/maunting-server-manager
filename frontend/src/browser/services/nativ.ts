@@ -152,7 +152,7 @@ export interface MenueEintrag {
 export type Antwort =
   | { art: 'menue'; befehl: number | null }
   | { art: 'dialog'; ok: boolean; text: string | null }
-  | { art: 'recht'; erlauben: boolean }
+  | { art: 'recht'; erlauben: boolean | null }
   | { art: 'anmeldung'; benutzer: string | null; passwort: string | null }
 
 export async function tabEreignisse(rueckruf: (e: TabEreignis) => void): Promise<() => void> {
@@ -182,6 +182,9 @@ export const nativ = {
   tabSeiteZuruecksetzen: (id: string) => rufen('tab_seite_zuruecksetzen', { id }),
   tabsRahmen: (rahmen: { x: number; y: number; breite: number; hoehe: number }) =>
     nacheinander('tabs_rahmen', { rahmen }),
+  /** Geometrie einer externen Web-App im Panel; `null` versteckt sie nur. */
+  panelRahmen: (id: string, rahmen: { x: number; y: number; breite: number; hoehe: number } | null) =>
+    nacheinander('panel_rahmen', { id, rahmen }),
   tabsSplitSetzen: (
     primaerId: string,
     primaerRahmen: { x: number; y: number; breite: number; hoehe: number },
@@ -197,7 +200,7 @@ export const nativ = {
   tabsSplitAufheben: () => nacheinander('tabs_split_aufheben'),
   tabsVerdecken: (verdeckt: boolean) => nacheinander('tabs_verdecken', { verdeckt }),
   /** JPEG des vorderen Tabs. */
-  tabStandbild: () => nacheinander<ArrayBuffer | Uint8Array | number[]>('tab_standbild'),
+  tabStandbild: (id?: string) => nacheinander<ArrayBuffer | Uint8Array | number[]>('tab_standbild', id ? { id } : {}),
   tabsZuruecksetzen: () => nacheinander('tabs_zuruecksetzen'),
   /** Screenshot des vorderen Tabs als PNG (Base64); `ganz` nur unter Windows (`tabs/aufnahme.rs`). */
   tabAufnahme: (id: string, ganz: boolean) => rufen<{ png: string; abgeschnitten: boolean }>('tab_aufnahme', { id, ganz }),
@@ -231,6 +234,8 @@ export const nativ = {
   /** `schlafenMinuten: null`: Tabs schlafen nie (`tabs/ruhe.rs`). */
   tabsLeistung: (schlafenMinuten: number | null, verwerfen: boolean, ausnahmen: string[]) =>
     rufen('tabs_leistung', { schlafenMinuten, verwerfen, ausnahmen }),
+  /** Bevorzugt dunkle Seiten in allen Tabs (Windows: WebView2, Android: WebView). */
+  tabsDarstellung: (an: boolean) => rufen('tabs_darstellung', { an }),
   fensterAktion: (aktion: 'minimieren' | 'maximieren' | 'schliessen' | 'neustarten') => rufen('fenster_aktion', { aktion }),
   neustarten: () => rufen('fenster_aktion', { aktion: 'neustarten' }),
   /** Startinformationen dieses Browserfenster-Prozesses (z. B. ausgelagertes Einzelfenster). */
@@ -266,10 +271,17 @@ export const nativ = {
   schutzBestaetigen: () => rufen<SchutzStand>('schutz_bestaetigen'),
   /** Was das Such-Widget oder ein Link aus einer anderen App angestoßen hat, einmal (`widget.rs`). */
   widgetStart: () => rufen<WidgetStart | null>('widget_start'),
+  /** Unter Android die System-Spracherkennung; `kein_erkenner`, wenn keine App da ist. */
+  sprachEingabe: () => rufen<SprachEingabe>('widget_sprache'),
   widgetStand: (bildsuche: boolean) => rufen('widget_stand', { bildsuche }),
   widgetLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_lage'),
   /** Der Startbildschirm fragt danach selbst; `false`, wenn er die Bitte nicht annimmt. */
   widgetAnheften: () => rufen<boolean>('widget_anheften'),
+  /** Konfiguriert das Wetter-Widget; MSM-Adresse und Token bleiben nativ. */
+  widgetWetterSetzen: (daten: { ort: string; land: string; lat: number; lon: number; einheit: string; token: string }) =>
+    rufen('widget_wetter_setzen', daten),
+  widgetWetterLage: () => rufen<'liegt' | 'anheftbar' | 'nein'>('widget_wetter_lage'),
+  widgetWetterAnheften: () => rufen<boolean>('widget_wetter_anheften'),
   tastaturZeigen: () => rufen('tastatur_zeigen'),
   /** Ist der Browser der Standardbrowser? Android und Windows, sonst `false`. */
   standardbrowser: () => rufen<boolean>('standardbrowser'),
@@ -286,6 +298,10 @@ export const nativ = {
   updateHerunterladen: () => rufen('update_herunterladen'),
   /** Wendet das vorbereitete Update an und startet den Browser neu. */
   updateInstallieren: () => rufen('update_installieren'),
+  /** Unter Windows: Browser mit einem lesbaren Profil (`browserimport/`). */
+  browserProfile: () => rufen<BrowserProfil[]>('detect_installed_browsers'),
+  /** Liest das gewählte Profil; nur die ID geht an Rust, nie ein Pfad. */
+  browserDatenImportieren: (profilId: string) => rufen<ImportErgebnis>('import_browser_data', { profilId }),
 }
 
 export interface FensterStartInfo {
@@ -300,6 +316,13 @@ export type WidgetStart =
   | { art: 'bild' }
   /** Ein Link aus einer anderen App (`WidgetPlugin.linkAufnehmen`). */
   | { art: 'link'; url: string; privat?: boolean }
+
+/** Antwort der System-Spracherkennung (`widget_sprache`). */
+export interface SprachEingabe {
+  text: string | null
+  /** `kein_erkenner`, wenn keine Spracherkennungs-App installiert ist. */
+  fehler: string | null
+}
 
 /** Ein neuer Anstoß des Such-Widgets, während der Browser läuft. */
 export async function widgetAnstoesse(rueckruf: () => void): Promise<() => void> {
@@ -340,6 +363,63 @@ export interface SchutzStand {
 export async function schutzEreignisse(rueckruf: () => void): Promise<() => void> {
   if (!istTauri()) return () => {}
   return listen('msb:schutz', () => rueckruf())
+}
+
+/** Ein installiertes Browserprofil (`browserimport/profile.rs`). */
+export interface BrowserProfil {
+  id: string
+  browser: string
+  name: string
+  verlauf: boolean
+  lesezeichen: boolean
+}
+
+export interface ImportLesezeichen {
+  url: string
+  titel: string
+  ordner: string[]
+  zeit: number
+}
+
+export interface ImportVerlauf {
+  url: string
+  titel: string
+  zeit: number
+  anzahl: number
+}
+
+export interface ImportTopSite {
+  url: string
+  titel: string
+}
+
+/** Ein Symbol als `data:image/png;base64,…`, geschlüsselt nach Herkunft. */
+export interface ImportBild {
+  herkunft: string
+  daten: string
+}
+
+export interface ImportZahlen {
+  lesezeichen: number
+  verlauf: number
+  top_sites: number
+  bilder: number
+}
+
+export interface ImportWarnung {
+  code: string
+}
+
+export interface ImportErgebnis {
+  browser: string
+  profil: string
+  dauer_ms: number
+  lesezeichen: ImportLesezeichen[]
+  verlauf: ImportVerlauf[]
+  top_sites: ImportTopSite[]
+  bilder: ImportBild[]
+  zahlen: ImportZahlen
+  warnungen: ImportWarnung[]
 }
 
 /** Die Felder der Gerätekonfiguration (`konfig.rs`). */
