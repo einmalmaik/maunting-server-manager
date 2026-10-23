@@ -17,10 +17,10 @@
  *
  * Die Nachricht reist als ein Umschlag je Mailbox. Ein Umschlag darf 1 MiB
  * fassen; deshalb wird die Zahl der Nachrichten je Mailbox so lange halbiert,
- * bis Chiffrat und Unterschrift hineinpassen. Anhänge mit eingebetteten
- * `data:`-Daten fallen dabei auf ihren Verweis zusammen — ein halber Verlauf
- * mit Verweisen ist mehr wert als gar keiner, und der Inhalt ist über
- * `mediaId` weiterhin abrufbar.
+ * bis Chiffrat und Unterschrift hineinpassen. Anhänge fallen dabei auf ihren
+ * Verweis zusammen und reisen danach als eigene, geprüfte Pakete aus der
+ * lokalen Ablage mit (`verlaufsMedien.ts`) — der Server hält einen Blob nur
+ * 30 Tage, der Verweis allein wäre nach Ablauf wertlos.
  */
 
 import { relayE2eeEnvelope, type E2eeGeraetItem } from '@/api/social'
@@ -33,8 +33,6 @@ import {
 import { ladeGespraeche } from '../gespraechsListe'
 import { ablage } from '../gruppen/gruppenAblage'
 import { uebernimmDmGeheimnis } from '../gruppen/dmGeheimnis'
-import { eigenesGeraet } from './geraeteAblage'
-import { geraeteVon, verzeichnisVon } from './geraeteVerzeichnis'
 import {
   istVerschluesselterPlatzhalter,
   listeLokaleMailboxen,
@@ -46,6 +44,20 @@ import {
   type LocalStoredMessage,
   type VerlaufsArt,
 } from '../messengerLocalStore'
+import { eigenesGeraet } from './geraeteAblage'
+import { geraeteVon, verzeichnisVon } from './geraeteVerzeichnis'
+import {
+  MAX_UMSCHLAG_ZEICHEN,
+  VERLAUF_MEDIA_ACK_TYP,
+  VERLAUF_MEDIA_TYP,
+  anhaengeSammeln,
+  endung,
+  kennungInOrdnung,
+  merkeMediumGesendet,
+  nimmtMedienTeil,
+  sendeMedienAnGeraet,
+  type MedienAuftrag,
+} from './verlaufsMedien'
 import { pruefeNutzlast, signiereNutzlast } from '../nutzlastSignatur'
 
 export const VERLAUF_SYNC_TYP = 'history_sync'
@@ -108,22 +120,12 @@ const CHUNK = 200
 /**
  * Wie viele Umschläge je Mailbox höchstens.
  *
- * 25 × 200 = 5000 Nachrichten. Das deckt auch einen über Wochen gewachsenen
- * Chat; alles darüber würde beim Gegenüber ohnehin niemand mehr lesen und
- * kostet nur Relais-Zeit.
+ * Die früheren 25 (5000 Nachrichten) waren kein vollständiger Verlauf: was
+ * darüber lag, fiel still weg. 1000 Teile tragen 200 000 Nachrichten; ist
+ * auch das erreicht, meldet der Lauf es als Teilfehler und merkt sich den
+ * Verlauf **nicht** als übergeben.
  */
-const MAX_TEILE = 25
-
-/**
- * Die Grenze des **äußeren** Umschlags, in Zeichen.
- *
- * Das Relais nimmt 1 MiB an. Gemessen wird deshalb nicht nur der innere
- * Klartext: Signatur und Hybridverschlüsselung legen ihre eigene Hülle darum,
- * und ein Paket, das hier zu groß hinausgeht, kommt als Ganzes nicht an — der
- * Verlauf risse an genau dieser Stelle ab, ohne Meldung. Bis 10/2026 wurde nur
- * der innere Umschlag auf 900 000 Zeichen geprüft.
- */
-const MAX_UMSCHLAG_ZEICHEN = 1_000_000
+const MAX_TEILE = 1000
 
 /** Eine einzelne Nachricht über dieser Grenze ist ein Anhang, kein Verlauf. */
 const MAX_NACHRICHT_BYTES = 40_000
@@ -132,18 +134,14 @@ function byteLaenge(text: string): number {
   return new TextEncoder().encode(text).length
 }
 
-function endung(geraetId: string): string {
-  const sauber = (geraetId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(-16)
-  return sauber || 'geraet'
-}
-
 /**
  * Eine Nachricht ohne eingebettete Anhangsdaten.
  *
  * `dataUrl` ist eine Kopie des Inhalts für die sofortige Anzeige auf dem
  * sendenden Gerät. Sie kann mehrere Megabyte groß sein und gehört nicht in
  * einen Verlaufsumschlag; der Verweis (`mediaId`, `paketSchluessel`) genügt,
- * um den Inhalt auf dem neuen Gerät zu laden.
+ * um den Inhalt auf dem neuen Gerät zu laden. Die Daten selbst reisen danach
+ * als eigene Pakete mit (`verlaufsMedien.ts`).
  */
 function kompakt(nachricht: LocalStoredMessage): LocalStoredMessage | null {
   if (!nachricht || typeof nachricht !== 'object') return null
@@ -154,8 +152,22 @@ function kompakt(nachricht: LocalStoredMessage): LocalStoredMessage | null {
   if (typeof nachricht.createdAt !== 'string') return null
   if (typeof nachricht.isSelf !== 'boolean') return null
   // Was nie hinausging, gehört auch nicht in den Verlauf eines anderen
-  // Geräts: es stünde dort für immer auf „wird gesendet“.
-  if (nachricht.status === 'queued' || nachricht.status === 'failed') return null
+  // Geräts: es stünde dort für immer auf „wird gesendet“. Das gilt nur für
+  // **eigene** Zeilen: eine empfangene Nachricht aus dem Gerätepostfach trägt
+  // lokal ebenfalls `queued` (ihre Kennung ist negativ), ist aber längst da.
+  // Bis 23.10.2026 fiel sie damit aus jeder Verlaufsübergabe.
+  if (
+    nachricht.isSelf &&
+    (nachricht.status === 'queued' || nachricht.status === 'failed')
+  ) {
+    return null
+  }
+  // Abgelaufenes wird weder exportiert noch importiert. Auf dem Quellgerät
+  // fehlt es meist schon; ein altes Paket darf es nicht zurückbringen.
+  if (typeof nachricht.verfaelltAm === 'string') {
+    const ablauf = Date.parse(nachricht.verfaelltAm)
+    if (Number.isFinite(ablauf) && ablauf <= Date.now()) return null
+  }
 
   // Der Platzhalter eines früheren Standes ist keine Nachricht, sondern die
   // Aussage „konnte ich nicht lesen". Er darf nicht im Verlauf eines anderen
@@ -265,10 +277,12 @@ export async function sendeVerlaufAnGeraet(
   }
 
   let gesendet = 0
+  const medien = new Map<string, MedienAuftrag>()
   for (const mid of mailboxen) {
     try {
       const nachrichten = await loadLocalMessages(mid)
       if (nachrichten.length === 0) continue
+      anhaengeSammeln(nachrichten, mid, medien)
       const peerId = partnerJeMailbox.get(mid)
       let dmGeheimnis:
         | { peerId: number; geheimnis: string; beleg?: Record<string, unknown> }
@@ -372,12 +386,25 @@ export async function sendeVerlaufAnGeraet(
         rest = rest.slice(0, rest.length - gepackt.anzahl)
         teil += 1
       }
+      // Was der Deckel nicht mehr fasst, ist ein ausdruecklicher Teilfehler —
+      // kein vollstaendiger Verlauf.
+      if (rest.length > 0) optionen.beiTeilfehler?.()
     } catch {
       // Naechste Mailbox. Ein Paket ist ein Zusatz, kein Grund, die Freigabe
       // rueckgaengig zu machen — aber der Aufrufer soll wissen, dass die
       // Übergabe nicht vollständig war und nicht als erledigt gilt.
       optionen.beiTeilfehler?.()
     }
+  }
+
+  // Erst die Nachrichten, dann die Anhänge: das Ziel bekommt Zeilen mit
+  // Zeigern und danach die Dateien dazu.
+  if (medien.size > 0) {
+    const ergebnis = await sendeMedienAnGeraet(ziel, [...medien.values()], optionen).catch(
+      () => ({ gesendet: 0, fehlend: medien.size }),
+    )
+    gesendet += ergebnis.gesendet
+    if (ergebnis.fehlend > 0) optionen.beiTeilfehler?.()
   }
   return gesendet
 }
@@ -447,7 +474,10 @@ export async function verarbeiteVerlaufsAbgleich(
   eigeneId: number,
   entsiegle: (umschlag: string) => Promise<string>,
 ): Promise<number> {
-  if (roh.type !== VERLAUF_SYNC_TYP) return 0
+  const typ = roh.type
+  if (typ !== VERLAUF_SYNC_TYP && typ !== VERLAUF_MEDIA_TYP && typ !== VERLAUF_MEDIA_ACK_TYP) {
+    return 0
+  }
   const konto = angemeldetesKonto()
   if (!konto || Number(konto) !== Number(eigeneId)) return 0
 
@@ -463,6 +493,19 @@ export async function verarbeiteVerlaufsAbgleich(
   if (!vonGeraet) return 0
   const geschwister = await geraeteVon(eigeneId)
   if (!geschwister.some((g) => g.device_id === vonGeraet)) return 0
+
+  // Ein Anhang ist beim Ziel angekommen und geprueft: erst jetzt gilt er beim
+  // Absender als uebergeben.
+  if (typ === VERLAUF_MEDIA_ACK_TYP) {
+    const mediaId = roh.mediaId
+    if (!kennungInOrdnung(mediaId)) return 0
+    merkeMediumGesendet(Number(konto), vonGeraet, mediaId)
+    return 1
+  }
+
+  if (typ === VERLAUF_MEDIA_TYP) {
+    return await nimmtMedienTeil(roh, vonGeraet, entsiegle)
+  }
 
   const paketText = await entsiegle(String(roh.paket || ''))
   let paket: { mailbox?: unknown; nachrichten?: unknown; dmGeheimnis?: unknown; art?: unknown }
@@ -487,10 +530,13 @@ export async function verarbeiteVerlaufsAbgleich(
   const rohe = Array.isArray(paket.nachrichten) ? paket.nachrichten : []
   if (!mid || rohe.length === 0) return 0
 
+  // Ein Paket traegt hoechstens 200 Nachrichten; 1000 sind die Schranke
+  // gegen ein Paket, das mehr behauptet. Frueher schnitt `.slice(-500)` den
+  // Rest still weg.
   const nachrichten = rohe
     .map((m) => kompakt(m as LocalStoredMessage))
     .filter((m): m is LocalStoredMessage => m !== null)
-    .slice(-500)
+    .slice(0, 1000)
   if (nachrichten.length === 0) return 0
 
   // Die Art reist im Paket: der Absender weiss, ob die Mailbox zu einer

@@ -113,7 +113,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 5
+const DB_VERSION = 6
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -125,6 +125,8 @@ const STORE_KLARTEXTE = 'envelope_plaintexts'
 const STORE_ENTWUERFE = 'entwuerfe'
 const STORE_FUNKEN = 'funken'
 const STORE_MEDIEN = 'medien'
+/** Angefangene Medienuebertragungen, Stueck fuer Stueck. */
+const STORE_MEDIEN_TEILE = 'medien_teile'
 
 /**
  * Die Felder einer Nachricht, die im Klartext liegen bleiben müssen.
@@ -290,6 +292,15 @@ function openLocalDatabase(): Promise<IDBDatabase> {
       // geschützt wie der Verlauf.
       if (!db.objectStoreNames.contains(STORE_MEDIEN)) {
         db.createObjectStore(STORE_MEDIEN, { keyPath: 'mediaId' })
+      }
+      // Version 6: angekommene Teile einer Medienuebertragung.
+      //
+      // Ein Anhang reist in Stuecken, weil ein Umschlag 1 MiB fasst. Erst wenn
+      // alle Teile da sind und die Pruefsumme stimmt, wird daraus ein Eintrag
+      // in `medien`; bis dahin liegt hier nur, was noch nicht uebernommen ist.
+      if (!db.objectStoreNames.contains(STORE_MEDIEN_TEILE)) {
+        const teile = db.createObjectStore(STORE_MEDIEN_TEILE, { keyPath: 'id' })
+        teile.createIndex('by_transfer', 'transferId', { unique: false })
       }
     }
 
@@ -738,6 +749,11 @@ function mediumAad(mediaId: string): string {
   return `msm-medium:${mediaId}`
 }
 
+/** Bindet ein angekommenes Stueck an seine Uebertragung und Position. */
+function medienTeilAad(transferId: string, teil: number): string {
+  return `msm-medienteil:${transferId}:${teil}`
+}
+
 /**
  * Legt einen entschlüsselten Anhang dauerhaft ab.
  *
@@ -791,6 +807,82 @@ export async function leseMedium(mediaId: string): Promise<string | null> {
   if (!roh) return null
   const zeile = await entsiegleZeile<{ klartext?: unknown }>(roh, mediumAad(mediaId))
   return typeof zeile?.klartext === 'string' ? zeile.klartext : null
+}
+
+/** Ein Stueck einer Medienuebertragung, so wie es durchs Relais kam. */
+export interface MedienTeil {
+  transferId: string
+  mediaId: string
+  name: string | null
+  teil: number
+  teile: number
+  sha256: string
+  groesse: number
+  daten: string
+}
+
+/**
+ * Ein Stueck ablegen — versiegelt wie alles andere in dieser Ablage.
+ *
+ * Dieselbe Position zweimal (die Wiederholung eines Laufs) ersetzt nur sich
+ * selbst. Erst wenn alle Teile da sind, entsteht daraus ein Anhang.
+ */
+export async function legeMedienTeilAb(teil: MedienTeil): Promise<void> {
+  if (!teil?.transferId || !teil.mediaId || !Number.isInteger(teil.teil)) return
+  const db = await openLocalDatabase()
+  const id = `${teil.transferId}:${teil.teil}`
+  const zeile = await versiegleZeile(
+    { ...teil, id },
+    ['id', 'transferId'],
+    medienTeilAad(teil.transferId, teil.teil),
+  )
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_TEILE, 'readwrite')
+    tx.objectStore(STORE_MEDIEN_TEILE).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Alle angekommenen Stuecke einer Uebertragung, nach Position sortiert. */
+export async function holeMedienTeile(transferId: string): Promise<MedienTeil[]> {
+  if (!transferId) return []
+  const db = await openLocalDatabase()
+  const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_TEILE, 'readonly')
+    const index = tx.objectStore(STORE_MEDIEN_TEILE).index('by_transfer')
+    const req = index.getAll(IDBKeyRange.only(transferId))
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+  const teile = await entsiegleZeilen<MedienTeil>(rohzeilen, (z) =>
+    medienTeilAad(String(z.transferId), Number(z.teil)),
+  )
+  return teile
+    .filter((t) => typeof t?.daten === 'string' && Number.isInteger(Number(t.teil)))
+    .sort((a, b) => a.teil - b.teil)
+}
+
+/** Die Stuecke einer Uebertragung wieder wegwerfen (fertig oder unbrauchbar). */
+export async function loescheMedienTeile(transferId: string): Promise<void> {
+  if (!transferId) return
+  const db = await openLocalDatabase()
+  const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_TEILE, 'readonly')
+    const index = tx.objectStore(STORE_MEDIEN_TEILE).index('by_transfer')
+    const req = index.getAll(IDBKeyRange.only(transferId))
+    req.onsuccess = () => resolve(req.result || [])
+    req.onerror = () => reject(req.error)
+  })
+  if (rohzeilen.length === 0) return
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_MEDIEN_TEILE, 'readwrite')
+    for (const zeile of rohzeilen) tx.objectStore(STORE_MEDIEN_TEILE).delete(zeile.id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
 }
 
 /** Nimmt einen Anhang aus der Ablage. Gehört zum Löschen und zum Verfall. */

@@ -23,6 +23,7 @@ import {
 import { leereAntwortSperren, verarbeiteGruppenSteuerung } from './gruppenSteuerung'
 import { normalisiereMitglieder, type GruppenKontext } from './typen'
 import { VERLAUF_SYNC_TYP, verarbeiteVerlaufsAbgleich } from '../geraet/verlaufsAbgleich'
+import { VERLAUF_MEDIA_ACK_TYP, VERLAUF_MEDIA_TYP } from '../geraet/verlaufsMedien'
 
 /**
  * Wie weit die eigene Geräte-Mailbox schon gelesen ist, je Konto.
@@ -180,7 +181,11 @@ export async function holeGeraeteSteuerung(
       // Der Verlauf eines frisch freigegebenen eigenen Geräts. Er kommt aus
       // derselben Mailbox wie die Schlüssel und ist dort an genau dieses Gerät
       // versiegelt; der Absender ist ein freigegebenes Geschwistergerät.
-      if (roh.type === VERLAUF_SYNC_TYP) {
+      if (
+        roh.type === VERLAUF_SYNC_TYP ||
+        roh.type === VERLAUF_MEDIA_TYP ||
+        roh.type === VERLAUF_MEDIA_ACK_TYP
+      ) {
         try {
           verarbeitet += await verarbeiteVerlaufsAbgleich(roh, eigeneId, entsiegle)
         } catch {

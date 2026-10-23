@@ -140,7 +140,16 @@ export async function packeUndVersiegele(ziele: readonly UebergabeZiel[]): Promi
   const schluesselJe = await unterschriebeneSchluessel(konto, rawNotesKey, ziele)
 
   const verlaeufe = await Promise.all(
-    mailboxen.map(async (mid) => ({ mid, nachrichten: await loadLocalMessages(mid) })),
+    mailboxen.map(async (mid) => ({
+      mid,
+      // Abgelaufenes reist nicht mit — sonst stünde es auf dem neuen Gerät
+      // wieder da, obwohl es auf dem alten längst weg ist.
+      nachrichten: (await loadLocalMessages(mid)).filter((m) => {
+        if (typeof m.verfaelltAm !== 'string') return true
+        const ablauf = Date.parse(m.verfaelltAm)
+        return !Number.isFinite(ablauf) || ablauf > Date.now()
+      }),
+    })),
   )
   const belegt = verlaeufe.filter((v) => v.nachrichten.length > 0)
   if (belegt.length === 0 && schluesselJe.size === 0) return null

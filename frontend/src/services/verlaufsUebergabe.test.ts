@@ -216,6 +216,21 @@ describe('Verlaufs-Erstabgleich', () => {
     expect(await packeUndVersiegele([])).toBeNull()
   }, 60_000)
 
+  it('lässt abgelaufene Nachrichten zurück', async () => {
+    lokal.set(MAILBOX, [
+      { ...nachricht(1, 'alt'), verfaelltAm: '2020-01-01T00:00:00.000Z' },
+      nachricht(2, 'neu'),
+    ])
+
+    const blob = await packeUndVersiegele([
+      { device_id: 'neu', public_key: neuesGeraet.publicKeyJwk },
+    ])
+    lokal.clear()
+    await uebernimmVerlauf(blob!, neuesGeraet.privateKeyJwk)
+
+    expect(lokal.get(MAILBOX)!.map((m) => m.text)).toEqual(['neu'])
+  }, 60_000)
+
   it('kürzt auf die jüngsten Nachrichten je Mailbox', async () => {
     // 200 ist die oberste Stufe; alles darüber bleibt zurück, und zwar das
     // Älteste.
