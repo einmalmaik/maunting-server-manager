@@ -112,20 +112,32 @@ function Wetterwahl() {
   const setzen = useEinstellungenStore((s) => s.setzen)
   const [suche, setSuche] = useState('')
   const [treffer, setTreffer] = useState<WetterOrt[]>([])
+  const [laeuft, setLaeuft] = useState(false)
+  const [fehler, setFehler] = useState(false)
+  const [versuch, setVersuch] = useState(0)
   useEffect(() => {
     const q = suche.trim()
     if (q.length < 2) {
       setTreffer([])
+      setLaeuft(false)
+      setFehler(false)
       return
     }
     let weg = false
+    setLaeuft(true)
+    setFehler(false)
     const timer = window.setTimeout(() => {
       api<{ orte: WetterOrt[] }>(`/browser/wetter/orte?q=${encodeURIComponent(q)}`).then(
         (antwort) => {
-          if (!weg) setTreffer(Array.isArray(antwort.orte) ? antwort.orte.filter(istWetterOrt) : [])
+          if (weg) return
+          setTreffer(Array.isArray(antwort.orte) ? antwort.orte.filter(istWetterOrt) : [])
+          setLaeuft(false)
         },
         () => {
-          if (!weg) setTreffer([])
+          if (weg) return
+          setTreffer([])
+          setLaeuft(false)
+          setFehler(true)
         },
       )
     }, 250)
@@ -133,7 +145,14 @@ function Wetterwahl() {
       weg = true
       window.clearTimeout(timer)
     }
-  }, [suche])
+  }, [suche, versuch])
+  const waehlen = (eintrag: WetterOrt) => {
+    setzen({ wetterOrt: eintrag })
+    setSuche('')
+    setTreffer([])
+    setFehler(false)
+    setLaeuft(false)
+  }
   return (
     <>
       <Aktionszeile name={t('browser.einstellungen.wetterOrt')} hinweis={t('browser.einstellungen.wetterHinweis')}>
@@ -143,9 +162,31 @@ function Wetterwahl() {
           value={suche}
           maxLength={80}
           onChange={(ereignis) => setSuche(ereignis.target.value)}
+          onKeyDown={(ereignis) => {
+            if (ereignis.key === 'Enter' && treffer.length > 0) {
+              ereignis.preventDefault()
+              waehlen(treffer[0])
+            }
+          }}
           className="w-56 max-w-full"
         />
       </Aktionszeile>
+      {laeuft && (
+        <p role="status" className="text-label-sm text-on-surface-variant">
+          {t('browser.einstellungen.wetterSucheLaeuft')}
+        </p>
+      )}
+      {fehler && (
+        <p role="alert" className="flex items-center gap-2 text-label-sm text-status-error">
+          {t('browser.einstellungen.wetterSucheFehler')}
+          <button type="button" className="underline" onClick={() => setVersuch((n) => n + 1)}>
+            {t('browser.einstellungen.wetterErneut')}
+          </button>
+        </p>
+      )}
+      {!laeuft && !fehler && suche.trim().length >= 2 && treffer.length === 0 && (
+        <p className="text-label-sm text-on-surface-variant">{t('browser.einstellungen.wetterKeineTreffer')}</p>
+      )}
       {treffer.length > 0 && (
         <ul className="flex w-full max-w-sm flex-col rounded-lg border border-outline-variant bg-surface-container-high p-1">
           {treffer.map((eintrag) => (
@@ -153,11 +194,7 @@ function Wetterwahl() {
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-3 rounded-md px-3 py-2 text-left text-body-sm hover:bg-surface-variant"
-                onClick={() => {
-                  setzen({ wetterOrt: eintrag })
-                  setSuche('')
-                  setTreffer([])
-                }}
+                onClick={() => waehlen(eintrag)}
               >
                 <span>
                   {eintrag.name}
