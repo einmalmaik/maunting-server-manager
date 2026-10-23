@@ -23,6 +23,7 @@ import {
 } from '@/services/gruppenSchluessel'
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { holeOffeneMedien } from '@/services/medienNachholen'
+import { setzeLoeschMelder, stosseLoeschungenAn } from '@/services/loeschNachholen'
 import { anheftung } from '@/services/nachrichtAnheftung'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
@@ -293,6 +294,37 @@ export function useMessengerKern({
   }, [currentUserId, identity, messengerGesperrt])
 
   /**
+   * Das Server-Aufräumen gelöschter Nachrichten abarbeiten.
+   *
+   * Dieselben drei Anlässe wie beim Medien-Nachholen und bei der Outbox:
+   * Start (Identität da, nicht gesperrt), `online` und die Rückkehr der App
+   * nach vorn. Das Entsperren löst diesen Effekt über `messengerGesperrt`
+   * ebenfalls aus. Der vierte Anlass steht im Löschpfad selbst: dort wird der
+   * Auftrag sofort versucht.
+   *
+   * Der Auftrag liegt in der Ablage; hier wird nur gelesen, was fällig ist.
+   * Kein Timer, kein Dauerfeuer.
+   */
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready') return
+    let aktiv = true
+    const lauf = () => {
+      if (!aktiv) return
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void stosseLoeschungenAn().catch(() => {})
+    }
+    lauf()
+    window.addEventListener('online', lauf)
+    document.addEventListener('visibilitychange', lauf)
+    return () => {
+      aktiv = false
+      window.removeEventListener('online', lauf)
+      document.removeEventListener('visibilitychange', lauf)
+    }
+  }, [currentUserId, identity.state, messengerGesperrt])
+
+  /**
    * Die Outbox der Steuerwirkungen abarbeiten.
    *
    * Dieselben drei Anlässe wie beim Medien-Nachholen — Start (Identität da,
@@ -385,6 +417,37 @@ export function useMessengerKern({
         .catch(() => {})
     })
   }, [t, zeigeSystemzeile, setAngeheftet, setVerfallSekunden])
+
+  /**
+   * Was beim Server-Aufräumen endgültig nicht ging, wird gesagt.
+   *
+   * Drei Fälle: der Server hat es abgelehnt, die Versuche sind erschöpft, oder
+   * ein fremder Anhang ließ sich nicht entfernen. Der Text gehört in das
+   * Gespräch, um das es geht; ist ein anderes offen, sagt es ein Toast. Eine
+   * stille Lücke gibt es nicht (Punkt 168 des Regelwerks).
+   */
+  useEffect(() => {
+    return setzeLoeschMelder((auftrag, grund, medienGeblieben) => {
+      const fremdesMedium = grund === 'medien' && auftrag.fremd
+      const schluessel =
+        grund === 'abgelehnt'
+          ? 'messenger.serverCleanupRejected'
+          : grund === 'aufgegeben'
+            ? 'messenger.serverCleanupAbandoned'
+            : auftrag.fremd
+              ? 'messenger.messageRemovedMediaStays'
+              : 'messenger.serverCleanupMediaRemains'
+      const text = t(
+        schluessel,
+        fremdesMedium ? { count: medienGeblieben } : undefined,
+      )
+      if (auftrag.mailbox === activeMailboxIdRef.current) {
+        zeigeSystemzeile(text, `loesch-${auftrag.id}`)
+      } else {
+        toast.info(text)
+      }
+    })
+  }, [t, zeigeSystemzeile])
 
   /**
    * Das Gerätepostfach im Hintergrund leeren.

@@ -55,11 +55,11 @@ import {
   updateMessageInLocalStore,
 } from '@/services/messengerLocalStore'
 import {
+  baueLoeschauftrag,
   tilgeInhalt,
-  tilgeNachrichtBeimServer,
-  tilgeFremdeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } from '@/services/nachrichtLoeschen'
+import { merkeUndRaeumeServerkopie } from '@/services/loeschNachholen'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerKennungen } from '@/services/quittungsstand'
 import { vergissMailbox } from '@/services/verlaufSuche'
@@ -442,32 +442,28 @@ export function useMessengerSenden(optionen: Optionen) {
         return geaendert
       })
 
-      // 3. Chiffretext und Anhänge vom Server nehmen — best effort, mit dem
-      //    `msg`-Objekt von eben. Die Medienkennungen stehen ausschließlich in
-      //    dieser Zeile; ein Fehlschlag wird gesagt, nicht verschluckt.
-      let medienGeblieben = 0
-      let serverRest = false
-      try {
-        if (fremd) {
-          ;({ medienGeblieben } = await tilgeFremdeNachrichtBeimServer(blindMailboxId, msg))
-        } else {
-          await tilgeNachrichtBeimServer(blindMailboxId, msg)
-        }
-      } catch {
-        serverRest = true
-      }
+      // 3. Chiffretext und Anhänge vom Server nehmen — als **dauerhafter
+      //    Auftrag**, abgelegt vor dem ersten Serveraufruf. Die Medienkennungen
+      //    stehen ausschließlich im `msg`-Objekt von eben: die Zeile ist hier
+      //    schon ein Grabstein. Bricht die App nach dem Ablegen ab, holt der
+      //    nächste Anlass den Auftrag nach. Ein Fehlschlag wird gesagt, nicht
+      //    verschluckt.
+      const ausgang = await merkeUndRaeumeServerkopie(
+        baueLoeschauftrag(blindMailboxId, msg, fremd),
+      )
+      const serverRest = ausgang.offen
 
-      if (!fremd) {
-        toast.success(t('messenger.messageDeletedForAll'))
-      } else if (medienGeblieben > 0) {
-        // Nicht verschweigen: der Text ist weg, das Bild liegt noch da.
-        toast.info(t('messenger.messageRemovedMediaStays', { count: medienGeblieben }))
-      } else {
-        toast.success(t('messenger.messageRemovedByModeration'))
+      // Kein „für alle gelöscht", solange ein Anhang nachweislich bleibt: der
+      // Lauf hat das schon über `setzeLoeschMelder` gesagt. Ein Erfolg daneben
+      // wäre die falsche Zusage, gegen die diese Datei geschrieben ist.
+      if (ausgang.medienGeblieben === 0) {
+        if (fremd) toast.success(t('messenger.messageRemovedByModeration'))
+        else toast.success(t('messenger.messageDeletedForAll'))
       }
       if (serverRest) {
-        // Hier ist sie weg; die Serverkopie bleibt bis zum Ablauf ihrer Frist.
-        // Das zu sagen ist besser, als „für alle gelöscht" zu behaupten.
+        // Hier ist sie weg; die Serverkopie liegt noch und wird weiter
+        // versucht. Das zu sagen ist besser, als „für alle gelöscht" zu
+        // behaupten.
         toast.info(t('messenger.messageServerCopyRemains'))
       }
       await loadMessages(false)

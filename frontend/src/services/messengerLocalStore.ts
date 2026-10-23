@@ -5,7 +5,7 @@
  * browser refreshes (F5) and app restarts (Web, Desktop, Mobile) without
  * re-entering recovery keys or waiting for network round-trips.
  *
- * Database: `msm_messenger_local:konto:<id>` (v8)
+ * Database: `msm_messenger_local:konto:<id>` (v9)
  * Object Stores:
  *  - `messages`: keyed by `[blindMailboxId, id]`, indexed by `blindMailboxId`, `createdAt`, `clientUuid`
  *  - `mailboxes`: keyed by `blindMailboxId`, tracks `lastSyncedEnvelopeId` and `updatedAt`
@@ -46,6 +46,7 @@ import {
   MAX_AUFTRAEGE,
   type SteuerAuftrag,
 } from './steuerOutboxTypen'
+import { LOESCH_AUFTRAEGE_MAX, type LoeschAuftrag } from './loeschAuftraege'
 
 export interface LocalStoredMessage {
   blindMailboxId?: string
@@ -117,7 +118,7 @@ export interface LocalMailboxMeta {
 }
 
 const DB_PRAEFIX = 'msm_messenger_local'
-const DB_VERSION = 8
+const DB_VERSION = 9
 
 /** Die Ablage dieses Kontos. Ein anderes Konto, eine andere Datenbank. */
 function dbName(kontoId: number): string {
@@ -137,6 +138,8 @@ const STORE_MEDIEN_AUFTRAEGE = 'medien_auftraege'
 const STORE_MEDIEN_GRABSTEINE = 'medien_grabsteine'
 /** Wirkungen, die noch nicht hinaus sind (Bearbeiten, Loeschen, Reaktion, ...). */
 const STORE_STEUER_AUFTRAEGE = 'steuer_auftraege'
+/** Offene Server-Aufraeumauftraege zu geloeschten Nachrichten. */
+const STORE_LOESCH_AUFTRAEGE = 'loesch_auftraege'
 
 /**
  * So viele Grabsteine bleiben.
@@ -384,6 +387,23 @@ function openLocalDatabase(): Promise<IDBDatabase> {
         steuer.createIndex('by_faellig', 'naechsterVersuch', { unique: false })
         steuer.createIndex('by_angelegt', 'angelegtAm', { unique: false })
         steuer.createIndex('by_ziel', 'ziel', { unique: false })
+      }
+      /*
+       * Version 9: das Server-Aufraeumen einer geloeschten Nachricht.
+       *
+       * Der Auftrag entsteht **vor** dem Serveraufruf und ueberlebt einen
+       * Absturz dazwischen. Er traegt Mailbox, logische und Umschlagkennung
+       * sowie die Medienkennungen samt Bindung — die Nachrichtenzeile ist
+       * lokal zu diesem Zeitpunkt nur noch ein Grabstein. Deshalb dieselbe
+       * kontogebundene Ablage wie der Verlauf und dasselbe Siegel; im
+       * localStorage laege er fuer jedes Konto des Browsers offen.
+       *
+       * Lesbar bleiben nur die Felder mit Index: Kennung, Mailbox, Termine.
+       */
+      if (!db.objectStoreNames.contains(STORE_LOESCH_AUFTRAEGE)) {
+        const loesch = db.createObjectStore(STORE_LOESCH_AUFTRAEGE, { keyPath: 'id' })
+        loesch.createIndex('by_faellig', 'naechsterVersuch', { unique: false })
+        loesch.createIndex('by_angelegt', 'angelegtAm', { unique: false })
       }
       // Die vorhandene Tabelle aus Version 6 bekommt ihren Index nach. In
       // einer frisch angelegten steht er schon oben.
@@ -1255,6 +1275,133 @@ export async function loescheMedienAuftrag(id: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE_MEDIEN_AUFTRAEGE, 'readwrite')
     tx.objectStore(STORE_MEDIEN_AUFTRAEGE).delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+// ==========================================
+// Die Server-Aufraeumauftraege beim Loeschen
+// ==========================================
+
+/**
+ * Bindet einen Loeschauftrag an seine Kennung.
+ *
+ * Die Kennung enthaelt Mailbox und logische Nachrichtenkennung, steht aber
+ * als reine Zeichenkette im Klartext — sie traegt den Index. Inhalt steht
+ * nicht darin.
+ */
+function loeschAuftragAad(id: string): string {
+  return `msm-loeschauftrag:${id}`
+}
+
+/** Lesbar bleiben nur die Felder mit Index und die Termine. */
+const LOESCH_KLARFELDER = ['id', 'mailbox', 'naechsterVersuch', 'angelegtAm'] as const
+
+/**
+ * Legt einen Auftrag an — **idempotent** und mit fester Grenze.
+ *
+ * Gibt es ihn schon, bleibt der alte stehen: ein zweiter Loeschversuch
+ * derselben Nachricht darf Versuche und Termin nicht zuruecksetzen. Ist die
+ * Warteschlange voll, wird **nichts** angenommen (`false`); der Aufrufer
+ * versucht es dann einmal direkt und sagt es, statt einen aelteren Auftrag
+ * still zu verdraengen.
+ */
+export async function legeLoeschauftragAn(auftrag: LoeschAuftrag): Promise<boolean> {
+  if (!auftrag?.id || !auftrag.mailbox) return false
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(auftrag, LOESCH_KLARFELDER, loeschAuftragAad(auftrag.id))
+  return await new Promise<boolean>((resolve, reject) => {
+    const tx = db.transaction(STORE_LOESCH_AUFTRAEGE, 'readwrite')
+    const store = tx.objectStore(STORE_LOESCH_AUFTRAEGE)
+    let angenommen = false
+    const vorhanden = store.get(auftrag.id)
+    vorhanden.onsuccess = () => {
+      if (vorhanden.result != null) {
+        // Schon da: der Auftrag liegt, und genau das ist die Zusage.
+        angenommen = true
+        return
+      }
+      const zahl = store.count()
+      zahl.onsuccess = () => {
+        if (zahl.result >= LOESCH_AUFTRAEGE_MAX) return
+        store.put(zeile)
+        angenommen = true
+      }
+      zahl.onerror = () => reject(zahl.error)
+    }
+    vorhanden.onerror = () => reject(vorhanden.error)
+    tx.oncomplete = () => resolve(angenommen)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/** Schreibt den fortgeschriebenen Stand (Versuche, naechster Termin). */
+export async function schreibeLoeschauftrag(auftrag: LoeschAuftrag): Promise<void> {
+  if (!auftrag?.id) return
+  const db = await openLocalDatabase()
+  const zeile = await versiegleZeile(auftrag, LOESCH_KLARFELDER, loeschAuftragAad(auftrag.id))
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_LOESCH_AUFTRAEGE, 'readwrite')
+    tx.objectStore(STORE_LOESCH_AUFTRAEGE).put(zeile)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error)
+  })
+}
+
+/**
+ * Alle offenen Auftraege dieses Kontos, aelteste zuerst.
+ *
+ * Ein Lesefehler ist kein Fehler: gesperrt, kein Konto oder Ablage weg heisst
+ * „es gibt gerade nichts abzuarbeiten", und der naechste Anlass liest wieder.
+ * Was nicht aufgeht oder verbogen ist, bleibt liegen.
+ */
+export async function ladeLoeschAuftraege(): Promise<LoeschAuftrag[]> {
+  try {
+    const db = await openLocalDatabase()
+    const rohzeilen = await new Promise<Record<string, any>[]>((resolve, reject) => {
+      const tx = db.transaction(STORE_LOESCH_AUFTRAEGE, 'readonly')
+      const req = tx.objectStore(STORE_LOESCH_AUFTRAEGE).getAll()
+      req.onsuccess = () => resolve(req.result || [])
+      req.onerror = () => reject(req.error)
+    })
+    const offen = await entsiegleZeilen<LoeschAuftrag>(rohzeilen, (z) =>
+      loeschAuftragAad(String(z.id)),
+    )
+    return offen
+      .filter(
+        (a) =>
+          typeof a?.id === 'string' &&
+          typeof a.mailbox === 'string' &&
+          (a.clientUuid === null || typeof a.clientUuid === 'string') &&
+          Number.isFinite(a.nachrichtId) &&
+          Array.isArray(a.medien) &&
+          a.medien.every(
+            (m) =>
+              typeof m?.mediaId === 'string' &&
+              typeof m.mailbox === 'string' &&
+              Number.isFinite(m.absenderId),
+          ) &&
+          typeof a.fremd === 'boolean' &&
+          Number.isInteger(a.versuche) &&
+          Number.isFinite(a.naechsterVersuch) &&
+          Number.isFinite(a.angelegtAm),
+      )
+      .sort((a, b) => a.angelegtAm - b.angelegtAm)
+  } catch {
+    return []
+  }
+}
+
+export async function loescheLoeschauftrag(id: string): Promise<void> {
+  if (!id) return
+  const db = await openLocalDatabase()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_LOESCH_AUFTRAEGE, 'readwrite')
+    tx.objectStore(STORE_LOESCH_AUFTRAEGE).delete(id)
     tx.oncomplete = () => resolve()
     tx.onerror = () => reject(tx.error)
     tx.onabort = () => reject(tx.error)
@@ -2204,6 +2351,10 @@ export async function clearLocalMessengerStore(): Promise<void> {
           // nichts liegen bleiben — und mit der Sitzung des naechsten Kontos
           // ginge er sonst hinaus (Punkt 50 des Regelwerks).
           STORE_STEUER_AUFTRAEGE,
+          // Und das Server-Aufraeumen geloeschter Nachrichten: es nennt die
+          // Mailbox und die Medienkennungen dieses Kontos. Mit der Sitzung des
+          // naechsten Kontos duerfte es nicht hinausgehen.
+          STORE_LOESCH_AUFTRAEGE,
         ],
         'readwrite'
       )
@@ -2214,6 +2365,7 @@ export async function clearLocalMessengerStore(): Promise<void> {
       tx.objectStore(STORE_MEDIEN_AUFTRAEGE).clear()
       tx.objectStore(STORE_MEDIEN_GRABSTEINE).clear()
       tx.objectStore(STORE_STEUER_AUFTRAEGE).clear()
+      tx.objectStore(STORE_LOESCH_AUFTRAEGE).clear()
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
     })
