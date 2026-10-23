@@ -85,19 +85,31 @@ export async function holeMedium(mediaId: string): Promise<string | null> {
 }
 
 /**
- * Holt einen Anhang und legt ihn ab — wenn er nicht schon da liegt.
+ * Holt einen Anhang und legt ihn ab — wenn er nicht schon **dauerhaft** da
+ * liegt.
  *
- * Gibt zurück, ob der Anhang danach **lokal gesichert** ist. Das ist die
+ * Gibt zurück, ob der Anhang danach lokal gesichert ist. Das ist die
  * Zusage, die die Anzeige braucht: „dauerhaft verfügbar" heisst „liegt auf
- * diesem Gerät", nicht „der Server hat es noch".
+ * diesem Gerät", nicht „stand eben noch im Arbeitsspeicher".
+ *
+ * **Der Arbeitsspeicher zählt hier nicht.** Er ist eine Optimierung über der
+ * Ablage: ein Anhang, den die Anzeige eben geholt hat, ist im RAM, aber nach
+ * dem Neuladen weg. Zählte er als gesichert, bliebe die Ablage leer — und die
+ * Zusage wäre falsch. Bis 23.10.2026 war genau das so: die native App zeigte
+ * das Bild, und nach dem Neuladen war es weg.
  */
 export async function sichereMedium(
   zeiger: MedienZeiger,
   bindung: MedienBindung,
   name?: string | null,
 ): Promise<boolean> {
-  const vorhanden = await holeMedium(zeiger.mediaId)
-  if (vorhanden) return true
+  try {
+    const gespeichert = await leseMedium(zeiger.mediaId)
+    if (gespeichert) return true
+  } catch {
+    // Die Ablage streikt: dann holen wir den Anhang und versuchen es noch
+    // einmal mit dem Schreiben.
+  }
   try {
     const klartext = await ladeAnhangHerunter(zeiger, bindung)
     const sicher = getSafeAttachmentUrl(klartext)
@@ -115,8 +127,15 @@ export async function sichereMedium(
 /**
  * Holt alle Anhänge dieser Nachrichten und legt sie ab.
  *
- * Nur fremde Nachrichten: was dieses Gerät selbst geschickt hat, liegt beim
- * Hochladen schon in der Ablage (`nachrichtVersand.ts`).
+ * **Auch die eigenen Nachrichten.** Das ist nicht selbstverständlich: das
+ * Gerät, das den Anhang hochgeladen hat, legt ihn beim Hochladen ab. Das
+ * *zweite* Gerät desselben Kontos hat die Datei aber nicht — es sieht nur
+ * den Zeiger im Nachrichtenpayload. Es stand hier bis 23.10.2026 als „eigene
+ * Nachricht“ auf der Liste und holte den Anhang nie; das Bild war dann nur im
+ * RAM, nach dem Neuladen weg.
+ *
+ * Das Hochladenegerät lädt dabei nichts zweimal: `sichereMedium` findet den
+ * Anhang in der Ablage und ist fertig.
  *
  * Gibt zurück, wie viele Anhänge danach lokal gesichert sind. Ein Anhang, der
  * nicht gesichert werden konnte, ist **nicht** gesichert — und wird nicht so
@@ -130,7 +149,6 @@ export async function sichereAnhaenge(
 
   const aufträge: { zeiger: MedienZeiger; bindung: MedienBindung; name?: string | null }[] = []
   for (const nachricht of nachrichten) {
-    if (nachricht.isSelf) continue
     const absenderId = Number(nachricht.senderId)
     if (!Number.isInteger(absenderId) || absenderId <= 0) continue
     for (const anhang of [

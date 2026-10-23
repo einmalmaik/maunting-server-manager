@@ -19,7 +19,7 @@ vi.mock('./messengerLocalStore', () => ({
 }))
 
 import { ladeAnhangHerunter } from '@/api/social'
-import { leereKlartextSpeicher } from './klartextSpeicher'
+import { chatMediaBlobCache, leereKlartextSpeicher } from './klartextSpeicher'
 import { leseMedium, speichereMedium } from './messengerLocalStore'
 import { sichereAnhaenge, sichereMedium, zeigerVon } from './medienSicherung'
 
@@ -70,6 +70,23 @@ describe('medienSicherung', () => {
     expect(ladeAnhangHerunter).not.toHaveBeenCalled()
   })
 
+  it('hält einen Anhang nur im Arbeitsspeicher nicht für gesichert', async () => {
+    /*
+     * Der Anhang stand schon im RAM, weil die Anzeige ihn geholt hatte. Nach
+     * dem Neuladen wäre er weg gewesen — die Zusage „liegt auf diesem Gerät"
+     * wäre falsch. Also wird er geholt **und** abgelegt.
+     */
+    chatMediaBlobCache.set('media-1', BILD)
+    const ergebnis = await sichereAnhaenge(
+      [{ senderId: 2, isSelf: false, imageAttachment: { ...ZEIGER } }],
+      'mailbox-1',
+    )
+
+    expect(ergebnis).toEqual({ gesichert: 1, offen: 0 })
+    expect(ladeAnhangHerunter).toHaveBeenCalledTimes(1)
+    expect(speichereMedium).toHaveBeenCalledWith('media-1', BILD, null)
+  })
+
   it('meldet einen Anhang, der nicht zu holen war, als offen', async () => {
     // Kein Netz, abgelaufen, Kontingent: der Anhang bleibt offen und wird
     // später erneut versucht. Er wird **nicht** als gesichert gemeldet.
@@ -83,16 +100,21 @@ describe('medienSicherung', () => {
     expect(speichereMedium).not.toHaveBeenCalled()
   })
 
-  it('holt die eigenen Anhänge nicht', async () => {
-    // Was dieses Gerät geschickt hat, liegt beim Hochladen schon in der
-    // Ablage (`nachrichtVersand.ts`).
+  it('holt die eigenen Anhänge nur, wenn sie hier fehlen', async () => {
+    /*
+     * Das Gerät, das hochgeladen hat, legt den Anhang beim Hochladen ab und
+     * holt ihn nicht noch einmal. Das *zweite* Gerät desselben Kontos hat die
+     * Datei aber nicht — es sieht nur den Zeiger im Payload. Bis 23.10.2026
+     * stand die eigene Nachricht auf der Liste, und der Anhang war dort nur im
+     * RAM: nach dem Neuladen weg.
+     */
     const ergebnis = await sichereAnhaenge(
       [{ senderId: 1, isSelf: true, imageAttachment: { ...ZEIGER } }],
       'mailbox-1',
     )
 
-    expect(ergebnis).toEqual({ gesichert: 0, offen: 0 })
-    expect(ladeAnhangHerunter).not.toHaveBeenCalled()
+    expect(ergebnis).toEqual({ gesichert: 1, offen: 0 })
+    expect(ladeAnhangHerunter).toHaveBeenCalledTimes(1)
   })
 
   it('lässt einen Anhang ohne Zeiger in Ruhe', async () => {
