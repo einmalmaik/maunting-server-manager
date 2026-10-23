@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, Database, FileArchive, GitBranch, KeyRound, Mic, Globe, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRightLeft, BellRing, Database, FileArchive, GitBranch, KeyRound, Mic, Globe, Inbox, MonitorSmartphone, Network, PhoneCall, Plug, Server, ShieldCheck, Terminal } from 'lucide-react'
 import { CodeBlock } from '@/components/docs/CodeBlock'
 import { PageHeader } from '@/Singra/UI/PageHeader'
 import { Sprungleiste, SPRUNGZIEL_ABSTAND } from '@/Singra/UI/Sprungleiste'
@@ -83,6 +83,7 @@ export function SelfHostingDocs() {
           { id: 'hoster-integration', label: t('docsSelfHosting.hoster.title') },
           { id: 'voice-mode', label: t('docsSelfHosting.voice.title') },
           { id: 'messenger-calls', label: t('docsSelfHosting.calls.title') },
+          { id: 'e2ee-delivery-state', label: t('docsSelfHosting.e2eeState.title') },
           { id: 'push-notifications', label: t('docsSelfHosting.push.title') },
           { id: 'smart-system', label: t('docsSelfHosting.smartSystem.title') },
           { id: 'secure-browser', label: t('docsSelfHosting.secureBrowser.title') },
@@ -461,6 +462,31 @@ export function SelfHostingDocs() {
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
           <p className="text-sm leading-6">{t('docsSelfHosting.calls.permissionsPolicy')}</p>
         </div>
+      </section>
+
+      {/* Der E2EE-Zustellbestand. Er ist kein Backup und keine Historie: was
+          hier liegt, ist ein Puffer mit Frist. Wer das Panel sichert, muss
+          wissen, was im Dump fehlt und was ein Restore nicht zurückbringt. */}
+      <section aria-labelledby="e2ee-delivery-state" className="msm-card mb-10 p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <Inbox className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div>
+            <h2 id="e2ee-delivery-state" className={`${SPRUNGZIEL_ABSTAND} font-headline text-headline-md text-on-surface`}>
+              {t('docsSelfHosting.e2eeState.title')}
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-on-surface-variant">
+              {t('docsSelfHosting.e2eeState.intro')}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-outline-variant bg-outline-variant md:grid-cols-2">
+          {(['stores', 'ttl', 'transfer', 'backup', 'deletion', 'limits'] as const).map(item => (
+            <div key={item} className="bg-surface-container p-4">
+              <dt className="text-sm font-semibold text-on-surface">{t(`docsSelfHosting.e2eeState.${item}.title`)}</dt>
+              <dd className="mt-1 text-sm leading-6 text-on-surface-variant">{t(`docsSelfHosting.e2eeState.${item}.body`)}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       {/* Benachrichtigungen bei geschlossener Anwendung. Einzurichten ist

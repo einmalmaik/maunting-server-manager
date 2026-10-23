@@ -79,7 +79,11 @@ class E2eeDeliveryPayload(Base):
     """Das Chiffretextobjekt — ohne Ziel, ohne Absender, ohne Inhalt.
 
     Mehrere Zustellungen koennen dasselbe Objekt tragen (ein Gruppenpaket an
-    viele Geraete). Es faellt, sobald keine offene Zustellung mehr darauf zeigt.
+    viele Geraete). Das Quittung loescht es, sobald keine offene Zustellung
+    mehr darauf zeigt. Wird ein Geraet entfernt, fallen seine Inbox und seine
+    Auftraege per Kaskade; das Objekt selbst bleibt bis zu seiner Frist (30
+    Tage) liegen, weil es von Auftraegen anderer Inboxen getragen sein kann.
+    `zustellung.abgelaufene_raeumen` nimmt es dann mit.
     """
 
     __tablename__ = "e2ee_delivery_payloads"
@@ -135,8 +139,10 @@ class E2eeDelivery(Base):
     )
     angenommen_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_jetzt, nullable=False)
     ablauf_am: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    # Gesetzt, wenn der Auftrag quittiert wurde. Die Zeile bleibt als
-    # Idempotenzrest, bis die Frist ablaeuft.
+    # Aus dem ersten Entwurf. Der laufende Weg loescht den Auftrag und legt
+    # den Idempotenzrest in `e2ee_delivery_receipts` ab, damit kein
+    # Chiffretextbezug zurueckbleibt. Die Spalte bleibt fuer Datenbanken aus
+    # dem ersten Entwurf; sie wird nicht geschrieben und ist immer NULL.
     quittiert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Die Beziehungen kennt die Datenbank ohnehin — sie stehen als
@@ -154,6 +160,11 @@ class E2eeDeliveryReceipt(Base):
     Nach dem Loeschen der Nutzlast bleibt nur, was eine wiederholte Anfrage
     beantworten muss: die Kennung, der Hash der Anfrage, das Ergebnis und die
     urspruengliche Frist. Kein Inhalt, kein Chiffretext, keine Groesse.
+
+    Er haengt an keiner Geraetezeile: wird das Geraet entfernt, bleibt er bis
+    zu seiner Frist liegen und faellt dann mit `abgelaufene_raeumen`. So
+    beantwortet eine verlorene HTTP-Antwort auch nach dem Entfernen noch
+    dieselbe Wiederholung, ohne ein zweites Versandarchiv anzulegen.
     """
 
     __tablename__ = "e2ee_delivery_receipts"

@@ -263,7 +263,12 @@ def geraet_pruefen(
 
 
 def _offene_last(db: Session, inbox_hash: str) -> tuple[int, int]:
-    """Wie viele Auftraege offen sind und wie viele Bytes sie tragen."""
+    """Wie viele Auftraege offen sind und wie viele Bytes sie tragen.
+
+    Abgelaufene Auftraege zaehlen nicht mehr. Sonst verweigerte eine volle
+    Inbox neue Zustellungen bis zum naechsten Aufraeumlauf, obwohl ihr Inhalt
+    laengst nicht mehr zugestellt wird.
+    """
     zeilen = (
         db.query(
             E2eeDelivery.id,
@@ -273,6 +278,7 @@ def _offene_last(db: Session, inbox_hash: str) -> tuple[int, int]:
         .filter(
             E2eeDelivery.inbox_hash == inbox_hash,
             E2eeDelivery.quittiert_am.is_(None),
+            E2eeDelivery.ablauf_am >= _jetzt(),
         )
         .all()
     )
@@ -401,7 +407,7 @@ def annehmen(
         if rest is not None:
             # Der Auftrag ist schon quittiert; der Rest antwortet. Gleiche
             # Bytes sind eine Wiederholung, andere ein Konflikt.
-            if rest.request_hash == _hash(eintrag_hash(eintrag, nutzlast)):
+            if rest.request_hash == eintrag_hash(eintrag, nutzlast):
                 # Der Auftrag ist laengst quittiert; seine Nummer stand im
                 # Idempotenzrest nicht und ist auch nicht mehr noetig.
                 angenommen.append({"delivery_id": delivery_id, "seq": 0, "ergebnis": "bereits"})
@@ -480,11 +486,20 @@ def annehmen(
 
 
 def eintrag_hash(eintrag: dict, nutzlast: dict) -> str:
-    """Der Hash einer Zustellung — fuer den Idempotenzrest."""
-    return _hash(
-        f"{eintrag['delivery_id']}:{eintrag['payload_id']}:{eintrag['inbox_hash']}:"
-        f"{nutzlast['ciphertext_sha256']}"
-    )
+    """Der Hash einer Zustellung — fuer den Idempotenzrest.
+
+    Kennung und Chiffretext-Hash, mehr nicht. `inbox_hash` steht schon im
+    eindeutigen Schluessel des Rests, und `payload_id` gehoert nicht zur
+    Identitaet: dieselben Bytes unter einer anderen Objektkennung sind
+    dieselbe Zustellung — so prueft es auch der Weg ueber einen noch offenen
+    Auftrag. Die Quittung schreibt denselben Wert (`anfrage_hash`).
+    """
+    return anfrage_hash(str(eintrag["delivery_id"]), nutzlast["ciphertext_sha256"])
+
+
+def anfrage_hash(delivery_id: str, ciphertext_sha256: str | None) -> str:
+    """Der Hash einer Zustellanfrage: Kennung und Chiffretext-Bytes."""
+    return _hash(f"{delivery_id}:{ciphertext_sha256 or ''}")
 
 
 def _darf_beschreiben(
@@ -536,11 +551,16 @@ def lesen(
         lese_beweis_daten(inbox_hash, seit_seq),
     )
     grenze = max(1, min(int(limit or MAX_ABRUF), MAX_ABRUF))
+    # Abgelaufenes wird nie mehr zugestellt, auch wenn der Aufraeumlauf noch
+    # nicht lief. Nach einer Wiederherstellung eines alten Backups ist das der
+    # Unterschied zwischen „Frist ist abgelaufen" und „wird trotzdem noch
+    # ausgeliefert".
     auftraege = (
         db.query(E2eeDelivery)
         .filter(
             E2eeDelivery.inbox_hash == inbox_hash,
             E2eeDelivery.quittiert_am.is_(None),
+            E2eeDelivery.ablauf_am >= _jetzt(),
             E2eeDelivery.laufende_seq > int(seit_seq or 0),
         )
         .order_by(E2eeDelivery.laufende_seq.asc())
@@ -624,7 +644,9 @@ def quittieren(
         objekt = db.query(E2eeDeliveryPayload).filter(
             E2eeDeliveryPayload.id == auftrag.payload_id
         ).first()
-        rest_hash = _hash(auftrag.id + ":" + (objekt.ciphertext_sha256 if objekt else ""))
+        rest_hash = anfrage_hash(
+            auftrag.id, objekt.ciphertext_sha256 if objekt else None
+        )
         db.add(
             E2eeDeliveryReceipt(
                 inbox_hash=inbox_hash,
@@ -636,6 +658,11 @@ def quittieren(
             )
         )
         db.delete(auftrag)
+        # Der Auftrag muss in der Datenbank weg sein, bevor gezaehlt wird: die
+        # Sitzung laeuft ohne Autoflush (`database.SessionLocal`), sonst zaehlt
+        # die Abfrage den gerade geloeschten Auftrag selbst mit und das
+        # Chiffretextobjekt bliebe bis zur Frist liegen.
+        db.flush()
         quittiert += 1
         # Das Chiffretextobjekt faellt, sobald kein Auftrag mehr darauf zeigt.
         if objekt is not None:
@@ -650,7 +677,6 @@ def quittieren(
             if weitere == 0:
                 # Erst der Auftrag weg, dann das Objekt — sonst zeigte der
                 # Fremdschluessel noch auf eine Zeile, die es nicht mehr gibt.
-                db.flush()
                 db.delete(objekt)
     db.commit()
     return {"quittiert": quittiert}

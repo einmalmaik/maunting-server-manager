@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.42 vom 2026-10-15 aus (Maunting Search)', () => {
+  it('weist die Fassung 3.43 vom 2026-10-23 aus (Gerätezustellung)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.42`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.43`)),
     ).toBeInTheDocument();
     expect(
       i18n.t('privacyPolicy.sections.browser.items.mauntingSearch'),
@@ -304,6 +304,14 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/kontrolliert der Browser\s+nicht/);
     expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/nicht in privaten Tabs und nicht, solange der Jugend- und Suchtschutz an ist/);
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/Erweiterungen lädt er nur auf Ihren Wunsch von Google/);
+    // 3.43: die gerätebezogene Zustellung. Sie speichert eine Zustellkennung,
+    // Prüfsumme und Größe des Chiffretexts und einen Idempotenzrest ohne
+    // Inhalt; das geteilte Postfach bleibt daneben bestehen.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery'))).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery')).toMatch(/Zustellkennung/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery')).toMatch(/Idempotenzrest/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.envelopes')).not.toMatch(/unwiderruflich bereinigt/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceFanout')).not.toMatch(/und sonst nichts/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

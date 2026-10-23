@@ -809,6 +809,13 @@ def vergessen(
 
     Die Sitzungskette des Geraets wird gesperrt: sein Access-Token gilt ab dem
     naechsten Aufruf nicht mehr (`dependencies._user_from_token`).
+
+    Mit der Zeile fallen per ``ON DELETE CASCADE`` auch die Zustelladresse des
+    Geraets und seine offenen Zustellauftraege. Das Chiffretextobjekt und der
+    Idempotenzrest haengen nicht an der Inbox und bleiben bis zu ihrer Frist
+    liegen (siehe `models/e2ee_delivery.py`); `abgelaufene_raeumen` nimmt sie
+    dann mit. Kein eigener Loeschweg hier — sonst liefen zwei Wege aneinander
+    vorbei.
     """
     eintrag = _geraet(db, user.id, (device_id or "").strip())
     if eintrag is None:
@@ -852,6 +859,9 @@ def zuruecksetzen(db: Session, user: User, familie_behalten: str | None) -> int:
     familien = {e.auth_family for e in eintraege if e.auth_family}
     for e in eintraege:
         db.delete(e)
+    # Mit jeder Geraetezeile fallen ihre Zustelladresse und ihre offenen
+    # Auftraege (ON DELETE CASCADE). Chiffretextobjekte und Idempotenzreste
+    # bleiben bis zu ihrer Frist; `abgelaufene_raeumen` raeumt sie ab.
     # Der Notizschluessel lag auf diesen Geraeten. Ohne sie gibt es niemanden
     # mehr, der ihn hat oder den Eintrag beglaubigen koennte: das naechste
     # Geraet setzt den Kontoschluessel neu (`kontoschluesselAbgleichen`).
