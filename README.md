@@ -3,6 +3,9 @@
 > [!IMPORTANT]
 > MSM wird gerade aktiv entwickelt. Setz es bitte nicht produktiv ein, ohne vorher ein Backup zu machen.
 
+🧪 Experimentelles Feature: Kubernetes
+Im Repository findest du unter deploy/kubernetes/ Manifeste für den Betrieb des Panels. Achtung: Dieses Setup wurde vom Kernteam bisher nicht im Live-Betrieb getestet. Wenn du dich mit K8s auskennst, teste es gerne und hinterlasse uns Feedback oder einen Pull Request auf GitHub!
+
 # Maunting Service Manager (MSM)
 
 MSM ist ein Panel, das du selbst hostest. Damit verwaltest du Game-Server, Anwendungen und Linux-Dienste an einem Ort. Dazu kommen ein KI-Assistent, Kalender, Notizen, ein Messenger und Recherche-Werkzeuge.
