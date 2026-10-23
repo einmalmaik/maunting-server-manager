@@ -3,6 +3,9 @@
 > [!IMPORTANT]
 > MSM wird gerade aktiv entwickelt. Setz es bitte nicht produktiv ein, ohne vorher ein Backup zu machen.
 
+🧪 Experimentelles Feature: Kubernetes
+Im Repository findest du unter deploy/kubernetes/ Manifeste für den Betrieb des Panels. Achtung: Dieses Setup wurde vom Kernteam bisher nicht im Live-Betrieb getestet. Wenn du dich mit K8s auskennst, teste es gerne und hinterlasse uns Feedback oder einen Pull Request!
+
 # Maunting Service Manager (MSM)
 
 MSM ist ein Panel, das du selbst hostest. Damit verwaltest du Game-Server, Anwendungen und Linux-Dienste an einem Ort. Dazu kommen ein KI-Assistent, Kalender, Notizen, ein Messenger und Recherche-Werkzeuge.
@@ -16,7 +19,7 @@ Die Kontrolle bleibt bei dir: Wer was darf, welche Werkzeuge die KI benutzen kan
 *Der KI-Assistent: Er schaut sich Status, Logs und freien Platz selbst an und antwortet dir in Klartext.*
 
 <sub>Die Bilder zeigen Demodaten.</sub>
-
+ein
 ---
 
 ## Was ist MSM?
@@ -156,10 +159,10 @@ MSM braucht Linux mit systemd und Docker.
 | **Ubuntu 22.04 LTS** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
 | **Debian 12 (Bookworm)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
 | **Debian 11 (Bullseye)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **AlmaLinux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Rocky Linux 9** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Fedora Server (40+)** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
-| **Arch Linux** | 🟡 **Ungetestet** | Noch keine Rückmeldung |
+| **AlmaLinux 9** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Rocky Linux 9** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Fedora Server (40+)** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
+| **Arch Linux** | 🔴 **Geht nicht** | Noch keine Rückmeldung |
 | **Alpine Linux** | 🔴 **Geht nicht** | Kein Standard-systemd, andere glibc |
 | **Windows / Windows Server** | 🔴 **Geht nicht** | Braucht einen Linux-Kernel und systemd |
 
@@ -303,7 +306,7 @@ sudo systemctl start msm-update.timer
 ## Hilfe und Doku
 
 - **Anleitungen**: in [`docs/self-hosting.md`](docs/self-hosting.md) und im Panel unter **Dokumentation**.
-- **Fehler melden**: [GitHub Issues](https://github.com/mauntingstudios/maunting-service-manager/issues)
+- **Fehler melden**: [GitHub Issues](https://github.com/einmalmaik/maunting-server-manager/issues)
 
 ---
 
