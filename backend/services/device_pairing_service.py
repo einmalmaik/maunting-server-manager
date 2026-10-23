@@ -379,8 +379,9 @@ def verlauf_abholen(db: Session, user: User, code: str) -> str | None:
     """Gibt den Verlauf **einmal** heraus und loescht ihn dabei.
 
     Einmal, weil es keinen zweiten Grund gibt, ihn zu holen: das Geraet hat ihn
-    danach lokal. Liegen zu bleiben waere der einzige Weg, wie er doch noch in
-    ein Backup geraet.
+    danach lokal. Dazu schliesst das Panel-Backup `device_pairings` seit
+    24.10.2026 als Daten aus (`PANEL_BACKUP_OHNE_DATEN`); ein Backup aus dem
+    kurzen Uebergabefenster traegt den Blob also nicht mit.
     """
     einladung = _offene_einladung(db, user, code)
     if einladung is None or einladung.verlauf_blob is None:

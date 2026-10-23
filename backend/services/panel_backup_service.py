@@ -101,6 +101,11 @@ PANEL_BACKUP_OHNE_DATEN: tuple[str, ...] = (
     # sind Serverkopien, die nach ihrer Frist ohnehin geloescht werden.
     "e2ee_blind_envelopes",
     "chat_media",
+    # Kopplungscodes und der versiegelte Verlaufs-Erstabgleich. Eine offene
+    # Kopplung ist ein kurzer Vorgang (Code zehn Minuten), kein Bestand, den
+    # ein Restore weiterfuehren soll. Oeffnen koennte den Blob nur das
+    # Zielgeraet, aber nach einer Wiederherstellung beginnt eine Kopplung neu.
+    "device_pairings",
 )
 
 

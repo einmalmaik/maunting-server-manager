@@ -564,9 +564,12 @@ Harte Invarianten:
   `POST /e2ee/devices/self/reset` leert das Verzeichnis nur gegen das Passwort
   und sperrt alle anderen Familien. Grenze, die in der Datenschutzerklärung
   steht: in der Webversion liefert der Server den Code selbst aus.
-- **Das Relais hält Umschläge 30 Tage, Anhänge 90.** Ältere Umschläge liefert
-  es nicht mehr aus und löscht sie stündlich (`cleanup_expired_envelopes`);
-  Anhänge nach `MEDIEN_AUFBEWAHRUNG_TAGE` (`cleanup_expired_media`). Ein Gerät,
+- **Das Relais hält Umschläge 30 Tage, neue Anhänge ebenfalls 30.** Ältere
+  Umschläge liefert es nicht mehr aus und löscht sie stündlich
+  (`cleanup_expired_envelopes`); Anhänge nach `MEDIEN_AUFBEWAHRUNG_TAGE`
+  (`cleanup_expired_media`). Anhänge aus der Zeit davor behalten ihren
+  gespeicherten Ablauf von bis zu 90 Tagen und laufen ohne Migration aus; die
+  lokale Verfallsfrist im Chat (bis 90 Tage) ist davon getrennt. Ein Gerät,
   das länger offline war, verpasst ältere Umschläge — auch Steuerumschläge wie
   die Übergabe eines Chatgeheimnisses.
 - **Schlüsselantworten sind je Konto und Gruppe gedeckelt**, nicht je Gerät:

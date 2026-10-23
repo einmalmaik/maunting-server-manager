@@ -144,9 +144,15 @@ describe('SelfHostingDocs', () => {
       screen.getByText(/One delivery address per device \(e2ee_device_inboxes\)/),
     ).toBeInTheDocument()
     expect(screen.getByText(/attachment packets are valid for 24 hours/)).toBeInTheDocument()
+    // Seit 3.44: neue Anhänge 30 Tage, Altbestand bis zu seinem gespeicherten
+    // Ablauf. Die lokale Frist bleibt davon getrennt.
+    expect(screen.getByText(/Attachments: 30 days from upload for new rows/)).toBeInTheDocument()
+    expect(screen.getByText(/up to 90 days and run out without a migration/)).toBeInTheDocument()
     expect(
       screen.getByText(/without the rows of e2ee_device_inboxes/),
     ).toBeInTheDocument()
+    // Die Kopplung ist ein kurzer Vorgang und gehört nicht ins Backup.
+    expect(screen.getByText(/chat_media and device_pairings/)).toBeInTheDocument()
     expect(
       screen.getByText(/does not promise that data is physically gone everywhere after 30 days/),
     ).toBeInTheDocument()
@@ -155,6 +161,8 @@ describe('SelfHostingDocs', () => {
     renderPage()
     expect(screen.getByRole('heading', { name: 'E2EE-Zustellbestand' })).toBeInTheDocument()
     expect(screen.getByText(/Das Schema bleibt/)).toBeInTheDocument()
+    expect(screen.getByText(/Ältere Uploads behalten ihren gespeicherten Ablauf von bis zu 90 Tagen/)).toBeInTheDocument()
+    expect(screen.getByText(/chat_media und device_pairings/)).toBeInTheDocument()
   })
 
   it('sagt, was das PostgreSQL-Studio kann und was nicht', () => {

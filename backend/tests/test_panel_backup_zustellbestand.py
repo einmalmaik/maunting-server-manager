@@ -8,9 +8,13 @@ ausgeliefert werden.
 
 Die Liste ist nicht frei gewaehlt: jede Tabelle mit `ablauf_am` gilt als
 Zustellpuffer. Eine neue Transporttabelle mit Frist macht diesen Test rot,
-solange sie nicht in `PANEL_BACKUP_OHNE_DATEN` steht. Die beiden Tabellen
-ohne diese Spalte (alter Relaisbestand, verschluesselte Anhaenge) stehen
-namentlich daneben.
+solange sie nicht in `PANEL_BACKUP_OHNE_DATEN` steht. Die drei Tabellen ohne
+diese Spalte (alter Relaisbestand, verschluesselte Anhaenge, Kopplungen)
+stehen namentlich daneben.
+
+`device_pairings` traegt neben dem kurzlebigen Kopplungscode den versiegelten
+Verlaufs-Erstabgleich. Ein Restore soll keine offene Kopplung weiterfuehren:
+das Schema bleibt, die Zeilen fallen, und eine Kopplung beginnt danach neu.
 """
 
 from __future__ import annotations
@@ -77,5 +81,12 @@ def test_jede_zustelltabelle_mit_frist_ist_ausgeschlossen() -> None:
         for tabelle in tabellen.values()
         if "ablauf_am" in tabelle.c
     }
-    ohne_frist = {"e2ee_blind_envelopes", "chat_media"}
+    ohne_frist = {"e2ee_blind_envelopes", "chat_media", "device_pairings"}
     assert set(pbs.PANEL_BACKUP_OHNE_DATEN) == mit_frist | ohne_frist
+
+    # Die Kopplung ist ein kurzer Vorgang, kein Bestand. Nach einem Restore
+    # darf weder ein alter Code noch ein versiegelter Verlaufsblob
+    # weiterlaufen; beides entsteht bei einer neuen Kopplung neu.
+    assert "device_pairings" in pbs.PANEL_BACKUP_OHNE_DATEN
+    assert "verlauf_blob" in tabellen["device_pairings"].c
+    assert "code_hash" in tabellen["device_pairings"].c

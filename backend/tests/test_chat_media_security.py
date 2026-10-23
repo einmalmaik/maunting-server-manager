@@ -4,7 +4,8 @@ import base64
 import io
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -346,34 +347,42 @@ def test_max_media_bytes_traegt_eine_volle_videonotiz():
     assert roh_grenze > 20 * 1024 * 1024
 
 
-def test_medien_aufbewahrung_deckt_laengste_verfallsfrist():
-    """Ein Anhang muss mindestens so lange liegen wie die laengste Verfallsfrist.
+def test_medien_aufbewahrung_ist_30_tage_fuer_neue_uploads():
+    """Neue Uploads liegen 30 Tage auf dem Server; die lokale Frist bleibt.
 
-    Die Gegenzahl steht in ``frontend/src/services/nachrichtVerfall.ts`` als
-    laengste Stufe in ``VERFALL_STUFEN`` (90 Tage). Hier stand bis 09/2026 30,
-    und damit war die Aufbewahrung kuerzer als die Frist, die der Nutzer im Chat
-    einstellen kann: eine 40 Tage alte Nachricht war noch da, ihr Bild aber
-    schon weg, und die Anlage brach mit einem 410 weg. Fuer den Empfaenger sah
-    das aus, als haette jemand die Datei geloescht.
+    Die Nutzerentscheidung vom 23.10.2026 trennt zwei Regeln, die vorher an
+    derselben Zahl hingen: der Server haelt den Chiffratblock nur fuer den
+    Erstdownload (30 Tage), waehrend die lokale Verfallsfrist im Chat bis
+    90 Tage reicht (`VERFALL_STUFEN` in `nachrichtVerfall.ts`). Eine 40 Tage
+    alte Nachricht darf lokal weiterleben; ihr Anhang ist dann nur noch auf
+    einem Geraet zu haben, das ihn vorher gesichert hat.
 
-    Wer in ``VERFALL_STUFEN`` eine laengere Stufe ergaenzt, muss
-    ``MEDIEN_AUFBEWAHRUNG_TAGE`` mitziehen. Dieser Test ist die Stelle, an der
-    das auffaellt.
+    Wer hier eine laengere Serverfrist eintraegt, verlaengert damit nicht die
+    lokale Frist, und umgekehrt. Beide Zahlen stehen deshalb nebeneinander.
     """
-    laengste_stufe_sekunden = 7_776_000  # 90 Tage, `retention.d90`
-    assert MEDIEN_AUFBEWAHRUNG_TAGE * 24 * 60 * 60 >= laengste_stufe_sekunden
+    assert MEDIEN_AUFBEWAHRUNG_TAGE == 30
+
+    quelle = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "services"
+        / "nachrichtVerfall.ts"
+    ).read_text(encoding="utf-8")
+    # Die laengste waehlbare Stufe bleibt 90 Tage. Der Server ist nur der
+    # Erstdownload und ersetzt diese lokale Frist nicht.
+    assert "sekunden: 7_776_000" in quelle
 
 
-def test_hochgeladener_anhang_bekommt_die_volle_aufbewahrung(
+def test_hochgeladener_anhang_bekommt_30_tage(
     db: Session, owner_user: User, regular_user: User
 ):
     """Die Konstante allein genuegt nicht: der Upload muss sie auch benutzen.
 
     Der Fehler sass nicht in einer Zahl, sondern in der Aufrufstelle, die eine
     eigene mitbrachte. Ein Test auf die Konstante haette ihn nicht gefunden.
+    Geprueft wird an den beiden gespeicherten Zeitpunkten, nicht an der Uhr.
     """
-    from datetime import timedelta
-
     friend_req = SocialService.send_friend_request(db, owner_user.id, regular_user.username)
     SocialService.accept_friend_request(db, regular_user.id, friend_req["id"])
     chat = SocialService.ensure_direct_chat(db, owner_user.id, regular_user.id)
@@ -387,12 +396,87 @@ def test_hochgeladener_anhang_bekommt_die_volle_aufbewahrung(
     )
 
     assert media.expires_at is not None
+    assert media.created_at is not None
+    erstellt = media.created_at
+    if erstellt.tzinfo is None:
+        erstellt = erstellt.replace(tzinfo=timezone.utc)
     gesetzt = media.expires_at
     if gesetzt.tzinfo is None:
         gesetzt = gesetzt.replace(tzinfo=timezone.utc)
-    rest = gesetzt - datetime.now(timezone.utc)
-    # Eine Stunde Spielraum, damit der Test nicht an der Laufzeit haengt.
-    assert rest > timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE) - timedelta(hours=1)
+    assert gesetzt - erstellt == timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE)
+
+
+def test_altbestand_behaelt_seine_90_tage_bis_zum_ablauf(
+    db: Session, owner_user: User
+):
+    """Die Verkuerzung wirkt nicht rueckwirkend und braucht keine Migration.
+
+    Eine Zeile aus der Zeit vor der Entscheidung traegt ihren gespeicherten
+    Ablauf (hier volle 90 Tage) weiter. Der Aufraeumlauf faellt sie erst an,
+    wenn diese Frist vorbei ist; die neue 30-Tage-Regel gilt nur fuer Zeilen,
+    die danach entstehen.
+    """
+    jetzt = datetime.now(timezone.utc)
+    alt_id = "altbestand-90-tage"
+    neu_id = "neuer-upload-abgelaufen"
+    alt = ChatMedia(
+        id=alt_id,
+        blind_mailbox_id="box-altbestand",
+        uploader_user_id=owner_user.id,
+        ciphertext_blob="altes-chiffrat",
+        media_type="image/png",
+        file_name="alt.png",
+        size_bytes=12,
+        sha256="0" * 64,
+        created_at=jetzt - timedelta(days=40),
+        expires_at=jetzt + timedelta(days=50),
+    )
+    neu_abgelaufen = ChatMedia(
+        id=neu_id,
+        blind_mailbox_id="box-altbestand",
+        uploader_user_id=owner_user.id,
+        ciphertext_blob="neues-chiffrat",
+        media_type="image/png",
+        file_name="neu.png",
+        size_bytes=13,
+        sha256="1" * 64,
+        created_at=jetzt - timedelta(days=31),
+        expires_at=jetzt - timedelta(days=1),
+    )
+    db.add_all([alt, neu_abgelaufen])
+    db.commit()
+
+    erstellt = alt.created_at
+    if erstellt.tzinfo is None:
+        erstellt = erstellt.replace(tzinfo=timezone.utc)
+    gesetzt = alt.expires_at
+    if gesetzt.tzinfo is None:
+        gesetzt = gesetzt.replace(tzinfo=timezone.utc)
+    assert gesetzt - erstellt == timedelta(days=90)
+
+    # Bis zu seiner gespeicherten Frist bleibt der Altbestand abrufbar.
+    import urllib.parse
+
+    signed_url, _ = ChatMediaService.generate_signed_url(db, user=owner_user, media_id=alt_id)
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(signed_url).query)
+    assert (
+        ChatMediaService.get_media_by_signed_url(
+            db,
+            media_id=alt_id,
+            token=qs["token"][0],
+            expires=int(qs["expires"][0]),
+            user_id=owner_user.id,
+        ).id
+        == alt_id
+    )
+
+    assert ChatMediaService.cleanup_expired_media(db) == 1
+    # Das Sammel-Loeschen laesst die geladene Instanz in der Sitzung stehen.
+    # Ohne Leeren der Identity Map versucht die naechste Abfrage, sie zu
+    # erneuern, und meldet die geloeschte Zeile als Fehler.
+    db.expunge_all()
+    assert db.query(ChatMedia).filter_by(id=alt_id).count() == 1
+    assert db.query(ChatMedia).filter_by(id=neu_id).count() == 0
 
 
 def test_medienpaket_wird_angenommen_und_bleibt_geprueft():

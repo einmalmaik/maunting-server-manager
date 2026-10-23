@@ -86,6 +86,14 @@ verschlüsselten Nachrichtentext. Der Server speichert einen generischen Namen
 versiegelten Manifest. Empfangene Anhänge werden dauerhaft in der
 kontogebundenen Ablage gespeichert, nicht nur im Arbeitsspeicher.
 
+Seit 23.10.2026 gilt für neue Uploads eine Serverfrist von 30 Tagen
+(`MEDIEN_AUFBEWAHRUNG_TAGE`). `expires_at` wird beim Upload aus `created_at`
+fortgeschrieben. Ältere Zeilen behalten ihren gespeicherten Ablauf von bis zu
+90 Tagen und laufen ohne Migration aus; der Aufräumlauf löscht nur, was seine
+gespeicherte Frist überschritten hat. Die lokale Verfallsfrist im Chat (bis
+90 Tage) ist davon getrennt: sie betrifft den Verlauf auf den Geräten und
+verlängert die Serverkopie nicht.
+
 ## 3. Speicherinventar
 
 | Tabelle | Felder | Zweck | Frist / Löschung |
@@ -97,15 +105,17 @@ kontogebundenen Ablage gespeichert, nicht nur im Arbeitsspeicher.
 | `e2ee_delivery_receipts` | `inbox_hash`, `delivery_id`, `request_hash`, `ergebnis`, `angenommen_am`, `ablauf_am` | Idempotenzrest nach der Quittung, ohne Inhalt | Ursprüngliche Frist, höchstens 30 Tage |
 | `e2ee_blind_envelopes` | `blind_mailbox_id`, `ciphertext_envelope`, `ciphertext_sha256`, `client_uuid`, `created_at` | Alter Relaisbestand, Gruppen, Steuerpakete, Verlauf | 30 Tage; stündlicher Lauf |
 | `e2ee_blind_mailboxes` | `mailbox_id`, `auth_verifier` | Besitznachweis einer Mailbox | Bis Mailbox nicht mehr gebraucht wird |
-| `chat_media` | Kennung, Mailbox, Chat/Gruppe, Uploader, `ciphertext_blob`, generischer Name/Typ, Größe, SHA-256, Zeiten | Verschlüsselter Anhang für den Erstdownload | 90 Tage oder mit der Nachricht |
-| `device_pairings` | `code_hash`, `family`, `verlauf_blob`, `verlauf_abgelegt_am`, `expires_at`, `redeemed_at` | Kopplungscode und Verlaufs-Erstabgleich | Code 10 Minuten; Blob nach Abholung oder 10 Minuten nach Einlösen |
+| `chat_media` | Kennung, Mailbox, Chat/Gruppe, Uploader, `ciphertext_blob`, generischer Name/Typ, Größe, SHA-256, Zeiten | Verschlüsselter Anhang für den Erstdownload | Neue Uploads 30 Tage ab Upload; ältere Zeilen bis zu ihrem gespeicherten Ablauf (höchstens 90 Tage); zusätzlich mit der Nachricht löschbar |
+| `device_pairings` | `code_hash`, `family`, `verlauf_blob`, `verlauf_abgelegt_am`, `expires_at`, `redeemed_at` | Kopplungscode und Verlaufs-Erstabgleich | Code 10 Minuten; Blob nach Abholung oder 10 Minuten nach Einlösen. Zeilen nicht im Panel-Backup: nach einem Restore beginnt eine Kopplung neu |
 | `webpush`/`push_subscriptions` | Endpunkt, Schlüssel, Sitzungsfamilie | Wecken bei geschlossener App | Bis Abmeldung, Widerruf oder 404/410 |
 
 Die Fristen stehen im Code: `FRIST_TAGE = 30` in
 `backend/services/social/zustellung.py`, `E2EE_ENVELOPE_RETENTION_DAYS = 30` in
-`backend/services/social/grenzen.py`, `MEDIEN_AUFBEWAHRUNG_TAGE = 90` in
+`backend/services/social/grenzen.py`, `MEDIEN_AUFBEWAHRUNG_TAGE = 30` in
 `backend/services/chat_media_service.py`, `FRIST_MINUTEN = 10` in
-`backend/services/device_pairing_service.py`.
+`backend/services/device_pairing_service.py`. Für Anhänge gilt die Frist je
+Zeile: neue Uploads bekommen 30 Tage, ältere behalten ihren gespeicherten
+Ablauf.
 
 ## 4. Schlüsselwege
 
@@ -175,6 +185,12 @@ Der Server kann die Zustelladresse nicht nachrechnen.
 - **Betrieb:** Zustellpuffer aus dem Panel-Backup ausgeschlossen; Fristen des
   gerätebezogenen Transports an den stündlichen Aufräumlauf gehängt;
   abgelaufene Zustellungen werden schon beim Lesen nicht mehr ausgeliefert.
+- **Anhangsfrist und Backup-Lücke (24.10.2026):** neue Uploads liegen 30 Tage
+  auf dem Server, der Altbestand behält seinen gespeicherten Ablauf von bis zu
+  90 Tagen und läuft ohne Migration aus. `device_pairings` steht jetzt im
+  Backup-Ausschluss; nach einem Restore sind offene Kopplungen fort. Die
+  Datenschutzerklärung trennt die 30-Tage-Serverkopie von der lokalen
+  Verfallsfrist bis 90 Tage (Fassung 3.44).
 
 ## 7. Belege in Tests
 
@@ -187,7 +203,8 @@ nach dem Merge bleibt Pflicht.
 | --- | --- |
 | `backend/tests/test_e2ee_zustellung.py` | Annahme, Abruf, Quittung, falscher/fehlender Beleg, fehlende Mailboxberechtigung, wartendes Ziel, Konflikt, fremdes Gerät, Idempotenzrest, Aufräumen, keine Auslieferung nach Fristablauf |
 | `backend/tests/test_migration_e2ee_zustellung.py` | Migration hin und zurück, keine Fremdschlüssel auf `users` |
-| `backend/tests/test_panel_backup_zustellbestand.py` | `pg_dump` schließt die sechs Puffer nur als Daten aus; Schema bleibt; neue Tabelle mit Frist macht den Test rot |
+| `backend/tests/test_panel_backup_zustellbestand.py` | `pg_dump` schließt die sieben Puffer nur als Daten aus; Schema bleibt; neue Tabelle mit Frist macht den Test rot |
+| `backend/tests/test_chat_media_security.py` | neue Uploads bekommen `expires_at = created_at + 30 Tage`; Altbestand behält 90 Tage; Cleanup löscht nur Abgelaufenes |
 | `backend/tests/test_e2ee_device_approval.py` | Freigabe, Schlüsselwechsel, fremde Sitzung, Entfernen, Wiederfreigabe mit Nachweis, Selbstbeglaubigung |
 | `backend/tests/test_e2ee_envelope_retention.py` | 30-Tage-Frist des alten Relaisbestands |
 | `backend/tests/test_review_regressions.py` | Aufräumlauf läuft im Thread, schließt die Sitzung, ruft die Zustellbereinigung |
@@ -270,9 +287,11 @@ nach dem Merge bleibt Pflicht.
 18. Ist die Aussage „Kopien in Sicherungen können länger bestehen“ ausreichend
     ehrlich? Panel-Backups schließen die Puffer aus; alte Backups, WAL,
     Replikate und Anbieter-Snapshots nicht.
-19. Ist die 90-Tage-Frist für Anhänge mit dem Plan vereinbar, der für neue
-    Uploads 30 Tage vorsah? Der Code verwendet weiterhin 90 Tage für alle
-    Uploads; eine Unterscheidung nach Alt-/Neubestand gibt es nicht.
+19. **Erledigt (24.10.2026):** Neue Uploads liegen 30 Tage auf dem Server,
+    ältere Zeilen behalten ihren gespeicherten Ablauf von bis zu 90 Tagen. Der
+    Plan verlangte genau diesen Übergang, ohne den Altbestand vor seiner
+    beworbenen Frist zu löschen. Zu prüfen bleibt, ob die sichtbaren Texte die
+    30-Tage-Serverkopie und die lokale 90-Tage-Frist überall trennen.
 20. Ist der Verlaufs-Erstabgleich über die Kopplung (10 Minuten) und der
     Geräteweg (Umschlag bis 30 Tage, Paketfenster 24 Stunden) so beschrieben,
     wie er tatsächlich läuft?
@@ -282,9 +301,9 @@ nach dem Merge bleibt Pflicht.
     echten Namen ablegen.
 22. Ist die Wiederherstellung eines Panel-Backups ohne die Puffer
     betrieblich akzeptabel? Geräte melden ihre Adresse beim nächsten Start
-    neu an; offene Zustellungen und nicht lokal gesicherte Anhänge sind fort.
-    Ein Gerät, das sich nicht wieder meldet (alte Version, kein Start),
-    empfängt nichts.
+    neu an; offene Zustellungen, offene Kopplungen und nicht lokal gesicherte
+    Anhänge sind fort. Ein Gerät, das sich nicht wieder meldet (alte Version,
+    kein Start), empfängt nichts.
 
 ### Vertrauen, Betrieb und Grenzen
 
@@ -307,7 +326,7 @@ nach dem Merge bleibt Pflicht.
     `DELETE` entfernt die Zeile aus der Anwendung; PostgreSQL hält die alte
     Zeilenversion bis `VACUUM`, und externe Kopien haben eigene Fristen.
 
-## 9. Offene Punkte (Stand 23.10.2026)
+## 9. Offene Punkte (Stand 24.10.2026; 7 und 9 erledigt)
 
 1. **Kein unabhängiges Audit, keine Freigabe.** Dieses Dokument ist input für
    eine Prüfung, nicht ihr Ergebnis.
@@ -327,13 +346,17 @@ nach dem Merge bleibt Pflicht.
 6. **Der Verlaufs-Umschlag liegt bis zu 30 Tage im Relais**, obwohl die
    Anhangpakete nach 24 Stunden verfallen. Das 24-Stunden-Fenster ist eine
    Client-Regel, keine serverseitige Löschfrist.
-7. **Medien bleiben 90 Tage.** Der Plan wollte neue Uploads auf 30 Tage
-   setzen; der Code unterscheidet nicht zwischen alt und neu.
+7. **Erledigt (24.10.2026): Medien 30 Tage für neue Uploads.** `expires_at`
+   wird beim Upload auf `created_at + 30 Tage` gesetzt. Zeilen aus der Zeit
+   davor behalten ihren gespeicherten Ablauf (bis 90 Tage) und laufen ohne
+   Migration aus; der Aufräumlauf löscht nur Abgelaufenes.
 8. **Physische Löschung ist nicht nachgewiesen.** WAL, Replikate,
    Anbieter-Snapshots und alte Backups wurden nicht inventarisiert.
-9. **Das Panel-Backup schließt `device_pairings` nicht aus.** Ein Backup
-   während der 10-Minuten-Übergabe enthält den versiegelten Verlaufsblob.
-   Öffnen kann ihn nur das Zielgerät.
+9. **Erledigt (24.10.2026): `device_pairings` ist aus dem Panel-Backup
+   ausgeschlossen.** Das Schema bleibt, die Zeilen fallen. Nach einem Restore
+   sind offene Kopplungen und der versiegelte Verlaufsblob fort; eine Kopplung
+   wird neu begonnen. Offen bleibt, wie Altbackups aus der Zeit davor behandelt
+   werden; sie werden nicht umgeschrieben.
 10. **Die Zustelladresse ist an das Gerätegeheimnis gebunden.** Geht der
     private Geräteschlüssel verloren, ist es ein neues Gerät mit neuer
     Freigabe; eine Wiederherstellung der alten Adresse gibt es nicht.

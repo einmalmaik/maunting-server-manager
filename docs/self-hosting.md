@@ -2237,7 +2237,7 @@ Wege bestehen nebeneinander:
 | `e2ee_delivery_payloads` | `id`, `ciphertext`, `ciphertext_sha256`, `groesse`, `angenommen_am`, `ablauf_am` | Das Chiffretextobjekt. Es trägt weder Ziel noch Absender und kann von mehreren Aufträgen getragen werden. | Fällt, sobald kein Auftrag mehr darauf zeigt, spätestens nach 30 Tagen. |
 | `e2ee_delivery_receipts` | `inbox_hash`, `delivery_id`, `request_hash`, `ergebnis`, `angenommen_am`, `ablauf_am` | Idempotenzrest nach der Quittung: eine verlorene HTTP-Antwort lässt sich wiederholen, ohne ein zweites Versandarchiv anzulegen. Kein Chiffrat, keine Größe. | Übernimmt die ursprüngliche Frist der Zustellung, höchstens 30 Tage. |
 | `e2ee_blind_envelopes` | `blind_mailbox_id`, `ciphertext_envelope`, `ciphertext_sha256`, `client_uuid`, `created_at` | Alter Relaisbestand; weiterhin für Gruppen, Steuerpakete und den Verlaufs-Erstabgleich. | 30 Tage ab Eingang, danach entfernt der stündliche Lauf die Zeile. |
-| `chat_media` | `id`, `blind_mailbox_id`, Chat-/Gruppenbezug, `uploader_user_id`, `ciphertext_blob`, `file_name` (generisch), `media_type`, `size_bytes`, `sha256`, `created_at`, `expires_at` | Verschlüsselter Anhang für den ersten Abruf durch die Geräte. | 90 Tage; zusätzlich mit der Nachricht löschbar. |
+| `chat_media` | `id`, `blind_mailbox_id`, Chat-/Gruppenbezug, `uploader_user_id`, `ciphertext_blob`, `file_name` (generisch), `media_type`, `size_bytes`, `sha256`, `created_at`, `expires_at` | Verschlüsselter Anhang für den ersten Abruf durch die Geräte. | Neue Uploads 30 Tage ab Upload; ältere Zeilen bis zu ihrem gespeicherten Ablauf (höchstens 90 Tage); zusätzlich mit der Nachricht löschbar. |
 
 Der **Verlaufs-Erstabgleich** für ein frisch gekoppeltes Gerät liegt als
 versiegelter Block in `device_pairings.verlauf_blob` (höchstens 25 MiB). Das
@@ -2257,21 +2257,22 @@ oben.
 ### Was im Panel-Backup fehlt
 
 Das Panel-Backup bleibt ein vollständiger `pg_dump` der Panel-Datenbank, aber
-ohne die Zeilen der sechs Puffer: `e2ee_device_inboxes`,
+ohne die Zeilen der sieben Puffer: `e2ee_device_inboxes`,
 `e2ee_delivery_payloads`, `e2ee_deliveries`, `e2ee_delivery_receipts`,
-`e2ee_blind_envelopes` und `chat_media`. `--exclude-table-data` lässt Tabellen,
-Spalten, Fremdschlüssel, Indizes und die Folge `e2ee_delivery_seq` stehen; nur
-die COPY-Blöcke fehlen. Ein Restore legt die Tabellen also leer an, und kein
-abgelaufener Chiffretext kommt zurück. Geräteadressen melden die Geräte beim
-nächsten Start selbst wieder an; offene Zustellungen sind nach einem Restore
-fort. Der Verlauf liegt auf den Geräten, ein Anhang nur, wenn das Gerät ihn
-zuvor lokal gesichert hat.
+`e2ee_blind_envelopes`, `chat_media` und `device_pairings`.
+`--exclude-table-data` lässt Tabellen, Spalten, Fremdschlüssel, Indizes und die
+Folge `e2ee_delivery_seq` stehen; nur die COPY-Blöcke fehlen. Ein Restore legt
+die Tabellen also leer an, und kein abgelaufener Chiffretext kommt zurück.
+Geräteadressen melden die Geräte beim nächsten Start selbst wieder an; offene
+Zustellungen sind nach einem Restore fort. Der Verlauf liegt auf den Geräten,
+ein Anhang nur, wenn das Gerät ihn zuvor lokal gesichert hat.
 
-Nicht ausgeschlossen ist `device_pairings`: eine Zeile trägt den versiegelten
-Verlaufsblob, solange die Übergabe läuft. Ein Backup aus diesem Fenster enthält
-ihn; öffnen kann ihn nur das Zielgerät. Alte Backups, WAL-Archive, Replikate
-und Anbieter-Snapshots werden durch diese Änderung nicht umgeschrieben und
-können Puffer aus ihrer Entstehungszeit enthalten.
+`device_pairings` trägt den kurzlebigen Kopplungscode und den versiegelten
+Verlaufs-Erstabgleich. Nach einem Restore ist beides fort: eine offene Kopplung
+wird nicht weitergeführt, sondern neu begonnen. Das Schema bleibt stehen, damit
+die Fremdschlüssel gültig sind. Alte Backups, WAL-Archive, Replikate und
+Anbieter-Snapshots werden durch diese Änderung nicht umgeschrieben und können
+Puffer aus ihrer Entstehungszeit enthalten.
 
 ### Löschen heißt entfernen, nicht überschreiben
 
