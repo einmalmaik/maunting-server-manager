@@ -13,6 +13,6 @@
     <string name="widget_wetter_name">Weather</string>
     <string name="widget_wetter_beschreibung">Forecast from your own MSM instance</string>
     <string name="widget_wetter_nicht_konfiguriert">Choose a location in Pontis</string>
-    <string name="widget_wetter_quelle">Quelle: deine MSM-Instanz</string>
+    <string name="widget_wetter_quelle">Source: MSM</string>
     <string name="vollbild_hinweis">%1$s is now full screen. Go back to exit.</string>
 </resources>

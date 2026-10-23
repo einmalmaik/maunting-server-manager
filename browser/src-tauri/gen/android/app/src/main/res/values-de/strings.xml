@@ -11,6 +11,6 @@
     <string name="widget_wetter_name">Wetter</string>
     <string name="widget_wetter_beschreibung">Vorhersage von deiner eigenen MSM-Instanz</string>
     <string name="widget_wetter_nicht_konfiguriert">Ort in Pontis wählen</string>
-    <string name="widget_wetter_quelle">Quelle: deine MSM-Instanz</string>
+    <string name="widget_wetter_quelle">Quelle: MSM</string>
     <string name="vollbild_hinweis">%1$s ist jetzt im Vollbild. Zurück beendet es.</string>
 </resources>

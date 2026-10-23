@@ -41,7 +41,7 @@ import { istAndroid } from '../services/plattform'
 import { useFrageDesTabs, useRueckfragen } from '../services/rueckfragen'
 import { baueZielUrl, suchmaschine } from '../services/searchEngines'
 import { suchName } from '../services/suchwahl'
-import { useAktiverTab, useTabsStore } from '../services/tabsStore'
+import { useAktiverTab, useSplitZustand, useTabsStore } from '../services/tabsStore'
 import { useUebersetzen } from '../uebersetzung/ablauf'
 
 /** Befehle der WebView2, die das Menü anbietet, in dieser Reihenfolge. */
@@ -73,6 +73,9 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
   const searxng = useEinstellungenStore((s) => s.searxngUrl)
   const anSingra = useAnSingra(tab)
   const uebersetzen = useUebersetzen(tab)
+  // In der geteilten Ansicht darf das Menü die Seite daneben nicht
+  // verdecken: Es bleibt auf die halbe Höhe begrenzt und durchscheinend.
+  const geteilt = Boolean(useSplitZustand().split)
 
   if (!tab || frage?.art !== 'kontextmenue') return null
   const menue = frage
@@ -175,6 +178,8 @@ export function SeitenMenue({ flaeche }: { flaeche: React.RefObject<HTMLElement 
       items={items}
       label={t('browser.menue.name')}
       onSchliessen={() => antworten(menue.nr, { art: 'menue', befehl: null })}
+      maxHoehe={geteilt ? '40dvh' : undefined}
+      durchsichtig={geteilt}
     />
   )
 }

@@ -547,9 +547,12 @@ pub fn vollbild(app: &AppHandle, id: &str, an: bool) {
 }
 
 /// Ein JPEG des vorderen Tabs, siehe `standbild.rs`.
-pub fn standbild(app: &AppHandle, tabs: &Tabs) -> Result<Vec<u8>, String> {
-    let aktiv = tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?;
-    standbild::aufnehmen(app, &aktiv)
+pub fn standbild(app: &AppHandle, tabs: &Tabs, id: Option<&str>) -> Result<Vec<u8>, String> {
+    let id = match id {
+        Some(id) => id.to_string(),
+        None => tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?,
+    };
+    standbild::aufnehmen(app, &id)
 }
 
 pub fn aufnahme(app: &AppHandle, id: &str, ganz: bool) -> Result<super::aufnahme::Aufnahme, String> {

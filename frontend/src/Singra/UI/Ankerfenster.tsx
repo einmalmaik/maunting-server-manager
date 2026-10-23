@@ -22,9 +22,29 @@ export interface AnkerfensterProps {
   children: ReactNode
   ausrichtung?: 'start' | 'ende'
   className?: string
+  /**
+   * Höchsthöhe, etwa `40dvh`. Ohne sie gilt das ganze Fenster. Als Stil, weil
+   * eine Klasse mit `dvh` nicht in jeder Tailwind-Fassung entsteht.
+   */
+  maxHoehe?: string
+  /**
+   * Durchsichtiger Hintergrund mit Schleier: In der geteilten Ansicht bleibt
+   * die Seite hinter dem Fenster sichtbar.
+   */
+  durchsichtig?: boolean
 }
 
-export function Ankerfenster({ offen, onSchliessen, anker, label, children, ausrichtung = 'start', className = '' }: AnkerfensterProps) {
+export function Ankerfenster({
+  offen,
+  onSchliessen,
+  anker,
+  label,
+  children,
+  ausrichtung = 'start',
+  className = '',
+  maxHoehe,
+  durchsichtig = false,
+}: AnkerfensterProps) {
   const fenster = useRef<HTMLDivElement>(null)
   const lage = useAnkerLage(offen, anker, fenster, { ausrichtung })
   const schliessen = useRef(onSchliessen)
@@ -62,8 +82,10 @@ export function Ankerfenster({ offen, onSchliessen, anker, label, children, ausr
       aria-label={label}
       tabIndex={-1}
       data-ankerfenster=""
-      style={lage}
-      className={`max-h-[calc(100dvh-1rem)] overflow-y-auto rounded-lg border border-outline-variant bg-surface-container-high p-4 text-on-surface shadow-xl outline-none ${className}`}
+      style={{ ...lage, maxHeight: maxHoehe ?? 'calc(100dvh - 1rem)' }}
+      className={`overflow-y-auto rounded-lg border border-outline-variant ${
+        durchsichtig ? 'bg-surface-container-high/85 backdrop-blur-md' : 'bg-surface-container-high'
+      } p-4 text-on-surface shadow-xl outline-none ${className}`}
     >
       {children}
     </div>,

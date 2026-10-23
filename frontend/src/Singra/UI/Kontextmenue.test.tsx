@@ -112,7 +112,8 @@ describe('Kontextmenue in einem niedrigen Fenster', () => {
       render(<Kontextmenue ort={{ x: 100, y: 300 }} items={[{ key: 'a', label: 'Umbenennen', onSelect: vi.fn() }]} label="Aktionen" onSchliessen={vi.fn()} />)
       const menue = screen.getByRole('menu')
       expect(menue.style.top).toBe('8px')
-      expect(menue.className).toContain('max-h-[calc(100dvh-1rem)]')
+      // Die Höhe steht im Stil: eine Klasse mit `dvh` entsteht nicht in jeder Tailwind-Fassung.
+      expect(menue.style.maxHeight).toBe('calc(100dvh - 1rem)')
       expect(menue.className).toContain('overflow-y-auto')
     } finally {
       layout.aufraeumen()

@@ -369,9 +369,14 @@ pub fn tab_drucken(app: AppHandle, id: String) -> Result<(), String> {
 
 /// Ein Bild des vorderen Tabs (JPEG), das die Oberfläche zeigt, solange der
 /// Tab verdeckt ist.
+/// Das Standbild eines Tabs (Vordergrund ohne `id`, sonst der genannte Tab).
+/// Für die geteilte Ansicht braucht die Oberfläche beide Seiten.
 #[tauri::command(async)]
-pub fn tab_standbild(app: AppHandle, tabs: State<'_, Tabs>) -> Result<tauri::ipc::Response, String> {
-    plattform::standbild(&app, &tabs).map(tauri::ipc::Response::new)
+pub fn tab_standbild(app: AppHandle, tabs: State<'_, Tabs>, id: Option<String>) -> Result<tauri::ipc::Response, String> {
+    if let Some(id) = &id {
+        id_pruefen(id)?;
+    }
+    plattform::standbild(&app, &tabs, id.as_deref()).map(tauri::ipc::Response::new)
 }
 
 /// Schließt alle Tabs. Die Oberfläche ruft das beim Start: nach einem

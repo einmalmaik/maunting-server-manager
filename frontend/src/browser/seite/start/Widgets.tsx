@@ -189,7 +189,7 @@ function Nachrichten({ jetzt }: { jetzt: number }) {
       {!gekoppelt && !stand && (
         <div className="flex flex-col items-start gap-2 px-2">
           <p className="text-body-sm text-on-surface-variant">{t('browser.start.nachrichten.ungekoppelt')}</p>
-          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/kopplung')}>
+          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/koppeln')}>
             {t('browser.start.nachrichten.koppeln')}
           </Button>
         </div>
@@ -236,7 +236,7 @@ function Wetter() {
       {!gekoppelt && !stand && (
         <div className="flex flex-col items-start gap-2 px-2">
           <p className="text-body-sm text-on-surface-variant">{t('browser.start.wetter.ungekoppelt')}</p>
-          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/kopplung')}>
+          <Button type="button" size="sm" variant="secondary" onClick={() => navigate('/koppeln')}>
             {t('browser.start.wetter.koppeln')}
           </Button>
         </div>

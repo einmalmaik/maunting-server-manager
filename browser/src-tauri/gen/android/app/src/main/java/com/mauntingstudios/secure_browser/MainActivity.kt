@@ -1,7 +1,9 @@
 package com.mauntingstudios.secure_browser
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -27,9 +29,19 @@ class MainActivity : TauriActivity() {
    */
   @Volatile private var rand = mapOf("oben" to 0f, "links" to 0f, "rechts" to 0f, "unten" to 0f)
 
+  override fun attachBaseContext(newBase: Context) {
+    // Pontis hat nur eine dunkle Oberfläche. Die WebView entscheidet anhand
+    // dieser Konfiguration, ob sie Seiten abdunkeln darf; ohne den erzwungenen
+    // Nachtmodus bliebe sie auf einem hell eingestellten Gerät hell.
+    val konfiguration = Configuration(newBase.resources.configuration)
+    konfiguration.uiMode =
+      (konfiguration.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or Configuration.UI_MODE_NIGHT_YES
+    super.attachBaseContext(newBase.createConfigurationContext(konfiguration))
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Die Oberfläche ist immer dunkel (`browser.html`): helle Symbole in
-    // Status- und Gestenleiste, sonst stünden Uhr und Akku dunkel auf dunkel.
+    // Helle Symbole in Status- und Gestenleiste, sonst stünden Uhr und Akku
+    // dunkel auf dunkel.
     enableEdgeToEdge(SystemBarStyle.dark(Color.TRANSPARENT), SystemBarStyle.dark(Color.TRANSPARENT))
     super.onCreate(savedInstanceState)
   }

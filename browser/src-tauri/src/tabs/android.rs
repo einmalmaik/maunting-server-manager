@@ -134,8 +134,11 @@ struct Bild {
 }
 
 /// Bild des vorderen Tabs für die Oberfläche, solange sie etwas darüberlegt.
-pub fn standbild(app: &AppHandle, tabs: &Tabs) -> Result<Vec<u8>, String> {
-    let id = tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?;
+pub fn standbild(app: &AppHandle, tabs: &Tabs, id: Option<&str>) -> Result<Vec<u8>, String> {
+    let id = match id {
+        Some(id) => id.to_string(),
+        None => tabs.0.lock().unwrap().aktiv.clone().ok_or("Kein Tab vorne")?,
+    };
     let bild: Bild = rufen(app, "standbild", json!({ "id": id, "png": false }))?;
     base64::engine::general_purpose::STANDARD.decode(bild.bild).map_err(|e| e.to_string())
 }
