@@ -267,13 +267,25 @@ if [[ -z "$LATEST_TAG" ]]; then
             if ! $FORCE; then exit 0; fi
             LATEST_TAG="unknown"
         elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]] && ! $FORCE; then
-            ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_BRANCH: ${LOCAL_SHA:0:8})."
-            # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
-            # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
-            # frueh aussteigen, stellen wir Besitz wieder her, damit der
-            # Panel-Service als msm-User schreibend zugreifen kann.
-            restore_panel_ownership
-            exit 0
+            if $SYSTEMD_AVAILABLE && ! $CHECK_ONLY \
+                && [[ -d "$MSM_DIR/wetter-sidecar" ]] \
+                && { [[ ! -f /etc/systemd/system/msm-wetter.service ]] \
+                    || ! systemctl is-enabled --quiet msm-wetter.service 2>/dev/null; }; then
+                # 5.6.0 -> 5.7.0 hat das Verzeichnis kopiert, aber die Unit mit
+                # dem alten Updater nicht angelegt. Ein zweiter Lauf stieg hier
+                # bisher aus und ließ den Sidecar dauerhaft aus.
+                warn "Wetter-Sidecar ist vorhanden, aber nicht als Dienst eingerichtet; der Lauf richtet ihn jetzt ein."
+                FORCE=true
+                LATEST_TAG="$CURRENT_BRANCH-${REMOTE_SHA:0:8}"
+            else
+                ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_BRANCH: ${LOCAL_SHA:0:8})."
+                # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
+                # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
+                # frueh aussteigen, stellen wir Besitz wieder her, damit der
+                # Panel-Service als msm-User schreibend zugreifen kann.
+                restore_panel_ownership
+                exit 0
+            fi
         else
             LATEST_TAG="$CURRENT_BRANCH-${REMOTE_SHA:0:8}"
             log "Neuer Commit auf $CURRENT_BRANCH: ${REMOTE_SHA:0:8}"
@@ -289,11 +301,21 @@ fi
 
 # ── Vergleich (nur bei Release-Mode) ──
 if [[ "$UPDATE_MODE" == "release" ]] && [[ "$(normalize_version "$CURRENT_VERSION")" == "$(normalize_version "$LATEST_TAG")" ]] && ! $FORCE; then
-    ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
-    # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
-    # Run Dateien als root liegen gelassen hat.
-    restore_panel_ownership
-    exit 0
+    if $SYSTEMD_AVAILABLE && ! $CHECK_ONLY \
+        && [[ -d "$MSM_DIR/wetter-sidecar" ]] \
+        && { [[ ! -f /etc/systemd/system/msm-wetter.service ]] \
+            || ! systemctl is-enabled --quiet msm-wetter.service 2>/dev/null; }; then
+        # Siehe Git-Pfad: eine bestehende 5.7.0-Installation holt die fehlende
+        # Wetter-Unit beim nächsten Lauf nach, statt vorher auszusteigen.
+        warn "Wetter-Sidecar ist vorhanden, aber nicht als Dienst eingerichtet; der Lauf richtet ihn jetzt ein."
+        FORCE=true
+    else
+        ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
+        # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
+        # Run Dateien als root liegen gelassen hat.
+        restore_panel_ownership
+        exit 0
+    fi
 fi
 
 # ── Nur prüfen? ──

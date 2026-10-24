@@ -777,6 +777,14 @@ if $SHOULD_COPY_FILES; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
                 "$SCRIPT_DIR/searxng-sidecar/" "$MSM_DIR/searxng-sidecar/"
         fi
+        if [[ -d "$SCRIPT_DIR/wetter-sidecar" ]]; then
+            # daten/ enthält die geladenen Modellläufe und bleibt beim Update
+            # erhalten; .env gehört dem Server, nicht dem Release.
+            rsync -a --chown="$MSM_USER:$MSM_USER" --delete \
+                --exclude '.env' --exclude 'daten/' \
+                --exclude '__pycache__/' --exclude '*.pyc' \
+                "$SCRIPT_DIR/wetter-sidecar/" "$MSM_DIR/wetter-sidecar/"
+        fi
         if [[ -d "$SCRIPT_DIR/livekit-sidecar" ]]; then
             rsync -a --chown="$MSM_USER:$MSM_USER" --delete --exclude '.env' \
                 "$SCRIPT_DIR/livekit-sidecar/" "$MSM_DIR/livekit-sidecar/"
