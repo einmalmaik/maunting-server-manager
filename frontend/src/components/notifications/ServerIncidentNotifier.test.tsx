@@ -37,6 +37,7 @@ const nachrichtenStore = vi.hoisted(() => ({
 vi.mock('@/stores/messengerNotificationStore', () => ({
   useMessengerNotificationStore: { getState: () => nachrichtenStore.zustand },
   playNotificationChime: nachrichtenStore.chime,
+  chimeEntsperren: vi.fn(),
 }))
 
 import { api } from '@/api/client'

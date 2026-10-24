@@ -346,6 +346,18 @@ export interface MessengerSperrZustand {
   fehlerLoeschen: () => void
 }
 
+/**
+ * Ob der Messenger gerade nichts herausgibt.
+ *
+ * Dieselbe Regel für die Seite und den Pontis-Hintergrund. `siegelAktiv()`
+ * steht daneben, weil der Store seinen Stand erst nach `initialisiere()`
+ * kennt; ohne den zweiten Blick zeigte der erste Durchlauf nach einem
+ * Neuladen einen leeren Messenger, bevor der Sperrschirm ihn ablöst.
+ */
+export function istGesperrt(s: { entsperrt: boolean; eingerichtet: boolean }): boolean {
+  return !s.entsperrt && (s.eingerichtet || siegelAktiv())
+}
+
 export const useMessengerSperre = create<MessengerSperrZustand>((set, get) => ({
   eingerichtet: false,
   entsperrt: false,

@@ -150,8 +150,7 @@ import { TrefferListe } from '@/components/social/TrefferListe'
 import { compressImageFile } from '@/lib/imageCompression'
 import { CreateStoryModal } from '@/components/social/CreateStoryModal'
 import { MessengerSperrschirm } from '@/components/social/MessengerSperrschirm'
-import { siegelAktiv } from '@/services/lokaleVersiegelung'
-import { useMessengerSperre } from '@/services/messengerSperre'
+import { istGesperrt, useMessengerSperre } from '@/services/messengerSperre'
 import { StoryViewerModal, type StoryReplyContext } from '@/components/social/StoryViewerModal'
 import { NotePickerDialog } from '@/components/social/modals/NotePickerDialog'
 import { CalendarPickerDialog } from '@/components/social/modals/CalendarPickerDialog'
@@ -192,18 +191,8 @@ import { DisBadge } from '@/components/DisBadge'
  * Zählen. Alles ist freiwillig; was nichts zu senden hat, kommt gar nicht erst
  * bis zum Umschlag.
  */
-/*
- * `siegelAktiv()` steht neben dem Store, weil der seinen Stand erst nach
- * `initialisiere()` kennt. Ohne diesen zweiten Blick zeigte der erste Durchlauf
- * nach jedem Neuladen einen kurz aufblitzenden, leeren Messenger, bevor der
- * Sperrschirm ihn ablöst. Gelesen hätte er nichts — die Ablagen geben ohne
- * Schlüssel nichts heraus —, aber es sähe kaputt aus.
- */
 /** Kennung einer Nachricht in der Mehrfachauswahl; noch nicht gesendete haben nur ihre `clientUuid`. */
 const auswahlSchluessel = (m: ChatMessage) => m.clientUuid || `#${m.id}`
-
-const istGesperrt = (s: { entsperrt: boolean; eingerichtet: boolean }) =>
-  !s.entsperrt && (s.eingerichtet || siegelAktiv())
 
 /**
  * Der Messenger hinter seinem Schloss.
@@ -1300,8 +1289,8 @@ function MessengerSeite() {
     const stand = quittungsstand(blindMailboxId)
     highestIncomingIdAcknowledgedRef.current = stand.gelesen
     highestIncomingIdDeliveredRef.current = stand.zugestellt
-    maxPartnerReadIdRef.current = 0
-    maxPartnerDeliveredIdRef.current = 0
+    // Die Partnerzähler lädt der Kern aus `partnerstand`; hier auf 0 zu setzen
+    // nahm den gespeicherten Zustellstand bei jedem Chatwechsel wieder weg.
   }, [blindMailboxId])
 
   /**

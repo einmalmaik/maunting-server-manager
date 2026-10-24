@@ -72,6 +72,17 @@ export interface PostfachLauf {
   setVerfallSekunden: (sekunden: number) => void
   /** Fuer die Zustellquittung an den Absender; ohne sie bleibt sie aus. */
   identitaet?: E2eeIdentity | null
+  /**
+   * Neue, eingehende Zeilen nach dem lokalen Commit. Der Aufrufer meldet sie
+   * (Zahl, Ton, Einblendung); das Gerätepostfach erzeugt kein Sync-Ereignis,
+   * aus dem eine andere Stelle sie erfahren könnte.
+   */
+  beiNeuerNachricht?: (
+    gespraech: PostfachGespraech,
+    nachrichten: readonly { clientUuid?: string; senderId?: number }[],
+  ) => void
+  /** Blockierte Kontakte bekommen keine Zustellquittung und keine Meldung. */
+  istBlockiert?: (userId: number) => boolean
 }
 
 /** Hoechstens so viele Eintraege holt ein Lauf (die Grenze des Servers). */
@@ -142,9 +153,35 @@ async function ordneZu(
  * wurden. Ein Eintrag, dessen Gespraech nicht bekannt ist oder dessen
  * Verarbeitung scheitert, bleibt liegen und kommt beim naechsten Lauf wieder.
  */
-export async function verarbeitePostfach(
+export interface PostfachErgebnis {
+  verarbeitet: number
+  quittiert: number
+}
+
+/**
+ * Ein Lauf zur Zeit, auch über zwei Aufhänger hinweg.
+ *
+ * Der Kern der Messenger-Seite und die Pontis-Wache können im selben Moment
+ * anstoßen (Seitenwechsel, Sync-Ereignis, Takt). Beide lesen dasselbe
+ * Gerätepostfach; zwei Läufe würden dieselben Einträge entschlüsseln und der
+ * zweite liefe in bereits verbrauchte Ratchet-Schlüssel. Der zweite Aufrufer
+ * wartet deshalb auf den laufenden und bekommt „nichts Neues".
+ */
+let offenerLauf: Promise<PostfachErgebnis> | null = null
+
+export function verarbeitePostfach(lauf: PostfachLauf): Promise<PostfachErgebnis> {
+  if (offenerLauf) {
+    return offenerLauf.then(() => ({ verarbeitet: 0, quittiert: 0 }))
+  }
+  offenerLauf = verarbeitePostfachInnen(lauf).finally(() => {
+    offenerLauf = null
+  })
+  return offenerLauf
+}
+
+async function verarbeitePostfachInnen(
   lauf: PostfachLauf,
-): Promise<{ verarbeitet: number; quittiert: number }> {
+): Promise<PostfachErgebnis> {
   if (!lauf.eigeneId || lauf.decryptionKeys.length === 0) return { verarbeitet: 0, quittiert: 0 }
 
   const inbox = await eigeneInboxAdresse()
@@ -237,6 +274,43 @@ export async function verarbeitePostfach(
       verarbeitet += uebernahme.processedList.length
 
       /*
+       * Nur wirklich **neue** Zeilen. Blieb das Transport-ACK liegen, kommt
+       * derselbe Auftrag beim nächsten Lauf wieder — und mit ihm dieselbe
+       * Nachricht. Ohne diesen Vergleich ginge alle zehn Sekunden eine
+       * Zustellquittung hinaus, und eine Meldung klingelte erneut, bis der
+       * Auftrag verfällt.
+       */
+      const bekannt = new Set(
+        uebernahme.lokalerVerlauf
+          .map((m) => m.clientUuid)
+          .filter((id): id is string => Boolean(id)),
+      )
+      const neueZeilen = uebernahme.processedList.filter(
+        (m) => !m.isSelf && Boolean(m.clientUuid) && !bekannt.has(m.clientUuid as string),
+      )
+      const neue = neueZeilen.map((m) => m.clientUuid as string)
+      const blockiert = Boolean(
+        !gespraech.group &&
+          gespraech.contact &&
+          lauf.istBlockiert?.(gespraech.contact.userId),
+      )
+
+      /*
+       * Das Gerätepostfach erzeugt kein Sync-Ereignis. Wer den Messenger
+       * geschlossen hat, erführe von einer hier abgelegten Nachricht sonst
+       * nichts — keine Zahl, kein Ton. Deshalb meldet der Lauf sie selbst,
+       * und nur die, die wirklich neu sind.
+       */
+      if (neueZeilen.length > 0 && !blockiert) {
+        try {
+          lauf.beiNeuerNachricht?.(gespraech, neueZeilen)
+        } catch {
+          // Eine Meldung ist Beiwerk; die Nachricht ist abgelegt und wird
+          // trotzdem quittiert. Der nächste Lauf meldet sie nicht erneut.
+        }
+      }
+
+      /*
        * Die Zustellquittung an den Absender — auch ohne offenen Chat.
        *
        * Bis 23.10.2026 entstand sie nur im offenen Gespraech. Eine Nachricht,
@@ -248,21 +322,7 @@ export async function verarbeitePostfach(
        * Gelesen ist sie damit nicht. Eine Lesequittung gibt es erst, wenn die
        * Nachricht wirklich auf einem Schirm stand.
        */
-      if (!gespraech.group && gespraech.drKontext && lauf.identitaet) {
-        /*
-         * Nur wirklich **neue** Zeilen. Blieb das Transport-ACK liegen, kommt
-         * derselbe Auftrag beim nächsten Lauf wieder — und mit ihm dieselbe
-         * Nachricht. Ohne diesen Vergleich ginge alle zehn Sekunden eine
-         * Zustellquittung hinaus, bis der Auftrag verfällt.
-         */
-        const bekannt = new Set(
-          uebernahme.lokalerVerlauf
-            .map((m) => m.clientUuid)
-            .filter((id): id is string => Boolean(id)),
-        )
-        const neue = uebernahme.processedList
-          .filter((m) => !m.isSelf && Boolean(m.clientUuid) && !bekannt.has(m.clientUuid as string))
-          .map((m) => m.clientUuid as string)
+      if (!gespraech.group && gespraech.drKontext && lauf.identitaet && !blockiert) {
         if (neue.length > 0) {
           const ids = Array.from(
             new Set([...quittungsKennungen(gespraech.mailbox, 'zugestellt'), ...neue]),

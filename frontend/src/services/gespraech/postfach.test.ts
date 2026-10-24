@@ -197,6 +197,70 @@ describe('verarbeitePostfach', () => {
     expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'an-sender:u-neu', 'quittung:d-1'])
   })
 
+  it('meldet nur neue eingehende Zeilen nach dem Commit', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
+      naechste_seq: 1,
+    })
+    uebernahme.uebernimmLesungen.mockResolvedValue({
+      processedList: [
+        { id: -1, clientUuid: 'u-neu', senderId: 2, isSelf: false },
+        { id: -2, clientUuid: 'u-eigen', senderId: 1, isSelf: true },
+        { id: -3, clientUuid: 'u-schon-da', senderId: 2, isSelf: false },
+      ],
+      lokalerVerlauf: [{ id: -3, clientUuid: 'u-schon-da', senderId: 2, isSelf: false }],
+      combined: [],
+      verlaufsArt: 'direkt',
+      mailbox: 'm-dm',
+      maxIncomingId: 1,
+      unlesbar: 0,
+    })
+    const melden = vi.fn()
+
+    await verarbeitePostfach({
+      ...lauf,
+      identitaet: { state: 'ready' } as never,
+      beiNeuerNachricht: melden,
+    })
+
+    // Nur die wirklich neue, fremde Zeile; die eigene und die bereits
+    // abgelegte dürfen weder zählen noch klingeln.
+    expect(melden).toHaveBeenCalledTimes(1)
+    expect(melden.mock.calls[0][1].map((m: { clientUuid: string }) => m.clientUuid)).toEqual([
+      'u-neu',
+    ])
+  })
+
+  it('schweigt und quittiert nicht bei einem blockierten Kontakt', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
+      naechste_seq: 1,
+    })
+    uebernahme.uebernimmLesungen.mockResolvedValue({
+      processedList: [{ id: -1, clientUuid: 'u-blockiert', senderId: 2, isSelf: false }],
+      lokalerVerlauf: [],
+      combined: [],
+      verlaufsArt: 'direkt',
+      mailbox: 'm-dm',
+      maxIncomingId: 1,
+      unlesbar: 0,
+    })
+    const melden = vi.fn()
+
+    await verarbeitePostfach({
+      ...lauf,
+      identitaet: { state: 'ready' } as never,
+      istBlockiert: (id: number) => id === 2,
+      beiNeuerNachricht: melden,
+    })
+
+    // Kein Ton, keine Zahl und keine Zustellquittung; der Transport-Auftrag
+    // wird trotzdem quittiert, sonst käme er zehn Sekunden lang wieder.
+    expect(melden).not.toHaveBeenCalled()
+    expect(steuerung.sendeSteuerpaket).not.toHaveBeenCalled()
+    expect(zustellung.quittiereZustellungen).toHaveBeenCalled()
+  })
+
   it('quittiert nicht alle zehn Sekunden erneut, wenn das ACK liegen bleibt', async () => {
     // Derselbe Auftrag kommt wieder, die Nachricht liegt aber schon im
     // Verlauf. Eine erneute Zustellquittung waere Laerm im Hundert-Fenster.

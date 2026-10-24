@@ -613,6 +613,29 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByLabelText('Kalendereintrag teilen')).toBeInTheDocument()
   })
 
+  it('räumt beim Verlassen des Messengers die offene Mailbox', async () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('alice'))
+
+    await waitFor(() => {
+      expect(useMessengerNotificationStore.getState().activeMailboxId).toBeTruthy()
+    })
+
+    unmount()
+
+    // Ohne das bliebe der zuletzt geöffnete Chat „offen"; Zahl und Ton für
+    // neue Nachrichten würden dauerhaft unterdrückt.
+    expect(useMessengerNotificationStore.getState().activeMailboxId).toBeNull()
+  })
+
   it('erlaubt das Senden einer Nachricht an ein Teammitglied ohne vorherige Freundschaft', async () => {
     vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValueOnce({
       id: 999,

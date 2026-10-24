@@ -17,9 +17,8 @@ import { toast } from '@/stores/toastStore'
 import { sendeGeraeteBenachrichtigung, pruefeUndFrageGeraeteBerechtigung } from '@/lib/benachrichtigung'
 import { abonniere, kuendige } from '@/services/pushAbo'
 import { kuendigeMailboxPush } from '@/services/mailboxPush'
-import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
-import { melde, planeMeldung } from '@/services/benachrichtigung/hub'
-import { NotificationService } from '@/services/notificationService'
+import { useMessengerNotificationStore, chimeEntsperren } from '@/stores/messengerNotificationStore'
+import { meldeChat } from '@/services/benachrichtigung/chatMeldung'
 import { loadCalendarEventsOfflineFirst } from '@/lib/offlineSync'
 import { erinnerungenAus, PLAN_TAGE, type GeplanteErinnerung } from '@/lib/erinnerungsplan'
 import { CALENDAR_CIPHERTEXT_PREFIX } from '@/services/notesCalendarCrypto'
@@ -166,6 +165,12 @@ export function ServerIncidentNotifier() {
   // Was zuletzt an Android ging; ohne Änderung wird nicht neu geplant.
   const planRef = useRef<string | null>(null)
   const currentUserIdRef = useRef<number | undefined>(user?.id)
+
+  // Ein Browser hebt die Autoplay-Sperre nur in einer echten Geste auf.
+  // Pontis, Web und MSS mounten diesen Baustein; damit gilt es überall.
+  useEffect(() => {
+    chimeEntsperren()
+  }, [])
 
   useEffect(() => {
     if (currentUserIdRef.current !== user?.id) {
@@ -359,135 +364,23 @@ export function ServerIncidentNotifier() {
           toast.success(t('notifications.achievementUnlockedToast', { title: ach.title, points: ach.points ?? 0 }))
         }
       } else if (detail?.type === 'e2ee_blind_message') {
-        const mid = detail.blind_mailbox_id
-        if (!mid) return
-
-        const store = useMessengerNotificationStore.getState()
-
-        // 1. Multi-Device Read Receipt Sync:
-        // Wenn der Benutzer den Chat auf einem anderen Gerät gelesen hat,
-        // wird der Zähler auf diesem Gerät unmittelbar zurückgesetzt
-        const senderId = detail.sender_user_id ?? detail.sender_id
-        if (
-          detail.control_type === 'read_receipt' &&
-          NotificationService.isOutgoingEcho(senderId, user?.id)
-        ) {
-          store.markAsRead(mid)
-          return
-        }
-
-        // 2. Outgoing Echo Prevention:
-        // Der Sender darf NIEMALS eine Notification oder einen Unread-Count für seine eigenen
-        // Aktionen erhalten (auch nicht bei Aktionen via KI/Worker im Namen des Nutzers).
-        if (NotificationService.isOutgoingEcho(senderId, user?.id)) {
-          return
-        }
-
-        // 3. Interne Steuernachrichten (Read Receipts, Delivery Receipts, Edits) ausschließen
-        const isControl = Boolean(
-          detail.is_control ||
-          (detail.control_type && detail.control_type !== 'message' && detail.control_type !== 'normal')
-        )
-        if (isControl) {
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('msm:messages-updated', {
-                detail: { blind_mailbox_id: mid, is_control: true, control_type: detail.control_type },
-              })
-            )
-          }
-          return
-        }
-
-        // 4. Mailbox-Metadaten abrufen oder bei Bedarf nachsynchronisieren
-        let meta = store.mailboxDirectory[mid]
-        if (!meta) {
-          if (user?.id) {
-            void store.syncMailboxDirectoryFromBackend(user.id)
-          }
-          meta = {
-            name: 'Neue Nachricht',
-            isGroup: Boolean(detail.is_group),
-          }
-        }
-
-
-        // Chat-Fokus und Vordergrund-Erkennung
-        const isDocVisible = typeof document !== 'undefined' && document.visibilityState === 'visible'
-        const isWindowFocused =
-          typeof document !== 'undefined' &&
-          (typeof document.hasFocus !== 'function' || document.hasFocus())
-        const isForeground = isDocVisible && isWindowFocused
-
-        /**
-         * Die Entscheidung liegt seit 22.10.2026 in `planeMeldung` — dieselbe
-         * Regel für Web, Pontis, MSS und Android. Hier stehen nur noch die
-         * Tatsachen, die der Hub nicht kennen kann: ist **dieser** Chat sichtbar,
-         * welche Mailbox ist stumm, wen hat der Mensch blockiert.
+        if (!detail.blind_mailbox_id) return
+        /*
+         * Geteilte Mailbox und Gerätepostfach gehen durch dieselbe Meldestelle.
+         * Die Regeln (eigene Aktion, Steuerung, Stumm, Blockiert, offener Chat)
+         * stehen dort; hier bleibt nur die Übersetzung des Ereignisses.
          */
-        const lage = {
-          art: 'chat' as const,
-          schalterAn: user?.device_notifications !== false,
-          absenderId: detail.sender_user_id ?? detail.sender_id,
-          eigeneId: user?.id,
+        meldeChat({
+          mailbox: detail.blind_mailbox_id,
+          senderId: detail.sender_user_id ?? detail.sender_id,
           empfaengerId: detail.recipient_id,
-          istSteuerung: isControl,
-          stumm: store.isMuted(mid),
-          blockiert: Boolean(meta.userId && store.isBlocked(meta.userId)),
-          chatOffen: store.activeMailboxId === mid && isDocVisible && isWindowFocused,
-          fensterImVordergrund: isForeground,
-          // Der Server wählt einen Zusteller je Konto. Ein zweites Fenster
-          // oder MSS/Pontis auf demselben Gerät bekommt `melden: false` und
-          // zeigt dann keine zweite Systemmeldung.
+          clientUuid: detail.client_uuid ?? null,
+          istGruppe: detail.is_group,
           meldenErlaubt: detail.melden !== false,
-        }
-        const plan = planeMeldung(lage)
-
-        /**
-         * „Hier liegt etwas Neues" — und zwar **vor** der Stummschaltung.
-         *
-         * Die Erwähnungswache hing bis 20.09.2026 am Ungelesen-Zähler, und den
-         * überspringt der stumme Pfad. In einer stummen Gruppe erschien deshalb
-         * nicht einmal das @-Abzeichen, obwohl genau das der Sinn der Sache ist:
-         * kein Ton, aber sehen, dass man gemeint war.
-         *
-         * Das Ereignis nennt nur die Mailbox. Es trägt keinen Inhalt und löst
-         * keine Meldung aus; wer daran hängt, entscheidet selbst, ob er
-         * hinsieht.
-         */
-        const erwaehnungSichtbar =
-          plan.grund !== 'eigene-aktion' &&
-          plan.grund !== 'steuerung' &&
-          plan.grund !== 'nicht-empfaenger' &&
-          plan.grund !== 'chat-offen'
-        if (erwaehnungSichtbar && typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('msm:mailbox-neu', { detail: { mid } }))
-        }
-
-        if (plan.grund) return
-
-        const senderOrChat = meta.name
-        const title = t('notifications.messageTitle', { name: senderOrChat })
-        const text = meta.isGroup
-          ? t('notifications.messageInGroup', { name: meta.name })
-          : t('notifications.messageFrom', { name: senderOrChat })
-
-        // Ungelesen-Zähler im Store erhöhen
-        if (plan.zaehlen) store.incrementUnread(mid)
-
-        // Ton, Einblendung und Systemmeldung an genau einer Stelle. Der
-        // Schlüssel trägt die `client_uuid`: die zweite Kopie derselben
-        // Nachricht für ein anderes Gerät ist derselbe Umschlag und darf
-        // nicht ein zweites Mal klingeln.
-        void melde(lage, {
-          // Die Kennung des Servers, wenn es eine gibt: sie reist auch im Push
-          // und ist damit die einzige, die Seite und Service Worker teilen.
-          schluessel: detail.ereignis || `chat:${mid}:${detail.client_uuid || detail.id || ''}`,
-          titel: title,
-          text,
-          toastText: meta.isGroup
-            ? t('notifications.messageToastGroup', { name: meta.name })
-            : t('notifications.messageToastDirect', { name: senderOrChat }),
+          isControl: Boolean(detail.is_control),
+          controlType: detail.control_type ?? null,
+          ereignis: detail.ereignis ?? null,
+          t,
         })
       }
     }

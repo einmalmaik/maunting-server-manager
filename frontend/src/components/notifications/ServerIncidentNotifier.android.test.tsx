@@ -35,6 +35,7 @@ vi.mock('@/stores/messengerNotificationStore', () => ({
     }),
   },
   playNotificationChime: vi.fn(),
+  chimeEntsperren: vi.fn(),
 }))
 
 import { ServerIncidentNotifier } from './ServerIncidentNotifier'

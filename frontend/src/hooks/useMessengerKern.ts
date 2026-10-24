@@ -6,8 +6,9 @@ import type { ChatContact } from '@/components/social/sidebar/ConversationListIt
 import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import { useKonversation, type GespraechsZiel } from '@/hooks/useKonversation'
 import { useNachrichtenLaden } from '@/hooks/useNachrichtenLaden'
+import { usePostfachWache } from '@/hooks/usePostfachWache'
 import { IDENTITY_LOADING, resolveIdentity, type E2eeIdentity } from '@/services/e2eeIdentity'
-import { decryptE2eeHybridWithKeyring, deriveBlindMailboxId, deriveGroupBlindMailboxId, getCachedBlindMailboxId, getCachedGroupBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
+import { decryptE2eeHybridWithKeyring, deriveBlindMailboxId, scrubPlaintextStorage } from '@/services/e2eeCrypto'
 import { uebernimmAltbestand } from '@/services/altbestandUebernahme'
 import {
   eigenesGeraetFreigegeben,
@@ -24,8 +25,7 @@ import {
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { holeOffeneMedien } from '@/services/medienNachholen'
 import { setzeLoeschMelder, stosseLoeschungenAn } from '@/services/loeschNachholen'
-import { ladeGruppenzustand } from '@/services/gruppenKonfig'
-import { rechteAusGruppe } from '@/services/gruppenRollen'
+import { meldeChat } from '@/services/benachrichtigung/chatMeldung'
 import { anheftung } from '@/services/nachrichtAnheftung'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
@@ -35,8 +35,6 @@ import type { SteuerAuftrag } from '@/services/steuerOutboxTypen'
 import { toast } from '@/stores/toastStore'
 import { useFunkenStore } from '@/stores/funkenStore'
 import { useMessengerNotificationStore } from '@/stores/messengerNotificationStore'
-import { verarbeitePostfach, type PostfachGespraech } from '@/services/gespraech/postfach'
-import { sendeAusstehendeZustellungen } from '@/services/ratchetSitzung'
 import { setzeAnrufIdentitaet } from '@/stores/useCallStore'
 
 interface Optionen {
@@ -478,130 +476,48 @@ export function useMessengerKern({
   /**
    * Das Gerätepostfach im Hintergrund leeren.
    *
-   * Der neue Transport stellt je Gerät zu; was hier liegt, gehört zu irgendeinem
-   * Gespräch — auch zu einem, das niemand offen hat. Ohne diesen Lauf bliebe es
-   * liegen, und nach 50 offenen Aufträgen nähme der Server nichts mehr an.
-   *
-   * Die Zuordnung braucht die Kennungen aller Gespräche. Die entstehen aus den
-   * Konten und Gruppen, nicht aus dem offenen Chat.
+   * Der Lauf liegt in `usePostfachWache`, weil ihn auch Pontis bei
+   * geschlossenem Messenger braucht. Hier bleibt nur die Meldung der neuen
+   * Zeilen: das Gerätepostfach erzeugt kein Sync-Ereignis, aus dem eine andere
+   * Stelle sie erfahren könnte.
    */
-  const postfachRef = useRef({ gruppenrechteVon, t, markAsRead, setVerfallSekunden })
-  postfachRef.current = { gruppenrechteVon, t, markAsRead, setVerfallSekunden }
-  useEffect(() => {
-    if (!currentUserId || messengerGesperrt) return
-    if (identity.state !== 'ready') return
-    let aktiv = true
-    let laeuft = false
-
-    const gespraeche = async (): Promise<PostfachGespraech[]> => {
-      const liste: PostfachGespraech[] = []
-      for (const f of friends) {
-        const peerId = Number(f.user_id ?? f.friend_user_id ?? f.id)
-        if (!Number.isInteger(peerId) || peerId <= 0) continue
-        const mailbox =
-          getCachedBlindMailboxId(currentUserId, peerId) ??
-          (await deriveBlindMailboxId(currentUserId, peerId))
-        if (!mailbox) continue
-        liste.push({
-          mailbox,
-          drKontext: { eigeneId: currentUserId, peerId },
-          gruppenKontext: null,
-          contact: { userId: peerId, isFriend: true },
-          group: null,
+  usePostfachWache({
+    eigeneId: currentUserId,
+    freunde: friends,
+    gruppen: groups,
+    identitaet: identity,
+    gesperrt: messengerGesperrt,
+    t,
+    markAsRead,
+    setVerfallSekunden,
+    gruppenrechteVon,
+    istBlockiert: isBlocked,
+    beiNeuerNachricht: (gespraech, nachrichten) => {
+      for (const msg of nachrichten) {
+        meldeChat({
+          mailbox: gespraech.mailbox,
+          senderId: msg.senderId,
+          clientUuid: msg.clientUuid ?? null,
+          istGruppe: Boolean(gespraech.group),
+          t,
         })
       }
-      for (const g of groups) {
-        const mailbox =
-          getCachedGroupBlindMailboxId(g.id) ?? (await deriveGroupBlindMailboxId(g.id))
-        if (!mailbox) continue
-        const mitglieder = (g.members ?? []).map((m) => Number(m.user_id))
-        if (!mitglieder.includes(currentUserId)) mitglieder.push(currentUserId)
-        liste.push({
-          mailbox,
-          drKontext: null,
-          gruppenKontext: {
-            groupId: g.id,
-            blindMailboxId: mailbox,
-            eigeneId: currentUserId,
-            mitglieder,
-            istEigentuemer: Number(g.owner_user_id) === currentUserId,
-          },
-          contact: null,
-          group: g,
-        })
-      }
-      return liste
-    }
+    },
+  })
 
-    const lauf = async () => {
-      if (!aktiv || laeuft) return
-      laeuft = true
-      try {
-        const liste = await gespraeche()
-        if (!aktiv) return
-        /*
-         * Was beim letzten Mal liegen blieb, geht zuerst hinaus — mit den
-         * exakten Bytes und Kennungen aus der Absicht. Ohne diesen Aufruf
-         * hätte eine Nachricht, deren Antwort verloren ging, nie wieder einen
-         * Weg: die Kettenposition war verbraucht, der Umschlag lag nur hier.
-         */
-        await sendeAusstehendeZustellungen(currentUserId).catch(() => undefined)
-        await verarbeitePostfach({
-          eigeneId: currentUserId,
-          decryptionKeys: identity.decryptionKeys ?? [],
-          gespraeche: liste,
-          identitaet: identity,
-          /*
-           * Die Rechte **dieses** Gespraechs, nicht die des sichtbaren.
-           *
-           * `postfachRef.current.gruppenrechteVon` haengt an `activeGroup`;
-           * ohne offenen Gruppenchat lieferte sie eine leere Menge, und
-           * gueltige Gruppennachrichten fremder Mitglieder wurden als
-           * „darf nicht schreiben" verworfen. Der Rollenblock wird je Gruppe
-           * gelesen; fehlt er, entscheidet die Mitgliederzeile.
-           */
-          rechteFuerGruppe: async (group) => {
-            let zustand = null
-            try {
-              const mailbox =
-                getCachedGroupBlindMailboxId(group.id) ?? (await deriveGroupBlindMailboxId(group.id))
-              const mitglieder = (group.members ?? []).map((m) => Number(m.user_id))
-              if (!mitglieder.includes(currentUserId)) mitglieder.push(currentUserId)
-              const lesung = await ladeGruppenzustand({
-                groupId: group.id,
-                blindMailboxId: mailbox,
-                eigeneId: currentUserId,
-                mitglieder,
-                istEigentuemer: Number(group.owner_user_id) === currentUserId,
-              })
-              if (lesung.art === 'zustand') zustand = lesung.zustand
-            } catch {
-              // Ohne Rollenblock gilt die Mitgliederzeile; ohne die bleibt es
-              // bei den Standardrechten.
-            }
-            return (konto: number) => rechteAusGruppe(group, konto, zustand)
-          },
-          ...postfachRef.current,
-        })
-      } catch {
-        // Netz, Ablage, ein einzelnes Gespraech: der naechste Takt versucht es
-        // erneut. Ein Fehler hier darf den Chat nicht aufhalten.
-      } finally {
-        laeuft = false
-      }
-    }
-
-    void lauf()
-    // Der Takt ist grob: das Postfach ist die Zustellung, nicht die Anzeige.
-    // Der offene Chat meldet sich ohnehin alle fuenf Sekunden.
-    const takt = setInterval(() => void lauf(), 10_000)
-    window.addEventListener('online', lauf)
-    return () => {
-      aktiv = false
-      clearInterval(takt)
-      window.removeEventListener('online', lauf)
-    }
-  }, [currentUserId, messengerGesperrt, identity, friends, groups])
+  /**
+   * Beim Verlassen des Messengers gibt es keinen offenen Chat mehr.
+   *
+   * Ohne diesen Schritt blieb die zuletzt geöffnete Mailbox im Store stehen.
+   * `planeMeldung` hielt sie dann für „offen" und unterdrückte Zahl und Ton
+   * dauerhaft — auch wenn der Messenger längst geschlossen war.
+   */
+  useEffect(
+    () => () => {
+      useMessengerNotificationStore.getState().setActiveMailboxId(null)
+    },
+    [],
+  )
 
   useEffect(() => {
     if (!currentUserId || friends.length === 0 || messengerGesperrt) return
