@@ -20,7 +20,6 @@ import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import type { ChatGroupItem } from '@/api/social'
 import type { Lesung } from '@/hooks/useKonversation'
 import { kontoNutztSignaturen } from './e2eeGeraet'
-import { durfteAnheften, uebernehmeAnheftung } from './nachrichtAnheftung'
 import {
   istSteuerpaket,
   neueBezugstafel,
@@ -29,10 +28,15 @@ import {
   type Sammeltafel,
 } from './nachrichtBezug'
 import { leseAugenblickMarke, leseRettungsMarke } from './funkenService'
-import { durfteVerfallStellen, istBekannteStufe, stufenDativ, uebernehmeVerfall } from './nachrichtVerfall'
 import { pruefeNutzlast } from './nutzlastSignatur'
 import { logischeUuid } from './ratchetSitzung'
 import type { RohReaktion } from './reaktionen'
+import { verarbeiteAnheftung } from './auswertung/anheftung'
+import { verarbeiteBearbeitung } from './auswertung/bearbeitung'
+import { verarbeiteLoeschung } from './auswertung/loeschung'
+import { verarbeiteQuittung } from './auswertung/quittung'
+import { verarbeiteReaktion } from './auswertung/reaktion'
+import { verarbeiteVerfall } from './auswertung/verfall'
 
 export interface Auswertungskontext {
   currentMid: string
@@ -44,10 +48,14 @@ export interface Auswertungskontext {
   /** Was ein Konto in der offenen Gruppe darf; aus `wirksameGruppenrechte`. */
   gruppenrechteVon: (konto: number) => Set<string>
   t: (schluessel: string, werte?: Record<string, unknown>) => string
-  /** Die Gegenseite hat bis zu dieser Umschlagkennung gelesen. */
+  /** Die Gegenseite hat bis zu dieser Umschlagkennung gelesen (Altweg). */
   quittiertGelesen: (bis: number) => void
-  /** Die Gegenseite hat bis zu dieser Umschlagkennung empfangen. */
+  /** Die Gegenseite hat bis zu dieser Umschlagkennung empfangen (Altweg). */
   quittiertZugestellt: (bis: number) => void
+  /** Die Gegenseite hat genau diese logischen Nachrichten gelesen. */
+  quittiertGelesenIds?: (ids: string[]) => void
+  /** Die Gegenseite hat genau diese logischen Nachrichten empfangen. */
+  quittiertZugestelltIds?: (ids: string[]) => void
   /** Ein eigenes anderes Gerät hat diese Mailbox gelesen. */
   markAsRead: (mailbox: string) => void
   setVerfallSekunden: (sekunden: number) => void
@@ -62,6 +70,14 @@ export interface Auswertung {
   maxPartnerReadId: number
   maxPartnerDeliveredId: number
   maxIncomingId: number
+  /**
+   * Wie viele unlesbare Umschläge keine Nachricht mehr ergeben haben.
+   *
+   * Kein Fehler und keine Zeile im Verlauf: es sind die Altlasten, die früher
+   * als „Verschlüsselte Nachricht" gespeichert wurden. Der Aufrufer zeigt
+   * dafür **eine** Systemzeile je Gespräch.
+   */
+  unlesbar: number
 }
 
 export async function werteUmschlaegeAus(
@@ -77,6 +93,8 @@ export async function werteUmschlaegeAus(
     t,
     quittiertGelesen,
     quittiertZugestellt,
+    quittiertGelesenIds,
+    quittiertZugestelltIds,
     markAsRead,
     setVerfallSekunden,
     zeigeSystemzeile,
@@ -92,9 +110,9 @@ export async function werteUmschlaegeAus(
   const aenderungen = neueBezugstafel<{ newText: string; editedAt: string }>()
   const loeschungen = neueBezugstafel<{ deletedAt: string }>()
   const reaktionen = neueSammeltafel<RohReaktion>()
-  let maxPartnerReadId = 0
-  let maxPartnerDeliveredId = 0
+  const quittungszustand = { maxPartnerReadId: 0, maxPartnerDeliveredId: 0 }
   let maxIncomingId = 0
+  let unlesbar = 0
 
   for (const lesung of gelesen) {
     const env = lesung.env
@@ -125,26 +143,20 @@ export async function werteUmschlaegeAus(
         continue
       }
 
-      const senderId = activeContact ? activeContact.userId : 0
-      const clientUuid = logischeUuid(env.client_uuid)
-      const dedupKey = `${senderId}:${clientUuid}`
-      if (clientUuid && seenClientUuids.has(dedupKey)) {
-        continue
-      }
-      if (clientUuid) {
-        seenClientUuids.add(dedupKey)
-      }
-      decryptedList.push({
-        id: env.id,
-        clientUuid,
-        senderId,
-        text: t('messenger.encryptedMessage'),
-        createdAt: env.created_at,
-        isSelf: false,
-      })
-      if (env.id > maxIncomingId) {
-        maxIncomingId = env.id
-      }
+      /*
+       * Kein Platzhalter mehr.
+       *
+       * Bis 10/2026 wurde jeder unlesbare Umschlag zu einer Zeile
+       * „Verschlüsselte Nachricht". Sie trug je nach Gespräch den Absender des
+       * Gegenübers oder 0, bekam damit einen anderen Misch-Schlüssel als die
+       * echte Zeile — und beide blieben stehen. Bei jedem Laden wurde der
+       * Platzhalter erneut gespeichert und über die Verlaufsübergabe an andere
+       * Geräte weitergereicht. Ein Satz „Verschlüsselte Nachricht" sagt nichts
+       * über den Inhalt; er sagt nur, dass dieser Stand den Umschlag nicht
+       * öffnen konnte. Gezählt wird er, damit der Aufrufer **eine**
+       * Systemzeile zeigen kann.
+       */
+      unlesbar += 1
       continue
     }
 
@@ -240,166 +252,50 @@ export async function werteUmschlaegeAus(
           return behauptet
         }
 
-        // 1. Read receipt control packet
-        if (parsed.type === 'read_receipt') {
-          const readUpTo = Number(parsed.read_up_to_id || 0)
-          const readerId = Number(parsed.reader_id || 0)
-          if (Number(readerId) !== Number(currentUserId)) {
-            if (readUpTo > maxPartnerReadId) {
-              maxPartnerReadId = readUpTo
-              quittiertGelesen(readUpTo)
-            }
-            if (readUpTo > maxPartnerDeliveredId) {
-              maxPartnerDeliveredId = readUpTo
-              quittiertZugestellt(readUpTo)
-            }
-          } else {
-            // Multi-Device: Vom aktuellen Benutzer auf anderem Gerät gelesen
-            markAsRead(currentMid)
-          }
-          continue
-        }
-
-        // 1b. Delivery receipt control packet
-        if (parsed.type === 'delivery_receipt') {
-          const deliveredUpTo = Number(parsed.delivered_up_to_id || 0)
-          const receiverId = Number(parsed.receiver_id || 0)
-          if (Number(receiverId) !== Number(currentUserId) && deliveredUpTo > maxPartnerDeliveredId) {
-            maxPartnerDeliveredId = deliveredUpTo
-            quittiertZugestellt(deliveredUpTo)
-          }
-          continue
-        }
-
-        // 2. Edit message control packet
-        if (parsed.type === 'edit_message') {
-          if (parsed.new_text) {
-            const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
-            if (urheber === null) {
-              console.warn('[Messenger] Dropping edit packet with forged actor_id:', parsed.actor_id)
-              continue
-            }
-            aenderungen.merke(
-              parsed,
-              {
-                newText: String(parsed.new_text),
-                editedAt: String(parsed.edited_at || env.created_at),
-              },
-              urheber,
-            )
-          }
-          continue
-        }
-
-        // 3. Delete message control packet
-        if (parsed.type === 'delete_message') {
-          const urheber = await urheberVon(parsed.actor_id ?? parsed.sender_id)
-          if (urheber === null) {
-            console.warn('[Messenger] Dropping delete packet with forged actor_id:', parsed.actor_id)
-            continue
-          }
-          loeschungen.merke(
+        if (
+          verarbeiteQuittung(
             parsed,
-            {
-              deletedAt: String(parsed.deleted_at || env.created_at),
-            },
-            urheber,
+            env,
+            currentMid,
+            currentUserId,
+            quittungszustand,
+            quittiertGelesen,
+            quittiertZugestellt,
+            markAsRead,
+            quittiertGelesenIds,
+            quittiertZugestelltIds,
           )
+        ) {
           continue
         }
 
-        // 4. Reaktion auf eine Nachricht
-        if (parsed.type === 'reaction') {
-          const urheber = await urheberVon(parsed.actor_id)
-          if (urheber === null) {
-            console.warn('[Messenger] Dropping reaction with forged actor_id:', parsed.actor_id)
-            continue
-          }
-          const zeichen = String(parsed.emoji || '')
-          const wer = Number(urheber || 0)
-          if (zeichen && wer) {
-            reaktionen.ergaenze(parsed, {
-              emoji: zeichen,
-              actorId: wer,
-              nehmen: parsed.aktion === 'nehmen',
-              zeitpunkt: String(parsed.zeitpunkt || env.created_at),
-            })
-          }
+        if (await verarbeiteBearbeitung(parsed, env, urheberVon, aenderungen)) {
           continue
         }
 
-        // 5. Verfallsfrist — gilt für beide Seiten, nicht nur für den,
-        //    der sie eingestellt hat. Ab hier hängen auch die eigenen
-        //    Nachrichten ihr `verfaellt_am` an. Wer zuletzt umstellt,
-        //    gewinnt; das entscheidet `uebernehmeVerfall` am Zeitpunkt.
-        //
-        //    Angewandt wird sofort und nicht am Ende des Durchlaufs: in
-        //    `loadMessages` stehen danach zwei Abbruchwächter für den Fall,
-        //    dass inzwischen ein zweiter Abruf läuft. Der Eintrag wäre dann schon geschrieben,
-        //    die Meldung darüber aber verschluckt — und `uebernehmeVerfall`
-        //    meldet dieselbe Umstellung kein zweites Mal.
-        //
-        //    Wer umgestellt hat, sagt der Beleg, nicht `actor_id`. Bis
-        //    09/2026 stand hier `Number(parsed.actor_id)`: jedes Mitglied
-        //    hält den Gruppenschlüssel und unterschreibt seine eigene
-        //    Nutzlast, konnte also bei allen „<Eigentümer> hat eingestellt
-        //    …" erscheinen lassen, und im Direktchat die Gegenseite ein
-        //    „Du hast eingestellt …". In der Gruppe braucht die Umstellung
-        //    seitdem auch das Recht `set_disappearing_messages`; im
-        //    Direktchat gibt es keine Rollen.
-        //
-        //    Beide Schranken stehen vor `uebernehmeVerfall`, nicht danach:
-        //    ein verworfenes Paket landete dort sonst als neuester Stand,
-        //    und jede spätere berechtigte Umstellung verlöre gegen seinen
-        //    Zeitpunkt — lautlos, wenn sich an der Frist nichts ändert.
-        if (parsed.type === 'retention') {
-          const urheber = await urheberVon(parsed.actor_id)
-          if (urheber === null) {
-            console.warn('[Messenger] Dropping retention packet with forged actor_id:', parsed.actor_id)
-            continue
-          }
-          const wer = Number(urheber || 0)
-          if (activeGroup && !(wer && durfteVerfallStellen(activeGroup, wer))) continue
-          const dauer = Number(parsed.dauer || 0)
-          const wann = String(parsed.zeitpunkt || env.created_at)
-          if (istBekannteStufe(dauer) && uebernehmeVerfall(currentMid, dauer, wann)) {
-            const selbst = wer === Number(currentUserId)
-            const name = selbst
-              ? t('messenger.retentionYou')
-              : (activeGroup?.members ?? []).find((m) => Number(m.user_id) === wer)?.username ||
-                activeContact?.username ||
-                t('messenger.retentionOther')
-            setVerfallSekunden(dauer)
-            zeigeSystemzeile(
-              dauer > 0
-                ? t(selbst ? 'messenger.retentionSetSelf' : 'messenger.retentionSetOther', {
-                    name,
-                    frist: stufenDativ(dauer, t),
-                  })
-                : t(selbst ? 'messenger.retentionOffSelf' : 'messenger.retentionOffOther', { name }),
-            )
-          }
+        if (await verarbeiteLoeschung(parsed, env, urheberVon, loeschungen)) {
           continue
         }
 
-        // 6. Angeheftete Nachricht der Gruppe.
-        //
-        //    Die Schranke sitzt hier, beim Empfänger: der Server kann den
-        //    Inhalt nicht lesen und deshalb nicht prüfen, wer anheften
-        //    durfte. Ohne das Recht bleibt der Umschlag folgenlos.
-        if (parsed.type === 'pin_message') {
-          const urheber = await urheberVon(parsed.actor_id)
-          if (urheber === null) {
-            console.warn('[Messenger] Dropping pin packet with forged actor_id:', parsed.actor_id)
-            continue
-          }
-          const wer = Number(urheber || 0)
-          const ziel = String(parsed.target_client_uuid || '')
-          const wann = String(parsed.zeitpunkt || env.created_at)
-          const geloest = parsed.aktion === 'loesen'
-          if (wer && durfteAnheften(activeGroup, wer)) {
-            uebernehmeAnheftung(currentMid, geloest ? '' : ziel, wann)
-          }
+        if (await verarbeiteReaktion(parsed, env, urheberVon, reaktionen)) {
+          continue
+        }
+
+        if (
+          await verarbeiteVerfall(parsed, env, urheberVon, {
+            currentMid,
+            currentUserId,
+            activeContact,
+            activeGroup,
+            t,
+            setVerfallSekunden,
+            zeigeSystemzeile,
+          })
+        ) {
+          continue
+        }
+
+        if (await verarbeiteAnheftung(parsed, env, urheberVon, activeGroup, currentMid)) {
           continue
         }
 
@@ -554,8 +450,8 @@ export async function werteUmschlaegeAus(
           seenClientUuids.add(dedupKey)
         }
 
-        if (!isSelf && env.id > maxIncomingId) {
-          maxIncomingId = env.id
+        if (!isSelf && (env.annahme_seq ?? env.id) > maxIncomingId) {
+          maxIncomingId = env.annahme_seq ?? env.id
         }
 
         decryptedList.push({
@@ -668,8 +564,8 @@ export async function werteUmschlaegeAus(
     // Die Markierung fällt nur weg, wo sie stimmt. Nennt der Ratchet die
     // Gegenseite, bleibt sie stehen: so sieht man, was behauptet wurde.
     const text = isSelf && vonMirBehauptet ? plain.slice('[ME]:'.length) : plain
-    if (!isSelf && env.id > maxIncomingId) {
-      maxIncomingId = env.id
+    if (!isSelf && (env.annahme_seq ?? env.id) > maxIncomingId) {
+      maxIncomingId = env.annahme_seq ?? env.id
     }
     decryptedList.push({
       id: env.id,
@@ -686,8 +582,9 @@ export async function werteUmschlaegeAus(
     aenderungen,
     loeschungen,
     reaktionen,
-    maxPartnerReadId,
-    maxPartnerDeliveredId,
+    maxPartnerReadId: quittungszustand.maxPartnerReadId,
+    maxPartnerDeliveredId: quittungszustand.maxPartnerDeliveredId,
     maxIncomingId,
+    unlesbar,
   }
 }

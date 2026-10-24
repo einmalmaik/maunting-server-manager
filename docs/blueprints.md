@@ -634,7 +634,7 @@ Die Kompatibilitätsschicht wird klassisch über Umgebungsvariablen (`runtime.en
 
 ```json
   "runtime": {
-    "image": "ghcr.io/einmalmaik/msm-wine:latest",
+    "image": "ghcr.io/mauntingstudios/msm-wine:latest",
     "env": {
       "WINEDEBUG": "-all",
       "WINEPREFIX": "/server/.wine",

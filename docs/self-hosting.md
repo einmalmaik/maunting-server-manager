@@ -24,7 +24,7 @@ Eine frische Produktionsinstallation benötigt eine HTTPS-Domain, deren DNS
 bereits auf den Panel-Server zeigt:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/einmalmaik/maunting-server-manager/main/scripts/bootstrap.sh \
+curl -fsSL https://raw.githubusercontent.com/mauntingstudios/maunting-service-manager/main/scripts/bootstrap.sh \
   | sudo bash -s -- --domain panel.example.com
 ```
 
@@ -92,7 +92,7 @@ Für ein getrenntes Frontend wird nur das Frontend-Archiv benötigt:
 
 ```bash
 VERSION=v1.8.0
-curl -fLO "https://github.com/einmalmaik/maunting-server-manager/releases/download/${VERSION}/msm-frontend-${VERSION}.tar.gz"
+curl -fLO "https://github.com/mauntingstudios/maunting-service-manager/releases/download/${VERSION}/msm-frontend-${VERSION}.tar.gz"
 tar -xzf "msm-frontend-${VERSION}.tar.gz"
 ```
 
@@ -687,7 +687,9 @@ zugreift.
   fremdes Ziel. Datenbank und Verzeichnis müssen vom selben Stand sein: das
   stündliche Aufräumen entfernt jedes Dateiverzeichnis, zu dem die Datenbank
   seit 24 Stunden keine Zeile hat. Spielst du eine ältere Datenbank ein,
-  verschwinden die Dateien, die erst danach hochgeladen wurden.
+  verschwinden die Dateien, die erst danach hochgeladen wurden. Für den
+  Messenger gilt zusätzlich: die Puffer seines E2EE-Zustellbestands fehlen im
+  Dump (siehe *Messenger: E2EE-Zustellbestand*).
 - **Tresor zurücksetzen** löscht den Tresor ganz, wie das Löschen des
   Kontos: Einträge, Besitznachweis und Formatsperre sofort, die Dateien beim
   nächsten stündlichen Aufräumen. Der Dialog nennt vorher Anzahl und Größe der
@@ -2212,6 +2214,78 @@ wirkungslos in der Datenbank zu landen.
   Verschlüsselung läuft. Ruckelt es beim Gegenüber, sind 1080p oder 30 Bilder
   die bessere Wahl.
 - Ein Gruppenraum fasst 16 Teilnehmer.
+
+---
+
+## Messenger: E2EE-Zustellbestand
+
+Der Messenger legt auf dem Server nur Chiffrat und Zustellmetadaten ab. Zwei
+Wege bestehen nebeneinander:
+
+- **Geteilte Mailbox** (`e2ee_blind_envelopes`): die bisherige Ablage. Die
+  Kennung leitet sich im Einzelchat aus den Beteiligten ab, in einer Gruppe aus
+  deren Kennung.
+- **Gerätepostfach** (`e2ee_delivery_*`): je Gerät eine eigene, aus einem
+  Geheimnis des Geräts abgeleitete Zustelladresse. Einzelchats nutzen sie,
+  sobald das Zielgerät eine solche Adresse veröffentlicht hat. Gruppen laufen
+  weiter über die geteilte Mailbox, der Verlaufs-Erstabgleich über die
+  Geräte-Mailbox.
+
+| Tabelle | Felder | Zweck | Frist und Löschung |
+| --- | --- | --- | --- |
+| `e2ee_device_inboxes` | `device_id`, `inbox_hash`, `erstellt_am`, `ablauf_am` | Opake Zustelladresse je Gerät. Der Server kann sie nicht nachrechnen; er kennt nur den öffentlichen Geräteschlüssel. | 30 Tage, bei jeder Gerätemeldung erneuert. Abgelaufene Zeilen entfernt der stündliche Lauf. |
+| `e2ee_deliveries` | `id`, `payload_id`, `inbox_hash`, `laufende_seq`, `angenommen_am`, `ablauf_am` | Offener Zustellauftrag. Die globale Nummer ist der Cursor beim Abruf und die Kennung, an der der Absender seine Häkchen misst. | Die Quittung des Zielgeräts löscht den Auftrag; ohne Quittung fällt er nach 30 Tagen weg. |
+| `e2ee_delivery_payloads` | `id`, `ciphertext`, `ciphertext_sha256`, `groesse`, `angenommen_am`, `ablauf_am` | Das Chiffretextobjekt. Es trägt weder Ziel noch Absender und kann von mehreren Aufträgen getragen werden. | Fällt, sobald kein Auftrag mehr darauf zeigt, spätestens nach 30 Tagen. |
+| `e2ee_delivery_receipts` | `inbox_hash`, `delivery_id`, `request_hash`, `ergebnis`, `angenommen_am`, `ablauf_am` | Idempotenzrest nach der Quittung: eine verlorene HTTP-Antwort lässt sich wiederholen, ohne ein zweites Versandarchiv anzulegen. Kein Chiffrat, keine Größe. | Übernimmt die ursprüngliche Frist der Zustellung, höchstens 30 Tage. |
+| `e2ee_blind_envelopes` | `blind_mailbox_id`, `ciphertext_envelope`, `ciphertext_sha256`, `client_uuid`, `created_at` | Alter Relaisbestand; weiterhin für Gruppen, Steuerpakete und den Verlaufs-Erstabgleich. | 30 Tage ab Eingang, danach entfernt der stündliche Lauf die Zeile. |
+| `chat_media` | `id`, `blind_mailbox_id`, Chat-/Gruppenbezug, `uploader_user_id`, `ciphertext_blob`, `file_name` (generisch), `media_type`, `size_bytes`, `sha256`, `created_at`, `expires_at` | Verschlüsselter Anhang für den ersten Abruf durch die Geräte. | Neue Uploads 30 Tage ab Upload; ältere Zeilen bis zu ihrem gespeicherten Ablauf (höchstens 90 Tage); zusätzlich mit der Nachricht löschbar. |
+
+Der **Verlaufs-Erstabgleich** für ein frisch gekoppeltes Gerät liegt als
+versiegelter Block in `device_pairings.verlauf_blob` (höchstens 25 MiB). Das
+neue Gerät holt ihn genau einmal; danach ist das Feld leer. Holt es ihn nicht,
+räumt der nächste Aufruf es zehn Minuten nach dem Einlösen weg. Der
+Geräte-zu-Geräte-Weg für bereits freigegebene Geräte schickt den Verlauf als
+Umschlag über die eigene Geräte-Mailbox; die Pakete für Anhänge tragen ein
+eigenes **24-Stunden-Fenster**, ältere verwirft der Empfänger. Der Umschlag
+selbst folgt der normalen 30-Tage-Frist des Relais.
+
+Dauerhaft und deshalb weiterhin im Backup: die Geräteliste
+(`user_e2ee_devices`), der Besitznachweis einer Mailbox
+(`e2ee_blind_mailboxes`), Push-Abos sowie Chat- und Gruppenzeilen
+(Mitgliedschaft, Konfiguration). Der Nachrichteninhalt liegt nur in den Puffern
+oben.
+
+### Was im Panel-Backup fehlt
+
+Das Panel-Backup bleibt ein vollständiger `pg_dump` der Panel-Datenbank, aber
+ohne die Zeilen der sieben Puffer: `e2ee_device_inboxes`,
+`e2ee_delivery_payloads`, `e2ee_deliveries`, `e2ee_delivery_receipts`,
+`e2ee_blind_envelopes`, `chat_media` und `device_pairings`.
+`--exclude-table-data` lässt Tabellen, Spalten, Fremdschlüssel, Indizes und die
+Folge `e2ee_delivery_seq` stehen; nur die COPY-Blöcke fehlen. Ein Restore legt
+die Tabellen also leer an, und kein abgelaufener Chiffretext kommt zurück.
+Geräteadressen melden die Geräte beim nächsten Start selbst wieder an; offene
+Zustellungen sind nach einem Restore fort. Der Verlauf liegt auf den Geräten,
+ein Anhang nur, wenn das Gerät ihn zuvor lokal gesichert hat.
+
+`device_pairings` trägt den kurzlebigen Kopplungscode und den versiegelten
+Verlaufs-Erstabgleich. Nach einem Restore ist beides fort: eine offene Kopplung
+wird nicht weitergeführt, sondern neu begonnen. Das Schema bleibt stehen, damit
+die Fremdschlüssel gültig sind. Alte Backups, WAL-Archive, Replikate und
+Anbieter-Snapshots werden durch diese Änderung nicht umgeschrieben und können
+Puffer aus ihrer Entstehungszeit enthalten.
+
+### Löschen heißt entfernen, nicht überschreiben
+
+Quittung und Frist laufen als `DELETE`. Danach liefert der Dienst die Zeile
+nicht mehr aus, und der Zustellbestand führt sie nicht mehr. PostgreSQL behält
+die alte Zeilenversion jedoch in der Datendatei, bis `VACUUM` sie freigibt;
+WAL, Basissicherungen, Replikate und Anbieter-Snapshots haben eigene Fristen.
+„Nach 30 Tagen überall physisch entfernt“ ist deshalb keine zugesagte
+Eigenschaft dieser Installation. Wer das braucht, muss die Kopien und ihre
+Fristen selbst nachweisen. Der Idempotenzrest bleibt nach der Quittung
+absichtlich bis zur ursprünglichen Frist: Kennung, Anfrage-Hash und Ergebnis,
+kein Chiffrat.
 
 ---
 

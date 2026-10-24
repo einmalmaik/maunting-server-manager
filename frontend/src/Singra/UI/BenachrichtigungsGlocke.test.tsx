@@ -6,9 +6,18 @@ import { useToastStore } from '@/stores/toastStore'
 import { api } from '@/api/client'
 import i18n from '@/i18n'
 import { fakeLayout } from '@/test/fakeLayout'
+import { ausschalten, dienstVerfuegbar, einschalten, stand } from '@/services/hintergrunddienst'
 
 vi.mock('@/api/client', () => ({
   api: vi.fn(),
+}))
+
+// Der Dauerdienst gibt es nur auf Android; auf dem Rechner ist er unsichtbar.
+vi.mock('@/services/hintergrunddienst', () => ({
+  dienstVerfuegbar: vi.fn(() => false),
+  stand: vi.fn(async () => ({ aktiv: false, akkuBefreit: false })),
+  einschalten: vi.fn(async () => true),
+  ausschalten: vi.fn(async () => {}),
 }))
 
 function setUser(email = true, ai = true, device = true) {
@@ -39,6 +48,10 @@ describe('BenachrichtigungsGlocke', () => {
     vi.mocked(api).mockReset().mockResolvedValue({})
     useToastStore.setState({ toasts: [] })
     setUser(true, true, true)
+    vi.mocked(dienstVerfuegbar).mockReturnValue(false)
+    vi.mocked(stand).mockResolvedValue({ aktiv: false, akkuBefreit: false })
+    vi.mocked(einschalten).mockClear()
+    vi.mocked(ausschalten).mockClear()
   })
 
   it('öffnet das Menü per Portal an body, außerhalb des Stapelkontexts der Shell', () => {
@@ -76,6 +89,47 @@ describe('BenachrichtigungsGlocke', () => {
     await waitFor(() => {
       expect(api).toHaveBeenCalledWith('/auth/me/notifications?device=false', { method: 'PATCH' })
     })
+  })
+
+  it('zeigt den Dauerdienst nicht auf einem Rechner', () => {
+    render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+
+    expect(screen.queryByRole('switch', { name: 'Auch bei geschlossener App' })).toBeNull()
+  })
+
+  it('schaltet den Dauerdienst auf Android ein und wieder aus', async () => {
+    vi.mocked(dienstVerfuegbar).mockReturnValue(true)
+    vi.mocked(stand).mockResolvedValue({ aktiv: false, akkuBefreit: true })
+    render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+    // Der Stand kommt aus Android, nicht aus dem Fenster.
+    await waitFor(() => expect(stand).toHaveBeenCalled())
+    const schalter = screen.getByRole('switch', { name: 'Auch bei geschlossener App' })
+    expect(schalter).not.toBeChecked()
+
+    fireEvent.click(schalter)
+    await waitFor(() => expect(einschalten).toHaveBeenCalledWith('Auch bei geschlossener App'))
+    await waitFor(() => expect(schalter).toBeChecked())
+
+    fireEvent.click(schalter)
+    await waitFor(() => expect(ausschalten).toHaveBeenCalled())
+    await waitFor(() => expect(schalter).not.toBeChecked())
+  })
+
+  it('sagt es, wenn der Nachweis abgebrochen wurde', async () => {
+    vi.mocked(dienstVerfuegbar).mockReturnValue(true)
+    vi.mocked(einschalten).mockResolvedValue(false)
+    render(<BenachrichtigungsGlocke placement="bottom" align="right" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /benachrichtigungen/i }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Auch bei geschlossener App' }))
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.some((t) => t.message === 'Der Hintergrunddienst ließ sich nicht einschalten.')).toBe(true),
+    )
   })
 
   it('klappt am unteren Rand nach oben, auch wenn unten gewünscht ist', () => {

@@ -133,6 +133,38 @@ describe('SelfHostingDocs', () => {
     expect(screen.getByText('Adresse für die Medien')).toBeInTheDocument()
   })
 
+  it('sagt, was im E2EE-Zustellbestand liegt und was im Backup fehlt', async () => {
+    // Der Bestand ist ein Puffer mit Frist, kein Backup. Wer das Panel sichert,
+    // muss wissen, dass die Tabellen leer zurückkommen und was ein Restore
+    // nicht zurückbringt.
+    renderPage()
+
+    expect(screen.getByRole('heading', { name: 'E2EE delivery state' })).toBeInTheDocument()
+    expect(
+      screen.getByText(/One delivery address per device \(e2ee_device_inboxes\)/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/attachment packets are valid for 24 hours/)).toBeInTheDocument()
+    // Seit 3.44: neue Anhänge 30 Tage, Altbestand bis zu seinem gespeicherten
+    // Ablauf. Die lokale Frist bleibt davon getrennt.
+    expect(screen.getByText(/Attachments: 30 days from upload for new rows/)).toBeInTheDocument()
+    expect(screen.getByText(/up to 90 days and run out without a migration/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/without the rows of e2ee_device_inboxes/),
+    ).toBeInTheDocument()
+    // Die Kopplung ist ein kurzer Vorgang und gehört nicht ins Backup.
+    expect(screen.getByText(/chat_media and device_pairings/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/does not promise that data is physically gone everywhere after 30 days/),
+    ).toBeInTheDocument()
+
+    await i18n.changeLanguage('de')
+    renderPage()
+    expect(screen.getByRole('heading', { name: 'E2EE-Zustellbestand' })).toBeInTheDocument()
+    expect(screen.getByText(/Das Schema bleibt/)).toBeInTheDocument()
+    expect(screen.getByText(/Ältere Uploads behalten ihren gespeicherten Ablauf von bis zu 90 Tagen/)).toBeInTheDocument()
+    expect(screen.getByText(/chat_media und device_pairings/)).toBeInTheDocument()
+  })
+
   it('sagt, was das PostgreSQL-Studio kann und was nicht', () => {
     // Der SQL-Editor an der Panel-Datenbank darf mehr als die Dialoge dort.
     // Bis 27.09.2026 stand in der Doku nur, das Studio ändere dort keine

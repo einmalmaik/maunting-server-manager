@@ -55,6 +55,10 @@ const { mockEnvelopeCache } = vi.hoisted(() => ({
   mockEnvelopeCache: new Map<number, { plain: string; ok: boolean }>(),
 }))
 
+// Eine Fälschung für beide Lesewege: der Messenger holt eine Mailbox
+// inzwischen seitenweise, die Tests setzen aber weiter `fetchE2eeEnvelopes`.
+const e2eeEnvelopeMock = vi.hoisted(() => vi.fn())
+
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
@@ -74,8 +78,10 @@ vi.mock('@/api/social', () => ({
   getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
   putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
-  fetchE2eeEnvelopes: vi.fn(),
+  fetchE2eeEnvelopes: e2eeEnvelopeMock,
+  fetchAlleE2eeEnvelopes: e2eeEnvelopeMock,
   getPublicProfiles: vi.fn().mockResolvedValue([]),
+  getProfile: vi.fn(),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
   sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
 }))
@@ -90,6 +96,7 @@ vi.mock('@/api/teams', () => ({
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn().mockResolvedValue('test-blind-mailbox'),
   deriveGroupBlindMailboxId: vi.fn().mockResolvedValue('test-group-blind-mailbox'),
+  deriveUserDeviceMailboxId: vi.fn().mockResolvedValue('test-device-mailbox'),
   getCachedBlindMailboxId: vi.fn().mockReturnValue(undefined),
   getCachedGroupBlindMailboxId: vi.fn().mockReturnValue(undefined),
   envelopePlaintextCache: mockEnvelopeCache,
@@ -164,7 +171,17 @@ vi.mock('@/services/messengerLocalStore', async () => {
   return {
     ...echt,
     loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    // Der strenge Weg liest und schreibt dieselbe Ablage: der Empfangsweg
+    // quittiert erst, wenn die Zeile wirklich liegt (`uebernimmLesungen`).
+    loadLocalMessagesStrict: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    leereMailboxLokal: vi.fn(async (mid: string) => {
+      nachrichten.delete(mid)
+      klartexte.delete(mid)
+    }),
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    saveLocalMessagesStrict: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
     // Die Ablage verliert eine Zeile nur, wenn jemand sie herausnimmt:
@@ -217,6 +234,9 @@ vi.mock('@/services/ratchetSitzung', async (importOriginal) => {
     DR_INIT_TYP: 'dr-init',
     DrGeraetNichtEingetragenError,
     DrZustellungFehlgeschlagenError,
+    // Der Wiederaufnehmer der Versandabsichten gehoert zum Kern; hier gibt es
+    // keine offenen Absichten.
+    sendeAusstehendeZustellungen: vi.fn(async () => ({ gesendet: 0, offen: 0 })),
     einpackenDr: einpacken,
     baueZustellungen: vi.fn(async (_kontext: any, klartext: string, basisUuid: string) => [
       {
@@ -320,6 +340,11 @@ vi.mock('@/services/gruppenSchluessel', async (importOriginal) => {
   return {
     ...echt,
     verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
+    // Die Geräte-Mailbox gehört nicht zu diesen Fällen. Ohne diesen Haken
+    // verbraucht ihr Abruf die `mockResolvedValueOnce`-Antwort, die für die
+    // Chat-Mailbox gedacht ist — und der Verlauf bleibt leer.
+    holeGeraeteSteuerung: vi.fn(async () => 0),
+    fordereDmGeheimnis: vi.fn(async () => false),
   }
 })
 
@@ -345,7 +370,9 @@ vi.mock('@/services/e2eeGeraet', () => ({
   onSchluesselWarnung: vi.fn((cb) => {
     schluesselWarnungCallback = cb
     return () => {
-      schluesselWarnungCallback = null
+      // Nur die eigene Anmeldung abmelden. Räumt ein alter Baum nach dem
+      // nächsten Mount ab, darf er dessen Callback nicht wieder löschen.
+      if (schluesselWarnungCallback === cb) schluesselWarnungCallback = null
     }
   }),
   sicherheitsnummer: vi.fn(async () => '11111 22222 33333 44444'),
@@ -584,6 +611,29 @@ describe('Messenger (Allround Chat)', () => {
     expect(screen.getByLabelText('Foto anhängen')).toBeInTheDocument()
     expect(screen.getByLabelText('Notiz teilen')).toBeInTheDocument()
     expect(screen.getByLabelText('Kalendereintrag teilen')).toBeInTheDocument()
+  })
+
+  it('räumt beim Verlassen des Messengers die offene Mailbox', async () => {
+    const { unmount } = render(
+      <MemoryRouter>
+        <Messenger />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('alice')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('alice'))
+
+    await waitFor(() => {
+      expect(useMessengerNotificationStore.getState().activeMailboxId).toBeTruthy()
+    })
+
+    unmount()
+
+    // Ohne das bliebe der zuletzt geöffnete Chat „offen"; Zahl und Ton für
+    // neue Nachrichten würden dauerhaft unterdrückt.
+    expect(useMessengerNotificationStore.getState().activeMailboxId).toBeNull()
   })
 
   it('erlaubt das Senden einer Nachricht an ein Teammitglied ohne vorherige Freundschaft', async () => {
@@ -1850,7 +1900,9 @@ describe('Messenger (Allround Chat)', () => {
       expect(baueZustellungen).toHaveBeenCalledWith(
         { eigeneId: 1, peerId: 205 },
         expect.stringContaining('Nachricht aus Tauri'),
-        expect.any(String)
+        expect.any(String),
+        // Die Mailbox des Gesprächs, für die dauerhafte Versandabsicht.
+        expect.any(String),
       )
       expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1967,11 +2019,14 @@ describe('Messenger (Allround Chat)', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: /charlie_e2ee/i }))
 
-    // Cross-platform messages must be decoded and readable, and unmatched legacy hybrid safely shows encrypted notice
+    // Cross-platform messages must be decoded and readable. Der unlesbare
+    // Altumschlag erzeugt **keine** Blase mehr, sondern eine Systemzeile — und
+    // nur eine, auch wenn der Abruf mehrfach läuft.
     await waitFor(() => {
       expect(screen.getByText('Nachricht aus Tauri auf Web lesbar')).toBeInTheDocument()
       expect(screen.getByText('Nachricht aus Web auf Tauri lesbar')).toBeInTheDocument()
-      expect(screen.getByText(i18n.t('messenger.encryptedMessage'))).toBeInTheDocument()
+      expect(screen.getByText(i18n.t('messenger.unreadableOlderMessages'))).toBeInTheDocument()
+      expect(screen.queryByText(i18n.t('messenger.encryptedMessage'))).toBeNull()
     })
   })
 
@@ -2395,10 +2450,18 @@ describe('Messenger (Allround Chat)', () => {
       </MemoryRouter>
     )
 
-    const input = await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+    await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
     vi.mocked(socialApi.relayE2eeEnvelope).mockResolvedValue({ success: true, id: 1001 } as any)
 
-    fireEvent.change(input, { target: { value: 'Nachricht vor Wechsel' } })
+    // Der Kontakt kommt aus der Adresse, die Mailbox-Kennung aus einem
+    // Promise. Erst wenn beides steht, bleibt das Getippte liegen — vorher
+    // kann ein Gesprächswechsel die Eingabe noch leeren.
+    await waitFor(() => {
+      fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
+        target: { value: 'Nachricht vor Wechsel' },
+      })
+      expect(screen.getByLabelText(i18n.t('messenger.send'))).toBeInTheDocument()
+    })
     fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
 
     await waitFor(() => {
@@ -2545,8 +2608,19 @@ describe('Messenger (Allround Chat)', () => {
       // Sowohl dr-init als auch die abhängige Nachricht müssen eingereiht werden
       expect(enqueueMessageMutation).toHaveBeenCalledTimes(2)
     })
-    // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein (nur dr-init wurde versucht)
-    expect(socialApi.relayE2eeEnvelope).toHaveBeenCalledTimes(1)
+    // Die Nachricht selbst darf NICHT über den Relay gesendet worden sein —
+    // nur der Sitzungsaufbau wurde versucht. Gezählt wird nur, was zu dieser
+    // Nachricht gehört: eine verzögerte Quittung aus dem vorigen Test kann
+    // hier noch eintreffen und machte eine Gesamtzahl zeitabhängig.
+    const relayAufrufe = vi
+      .mocked(socialApi.relayE2eeEnvelope)
+      .mock.calls.map(([auftrag]) => auftrag)
+    expect(
+      relayAufrufe.filter(
+        (auftrag) => auftrag.ciphertext_envelope === 'sv-e2ee-dr-v1:1.testgeraet.dev-1.msg-data',
+      ),
+    ).toHaveLength(0)
+    expect(relayAufrufe.filter((auftrag) => auftrag.control_type === 'dr-init')).toHaveLength(1)
   })
 
   /**
@@ -3264,21 +3338,157 @@ describe('Messenger (Allround Chat)', () => {
       ).toBeInTheDocument()
     })
 
-    it('warnt auch fürs eigene Konto — ein Gerät, das jemand mit deinem Passwort einträgt', async () => {
-      render(
-        <MemoryRouter initialEntries={['/chat?userId=101']}>
-          <Messenger />
-        </MemoryRouter>
+    it('lässt eine Warnung beim Wechsel in ein anderes Gespräch nicht mitwandern', async () => {
+      const { deriveBlindMailboxId } = await import('@/services/e2eeCrypto')
+      const ablage = vi.mocked(deriveBlindMailboxId).getMockImplementation()!
+      // Der Teststellvertreter lieferte bisher für jedes Gegenüber dieselbe
+      // Mailbox. Ein echter Wechsel braucht zwei verschiedene.
+      vi.mocked(deriveBlindMailboxId).mockImplementation(async (_eigene, fremd) => `mbox-${fremd}`)
+      vi.mocked(socialApi.getFriends).mockResolvedValue([
+        {
+          id: 101, user_id: 101, username: 'alice', avatar_url: null,
+          status: 'accepted', is_requester: false, created_at: '2026-09-01T00:00:00Z',
+          presence: { status: 'online', device_type: 'web' },
+        },
+        {
+          id: 104, user_id: 104, username: 'bob', avatar_url: null,
+          status: 'accepted', is_requester: false, created_at: '2026-09-01T00:00:00Z',
+          presence: { status: 'online', device_type: 'web' },
+        },
+      ])
+      try {
+        render(
+          <MemoryRouter initialEntries={['/chat?userId=101']}>
+            <Messenger />
+          </MemoryRouter>
+        )
+        await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+
+        act(() => {
+          schluesselWarnungCallback!({
+            userId: 101,
+            typ: 'unbestaetigt',
+            geraete: ['dev-101'],
+          })
+        })
+        const warnung = /alice hat ein Gerät, das nicht auf einem bekannten Gerät freigegeben wurde/
+        expect(await screen.findByText(warnung)).toBeInTheDocument()
+
+        fireEvent.click(screen.getByRole('button', { name: /bob/i }))
+        await waitFor(() => {
+          expect(screen.queryByText(warnung)).not.toBeInTheDocument()
+        })
+
+        // Der Rückweg holt sie auch nicht aus dem Sitzungszwischenspeicher
+        // zurück: sie war eine Warnung dieses Besuchs, kein Verlauf.
+        fireEvent.click(screen.getByRole('button', { name: /alice/i }))
+        await waitFor(() => {
+          expect(screen.queryByText(warnung)).not.toBeInTheDocument()
+        })
+      } finally {
+        vi.mocked(deriveBlindMailboxId).mockImplementation(
+          ablage ?? (async () => 'test-blind-mailbox'),
+        )
+      }
+    })
+
+    it('zeigt eine nur im Sitzungszwischenspeicher liegende Systemzeile nicht wieder an', async () => {
+      const { sessionChatCache } = await import('@/services/klartextSpeicher')
+      const ablage = vi.mocked(socialApi.fetchE2eeEnvelopes).getMockImplementation()!
+      // Der Abruf bleibt offen, sonst ersetzt er den Cache, bevor der Test ihn
+      // ansehen kann. Geprüft wird der Cache-Pfad, nicht der Netzpfad.
+      let abrufLoesen: ((wert: Awaited<ReturnType<typeof socialApi.fetchE2eeEnvelopes>>) => void) | null = null
+      vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(
+        () => new Promise((resolve) => { abrufLoesen = resolve }),
       )
-      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      try {
+        render(
+          <MemoryRouter>
+            <Messenger />
+          </MemoryRouter>
+        )
+        const alice = await screen.findByRole('button', { name: /alice/i })
 
-      act(() => {
-        schluesselWarnungCallback!({ userId: 1, typ: 'unbestaetigt', geraete: ['dieb-1'] })
+        // Erst jetzt füllen: der Klick auf Alice liest den Cache unmittelbar
+        // danach. So prüft der Test den Rückweg und nicht einen Startzustand.
+        sessionChatCache.set('test-blind-mailbox', [
+          {
+            id: 1,
+            clientUuid: 'normal-aus-dem-cache',
+            senderId: 101,
+            text: 'Normale Nachricht aus dem Zwischenspeicher',
+            createdAt: '2026-09-08T11:59:00Z',
+            isSelf: false,
+          },
+          {
+            id: 2,
+            clientUuid: 'sys-aus-dem-cache',
+            senderId: 0,
+            text: 'Alte Systemzeile aus dem Zwischenspeicher',
+            createdAt: '2026-09-08T12:00:00Z',
+            isSelf: false,
+            isSystem: true,
+          },
+        ])
+        fireEvent.click(alice)
+
+        // Erst wenn die normale Zeile steht, ist der Cache wirklich gelesen.
+        await screen.findByText('Normale Nachricht aus dem Zwischenspeicher')
+        expect(screen.queryByText('Alte Systemzeile aus dem Zwischenspeicher')).not.toBeInTheDocument()
+      } finally {
+        abrufLoesen?.([])
+        vi.mocked(socialApi.fetchE2eeEnvelopes).mockImplementation(ablage)
+      }
+    })
+
+    it('behält die eigene Schlüsselwarnung, während der Verlauf noch lädt', async () => {
+      const { loadLocalMessages } = await import('@/services/messengerLocalStore')
+      const ablage = vi.mocked(loadLocalMessages).getMockImplementation()!
+      let freigeben!: () => void
+      const tor = new Promise<void>((resolve) => (freigeben = resolve))
+      vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) => {
+        await tor
+        return ablage(mid)
       })
+      // Erst mit einer echten Zeile aus der Ablage ersetzt der Abruf den
+      // Verlauf. Eine leere Antwort würde die Warnung ohnehin nicht anfassen.
+      nachrichten.set('test-blind-mailbox', [
+        {
+          id: 1,
+          clientUuid: 'lokal-1',
+          senderId: 101,
+          text: 'Aus der Ablage',
+          createdAt: '2026-09-08T12:00:00Z',
+          isSelf: false,
+        },
+      ])
 
-      expect(
-        await screen.findByText(/Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat/),
-      ).toBeInTheDocument()
+      try {
+        render(
+          <MemoryRouter initialEntries={['/chat?userId=101']}>
+            <Messenger />
+          </MemoryRouter>
+        )
+        await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+        await waitFor(() => expect(loadLocalMessages).toHaveBeenCalled())
+
+        act(() => {
+          schluesselWarnungCallback!({ userId: 1, typ: 'unbestaetigt', geraete: ['dieb-1'] })
+        })
+        const warnung = /Für dein Konto ist ein Gerät eingetragen, das keines deiner Geräte freigegeben hat/
+        expect(await screen.findByText(warnung)).toBeInTheDocument()
+
+        // Der Abruf kommt erst jetzt zurück. Die Warnung darf dabei nicht
+        // wieder aus dem Verlauf fallen.
+        freigeben()
+        await act(async () => { await tor })
+        expect(screen.getByText(warnung)).toBeInTheDocument()
+      } finally {
+        freigeben()
+        vi.mocked(loadLocalMessages).mockImplementation(async (mid: string) =>
+          nachrichten.get(mid) ?? []
+        )
+      }
     })
 
     it('erlaubt das Öffnen der Sicherheitsnummer-Ansicht über das Chatmenü', async () => {
@@ -3415,6 +3625,204 @@ describe('Messenger (Allround Chat)', () => {
         expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
         expect(screen.queryByPlaceholderText(i18n.t('messenger.writePlaceholder'))).not.toBeInTheDocument()
       })
+    })
+  })
+
+  /**
+   * Ein `?userId=`, das niemand kennt, baute bis 10/2026 einen Kontakt
+   * „Benutzer #20", versiegelte ihn als Gespräch und ließ ihn nie wieder
+   * verschwinden — die Seitenleiste führte einen Chat, den es nicht gab.
+   */
+  describe('Unbekannte Kennungen und das Entfernen eines Chats', () => {
+    it('legt für eine unbekannte Kennung kein Gespräch an und räumt sie weg', async () => {
+      vi.mocked(socialApi.getProfile).mockRejectedValue(
+        Object.assign(new Error('Not Found'), { status: 404 }),
+      )
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=20']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      // Erst laden lassen, dann prüfen: der Geist entstand bisher sofort.
+      await waitFor(() => expect(socialApi.getFriends).toHaveBeenCalled())
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+
+      expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      expect(
+        screen.queryByText(i18n.t('social.contacts.unknownUser', { id: 20 })),
+      ).not.toBeInTheDocument()
+      expect(screen.queryByPlaceholderText(i18n.t('messenger.writePlaceholder'))).not.toBeInTheDocument()
+      expect((await ladeGespraeche()).has(20)).toBe(false)
+      expect(sessionStorage.getItem('msm:active_messenger_user_id')).toBeNull()
+    })
+
+    it('öffnet ein öffentliches Profil und merkt sich das Gespräch', async () => {
+      vi.mocked(socialApi.getProfile).mockResolvedValue({
+        user_id: 555,
+        username: 'zoe_public',
+        avatar_url: null,
+        privacy: 'public',
+        is_friend: false,
+        presence: null,
+      })
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=555']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      expect(await screen.findByText('zoe_public')).toBeInTheDocument()
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
+      expect((await ladeGespraeche()).get(555)?.username).toBe('zoe_public')
+    })
+
+    it('verweigert ein privates Profil ohne Freundschaft', async () => {
+      vi.mocked(socialApi.getProfile).mockResolvedValue({
+        user_id: 556,
+        username: 'zoe_privat',
+        avatar_url: null,
+        privacy: 'private',
+        is_friend: false,
+        presence: null,
+      })
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=556']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(socialApi.getProfile).toHaveBeenCalledWith(556))
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 50))
+      })
+
+      expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      expect(screen.queryByText('zoe_privat')).not.toBeInTheDocument()
+      expect((await ladeGespraeche()).has(556)).toBe(false)
+    })
+
+    it('nimmt einen Direktchat samt Verlauf aus der Liste', async () => {
+      render(
+        <MemoryRouter>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      fireEvent.click(await screen.findByText('alice'))
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await waitFor(async () => expect((await ladeGespraeche()).has(101)).toBe(true))
+
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.removeChatFromList')))
+      fireEvent.click(await screen.findByText(i18n.t('messenger.removeChatConfirm')))
+
+      await waitFor(() => {
+        expect(screen.getByText(i18n.t('messenger.pickChatHint'))).toBeInTheDocument()
+      })
+      // Die Zeile ist auch für einen **Freund** weg. Bis 10/2026 fiel nur der
+      // Gesprächseintrag; die Kontaktliste fügte alice als Freundin wieder
+      // hinzu, und die Zeile stand trotz „entfernt“ weiter da.
+      await waitFor(() => expect(screen.queryByText('alice')).not.toBeInTheDocument())
+      // Gemerkt wird das Verstecken, nicht ein Löschen: das Gespräch bleibt
+      // samt Namen und Mailbox für eine ankommende Nachricht erhalten.
+      expect((await ladeGespraeche()).get(101)?.versteckt).toBe(true)
+      expect(sessionStorage.getItem('msm:active_messenger_user_id')).toBeNull()
+    })
+
+    it('meldet einen Fehler, wenn der örtliche Verlauf nicht gelöscht werden kann', async () => {
+      // Bis 10/2026 verschluckte `leereMailboxLokal` jeden Fehler, und die Seite
+      // meldete „Chat entfernt“, während der Verlauf auf der Platte blieb.
+      const { leereMailboxLokal } = await import('@/services/messengerLocalStore')
+      vi.mocked(leereMailboxLokal).mockRejectedValueOnce(new Error('IndexedDB verweigert'))
+
+      render(
+        <MemoryRouter>
+          <Messenger />
+        </MemoryRouter>,
+      )
+
+      fireEvent.click(await screen.findByText('alice'))
+      await screen.findByPlaceholderText(i18n.t('messenger.writePlaceholder'))
+      await oeffneChatMenue()
+      fireEvent.click(screen.getByText(i18n.t('messenger.removeChatFromList')))
+      fireEvent.click(await screen.findByText(i18n.t('messenger.removeChatConfirm')))
+
+      const { useToastStore } = await import('@/stores/toastStore')
+      await waitFor(() => {
+        expect(useToastStore.getState().toasts.map((m) => m.message)).toContain(
+          i18n.t('messenger.chatRemoveFailed'),
+        )
+      })
+      // Der Chat bleibt offen und in der Liste — die Löschung hat nicht
+      // stattgefunden.
+      expect(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder'))).toBeInTheDocument()
+      expect((await ladeGespraeche()).get(101)?.versteckt).not.toBe(true)
+    })
+
+    it('löscht eine gescheiterte Nachricht erst, wenn der neue Versand angenommen ist', async () => {
+      // Bis 10/2026 fiel die alte Zeile **vor** dem Versand. Lief gerade ein
+      // anderer Versand, wies `handleSendMessage` den Auftrag still ab — und
+      // die Nachricht war trotzdem weg: nicht gesendet, nicht sichtbar, nicht
+      // wiederholbar. Mit gedrosseltem Versand ist genau dieses Fenster offen.
+      const { baueZustellungen } = await import('@/services/ratchetSitzung')
+      nachrichten.set('test-blind-mailbox', [
+        {
+          id: 1,
+          clientUuid: 'gescheitert-1',
+          senderId: 1,
+          text: 'Nicht angekommen',
+          createdAt: '2026-09-08T12:00:00Z',
+          isSelf: true,
+          status: 'failed',
+        },
+      ])
+      let freigeben!: () => void
+      vi.mocked(baueZustellungen).mockReturnValueOnce(
+        new Promise((resolve) => {
+          freigeben = () => resolve([])
+        }) as never,
+      )
+
+      render(
+        <MemoryRouter initialEntries={['/chat?userId=101']}>
+          <Messenger />
+        </MemoryRouter>,
+      )
+      await screen.findByText('Nicht angekommen')
+
+      // Ein Versand läuft und hängt an der verschlüsselten Zustellung.
+      fireEvent.change(screen.getByPlaceholderText(i18n.t('messenger.writePlaceholder')), {
+        target: { value: 'Gerade unterwegs' },
+      })
+      // Erst wenn `baueZustellungen` hängt, läuft der Versand wirklich.
+      await waitFor(() => expect(socialApi.sendTypingSignal).toHaveBeenCalled())
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.send')))
+      await waitFor(() => expect(baueZustellungen).toHaveBeenCalled())
+
+      // In diesem Fenster „Erneut senden“ drücken: der Auftrag wird abgewiesen,
+      // die gescheiterte Zeile muss bleiben.
+      const { entferneLokaleNachricht } = await import('@/services/messengerLocalStore')
+      vi.mocked(entferneLokaleNachricht).mockClear()
+      fireEvent.click(screen.getByLabelText(i18n.t('messenger.stateFailedRetry')))
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // Die Zeile steht noch — und niemand hat sie aus der Ablage genommen.
+      expect(screen.getByText('Nicht angekommen')).toBeInTheDocument()
+      expect(screen.getByLabelText(i18n.t('messenger.stateFailedRetry'))).toBeInTheDocument()
+      expect(entferneLokaleNachricht).not.toHaveBeenCalledWith(
+        'test-blind-mailbox',
+        expect.objectContaining({ clientUuid: 'gescheitert-1' }),
+      )
+
+      freigeben()
     })
   })
 })

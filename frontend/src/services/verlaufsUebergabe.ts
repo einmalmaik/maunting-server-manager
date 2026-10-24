@@ -39,6 +39,17 @@
  * andere Sitzung desselben Kontos — beide können ein Gerät mit eigenem
  * Signaturschlüssel eintragen. Die Sicherheitsnummer hilft hier ohnehin
  * nicht: sie weist dem Panel das Gerät nach, nicht dem Gerät das Paket.
+ *
+ * **Was mit dem Geräteweg geteilt ist und was nicht.** Beide Wege filtern den
+ * Bestand über `geraet/verlaufsAuswahl.ts`: Abgelaufenes, nie Gesendetes, der
+ * alte Platzhalter und der Inhalt eines Grabsteins bleiben zurück. Geteilt
+ * ist außerdem das Wissen, dass Anhänge ohne ihre Daten nur ein Verweis sind.
+ * **Nicht** geteilt sind Transport und Sicherheitsmodell: dieser Weg legt
+ * einen einmaligen, mit dem Notizschlüssel unterschriebenen Blob an der
+ * Kopplung ab und holt ihn genau einmal; der Geräteweg schickt signierte
+ * Teile über die Geräte-Mailbox, quittiert sie und kann wiederaufnehmen.
+ * Ein gemeinsamer Sendeweg würde die Rückfrage, die Zielbindung und den
+ * Erstabgleich-Charakter dieses Weges aufweichen — deshalb bleibt er eigen.
  */
 
 import { api } from '@/api/client'
@@ -52,6 +63,7 @@ import {
   setUserNotesKey,
   unterschreibeNotizUebergabe,
 } from './notesCalendarCrypto'
+import { verlaufsAuswahl } from './geraet/verlaufsAuswahl'
 import {
   listeLokaleMailboxen,
   loadLocalMessages,
@@ -140,7 +152,14 @@ export async function packeUndVersiegele(ziele: readonly UebergabeZiel[]): Promi
   const schluesselJe = await unterschriebeneSchluessel(konto, rawNotesKey, ziele)
 
   const verlaeufe = await Promise.all(
-    mailboxen.map(async (mid) => ({ mid, nachrichten: await loadLocalMessages(mid) })),
+    mailboxen.map(async (mid) => ({
+      mid,
+      // Dieselbe Auswahl wie im Geräteweg — nur mit den eingebetteten
+      // Anhangsdaten: dieser Weg hat keinen Mediennachlauf, und ein Verweis
+      // wäre nach 30 Tagen wertlos. Abgelaufenes reist auch hier nicht mit,
+      // sonst stünde es auf dem neuen Gerät wieder da.
+      nachrichten: verlaufsAuswahl(await loadLocalMessages(mid), 'direkt', 'erstabgleich'),
+    })),
   )
   const belegt = verlaeufe.filter((v) => v.nachrichten.length > 0)
   if (belegt.length === 0 && schluesselJe.size === 0) return null

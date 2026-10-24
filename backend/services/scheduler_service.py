@@ -1260,15 +1260,24 @@ def _ensure_calendar_reminder_job() -> None:
 
 
 async def _e2ee_envelope_cleanup_task() -> None:
-    """Regelmäßiger Hintergrund-Task zur Durchsetzung der 30-Tage-Vorhaltefrist für E2EE-Umschläge."""
+    """Setzt die Fristen des E2EE-Zustellbestands durch.
+
+    Dazu gehoeren der alte Relaisbestand (30 Tage), die verschluesselten
+    Anhaenge (90 Tage) und der geraetebezogene Transport (30 Tage). Der letzte
+    Punkt fehlte bis 23.10.2026: `abgelaufene_raeumen` war geschrieben und
+    getestet, aber an keinen Lauf gehaengt. Ohne ihn waeren abgelaufene
+    Zustellungen liegen geblieben, bis jemand sie von Hand loescht.
+    """
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
+    from services.social.queue_service import E2eeQueueService
     from services import ai_memory_service, vault_blob_service
     def _worker() -> None:
         db = SessionLocal()
         try:
             for name, cleanup in (
                 ("E2EE-Umschlag", SocialService.cleanup_expired_envelopes),
+                ("E2EE-Queue", E2eeQueueService.cleanup_expired_messages),
                 ("Anhang", ChatMediaService.cleanup_expired_media),
                 ("Story", SocialService.cleanup_expired_stories),
                 ("Tresor-Datei", vault_blob_service.aufraeumen),
@@ -1297,7 +1306,7 @@ def _ensure_e2ee_envelope_cleanup_job() -> None:
         func=_e2ee_envelope_cleanup_task,
         trigger=IntervalTrigger(hours=1),
         id=job_id,
-        name="E2EE Blind Envelope 30-Tage-Bereinigung",
+        name="E2EE-Zustellbestand: Fristen und Aufraeumen",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

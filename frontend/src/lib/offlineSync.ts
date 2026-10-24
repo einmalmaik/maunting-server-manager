@@ -15,11 +15,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api, apiStream } from '@/api/client'
 import { nachweisKopf } from '@/services/mailboxNachweis'
 import { merkeStromKennung, vergissStromKennung } from '@/services/mailboxAbo'
+import { merkePraesenzKennung, vergissPraesenzKennung } from '@/services/praesenz'
 import type { NoteItem } from '@/pages/Notes'
 import type { CalendarEventItem, KalenderVorkommen } from '@/pages/Calendar'
 import { LEERES_DOKUMENT, ausbreiten, serieLesen } from '@/services/kalenderSerie'
 import { useAuthStore } from '@/stores/authStore'
 import { angemeldetesKonto, beiKontowechsel } from '@/lib/angemeldetesKonto'
+import { updateMessageInLocalStore } from '@/services/messengerLocalStore'
 import { STORAGE_KEYS, getStorageItem, leereOfflineAblage, setStorageItem } from '@/lib/offlineAblage'
 import {
   NOTE_CIPHERTEXT_PREFIX,
@@ -310,6 +312,45 @@ async function neuVerschluesseltSenden(pfad: string, payload: any): Promise<void
   await api(pfad, { method: 'POST', body: JSON.stringify(payload) })
 }
 
+/**
+ * Die logische Kennung einer Nachricht ohne Gerätezusatz.
+ *
+ * Ein Auftrag steht je Zielgerät in der Warteschlange (`<uuid>#<geraet>`), die
+ * Zeile im Verlauf trägt nur die Kennung davor. Ohne diesen Schnitt fände das
+ * Statusupdate die Nachricht nie — genau der Fehler, der die Uhr verewigte.
+ */
+function logischeNachrichtUuid(kennung: string): string {
+  const raute = kennung.indexOf('#')
+  return raute === -1 ? kennung : kennung.slice(0, raute)
+}
+
+/**
+ * Sagt der Oberfläche, dass dieser Auftrag endgültig gescheitert ist.
+ *
+ * Vorher verschwand ein 400/404 ohne jedes Signal: der Umschlag war weg, die
+ * Nachricht stand weiter auf „wird gesendet", und niemand erfuhr, dass sie nie
+ * ankommen würde. Der Status gehört **vor** das Ereignis geschrieben, damit ein
+ * gleichzeitiges Neuladen nicht den alten Stand zurückholt (Regel 45).
+ */
+async function meldeEndgueltigGescheitert(
+  mutation: OutboxMutation,
+  grund: string,
+): Promise<void> {
+  if (mutation.entity !== 'message') return
+  const mid = mutation.payload?.blind_mailbox_id
+  const kennung = mutation.payload?.client_uuid || mutation.id
+  if (!mid || !kennung) return
+  const clientUuid = logischeNachrichtUuid(kennung)
+  await updateMessageInLocalStore(mid, clientUuid, { status: 'failed' }).catch(() => {})
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('msm:message-failed', {
+        detail: { client_uuid: clientUuid, blind_mailbox_id: mid, grund },
+      }),
+    )
+  }
+}
+
 export async function replayOutbox(): Promise<{ processed: number; failed: number; remaining: number }> {
   if (isReplaying) {
     return { processed: 0, failed: 0, remaining: getOutbox().length }
@@ -326,6 +367,16 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
   // Die Warteschlange gehört dem Konto, für das sie angelegt wurde. Wechselt
   // die Anmeldung während eines Aufrufs, geht kein weiterer Auftrag hinaus.
   const konto = angemeldetesKonto()
+  /**
+   * Was in **diesem** Lauf schon einmal versucht wurde.
+   *
+   * Ohne diese Menge bliebe ein abgelehnter Auftrag vorn liegen und blockierte
+   * alles dahinter, bis er nach fünf Läufen verschwunden war — ein einzelnes
+   * kaputtes Paket hielt die Nachrichten aller anderen Geräte an. Jeder
+   * Auftrag bekommt hier genau einen Versuch je Lauf; scheitert er, ist das
+   * nächste dran, und der nächste Takt versucht es erneut.
+   */
+  const versucht = new Set<string>()
 
   try {
     while (true) {
@@ -333,7 +384,9 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
       const currentOutbox = getOutbox()
       if (currentOutbox.length === 0) break
 
-      const mutation = currentOutbox[0]
+      const mutation = currentOutbox.find((m) => !versucht.has(m.id))
+      if (!mutation) break
+      versucht.add(mutation.id)
       try {
         if (mutation.entity === 'note') {
           if (mutation.action === 'create') {
@@ -430,13 +483,25 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
               headers: nachweisKopf(mutation.payload?.blind_mailbox_id),
             })
             if (res && res.id) {
+              // Erst festschreiben, dann melden. Ein Ereignis, das schneller
+              // ist als die Ablage, lädt den alten Stand und schreibt die Uhr
+              // zurück (Regel 45: nach dem `await` gilt der alte Zustand nicht
+              // mehr).
+              if (mutation.payload?.blind_mailbox_id) {
+                await updateMessageInLocalStore(
+                  mutation.payload.blind_mailbox_id,
+                  logischeNachrichtUuid(mutation.payload?.client_uuid || mutation.id),
+                  { id: res.id, status: 'sent' },
+                ).catch(() => {})
+              }
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(
                   new CustomEvent('msm:message-confirmed', {
                     detail: {
                       client_uuid: mutation.payload?.client_uuid || mutation.id,
                       envelope_id: res.id,
-                      blind_mailbox_id: res.blind_mailbox_id,
+                      blind_mailbox_id:
+                        res.blind_mailbox_id || mutation.payload?.blind_mailbox_id,
                     },
                   })
                 )
@@ -472,6 +537,8 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
         if (isNetworkErr || err?.status === 429 || (err?.status >= 500 && err?.status < 600)) {
           break
         } else if (err?.status === 404 || err?.status === 400) {
+          // Endgültig abgewiesen: nicht still verschwinden lassen.
+          await meldeEndgueltigGescheitert(mutation, `http-${err.status}`)
           const afterErrOutbox = getOutbox()
           setOutbox(afterErrOutbox.filter((m) => m.id !== mutation.id))
           failed++
@@ -481,14 +548,28 @@ export async function replayOutbox(): Promise<{ processed: number; failed: numbe
           if (idx >= 0) {
             const retryCount = (afterErrOutbox[idx].retryCount || 0) + 1
             if (retryCount > 5) {
-              afterErrOutbox.splice(idx, 1)
+              await meldeEndgueltigGescheitert(mutation, 'versuche-erschoepft')
+              // **Nach** dem Warten lesen, dann nur die erschöpfte Zeile
+              // entfernen. Die Meldung schreibt in die Ablage und öffnet damit
+              // ein Fenster: wer in ihm eine Nachricht sendet, hängt sie an die
+              // Warteschlange. Der vorher gelesene Stand kennt sie nicht — ihn
+              // zurückzuschreiben löschte die neue Nachricht still (Regel 45).
+              setOutbox(getOutbox().filter((m) => m.id !== mutation.id))
               failed++
             } else {
-              afterErrOutbox[idx].retryCount = retryCount
+              // Der Zähler ist ein kurzer Weg ohne Warten dazwischen; gelesen
+              // wird trotzdem frisch, damit die Zeile noch existiert.
+              const frisch = getOutbox()
+              const i = frisch.findIndex((m) => m.id === mutation.id)
+              if (i >= 0) {
+                frisch[i].retryCount = retryCount
+                setOutbox(frisch)
+              }
             }
-            setOutbox(afterErrOutbox)
           }
-          break
+          // Weiter mit dem nächsten Auftrag: dieser hier hat seinen Versuch für
+          // diesen Lauf gehabt. `versucht` verhindert die Endlosschleife.
+          continue
         }
       }
     }
@@ -1809,6 +1890,10 @@ export function startLiveSync(): () => void {
                 // ausrechnen kann — dort gibt es keinen Empfänger
                 // nachzuschlagen.
                 merkeStromKennung((data as { conn_id?: string }).conn_id ?? null)
+                // Derselbe Rückweg, zweiter Zweck: vorne oder hinten. Der
+                // Server wählt daraus **einen** Zusteller je Konto, statt
+                // jedem offenen Fenster eine eigene Meldung zu schicken.
+                merkePraesenzKennung((data as { conn_id?: string }).conn_id ?? null)
               }
               handleIncomingSyncEvent(currentEvent, data)
             } catch {
@@ -1831,6 +1916,7 @@ export function startLiveSync(): () => void {
       // meldete der Client nach dem Neuverbinden an eine Verbindung, die es
       // nicht mehr gibt — und bliebe stumm.
       vergissStromKennung()
+      vergissPraesenzKennung()
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('msm:sync-status', { detail: { connected: false } }))
       }

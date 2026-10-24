@@ -4,7 +4,7 @@
     "id": "singra_backend",
     "name": "Singra Backend & Bot",
     "category": "bot",
-    "author": "einmalmaik",
+    "author": "mauntingstudios",
     "description": "Singra Discord Bot and API Backend Suite"
   },
   "runtime": {
@@ -37,7 +37,7 @@
     "steam": null,
     "http": null,
     "github": {
-      "repo": "einmalmaik/Singra-Discord-bot",
+      "repo": "mauntingstudios/Singra-Discord-bot",
       "branch": "master",
       "subPath": null,
       "setupCommands": [

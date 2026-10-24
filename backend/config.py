@@ -62,6 +62,16 @@ class Settings(BaseSettings):
     # Lokale Split-Dev (localhost:3000 → :8000): true setzen, CORS-Origins pflegen.
     cookie_cross_site: bool = False
 
+    # Lokale Entwicklung ueber einfaches HTTP (Loopback).
+    #
+    # Ein `__Secure-`-Cookie verwirft Chromium ueber http://localhost; die
+    # Anmeldung im Dev-Panel waere damit unmoeglich (Login 200, /me 401).
+    # true setzt die Sitzungscookies im lokalen Stack ohne Praefix und ohne
+    # `Secure`. Wirkt nur zusammen mit `debug` und einer Loopback-Adresse in
+    # `panel_url`/`api_url` — in Produktion also folgenlos. Nur der Dev-Stack
+    # setzt diesen Wert (docker-compose.dev.yml).
+    dev_http_cookies: bool = False
+
     # Zusaetzliche CORS-Origins (Komma-separiert), z. B. https://maunting-panel.vercel.app
     # panel_url ist immer erlaubt. In debug=True kommen zusaetzlich lokale Dev-Origins.
     cors_allowed_origins: str = ""
@@ -174,8 +184,8 @@ class Settings(BaseSettings):
     """Optional: MSM_GITHUB_CLONE_TOKEN für private GitHub-Repos (source.type=github)."""
 
     # Auto-Update (GitHub Releases)
-    github_owner: str = "einmalmaik"
-    github_repo: str = "maunting-server-manager"
+    github_owner: str = "mauntingstudios"
+    github_repo: str = "maunting-service-manager"
     auto_update: bool = False  # true = systemd-Timer installiert Updates automatisch
     auto_update_interval_hours: int = 24  # Prüfintervall
 
@@ -234,6 +244,12 @@ TAURI_ORIGINS = (
     "https://tauri.localhost",
     "http://localhost:1430",
     "http://127.0.0.1:1430",
+    # Browser-Grundgerüst im `tauri dev` (siehe browser/src-tauri/tauri.conf.json,
+    # `devUrl`). Es fehlte bis 22.10.2026: jede Anfrage des Browser-Fensters
+    # scheiterte am CORS-Preflight, und das Koppeln meldete nur noch
+    # „Failed to fetch“ — ohne Host und ohne Status.
+    "http://localhost:1450",
+    "http://127.0.0.1:1450",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",

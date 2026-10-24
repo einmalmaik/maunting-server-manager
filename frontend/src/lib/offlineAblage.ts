@@ -39,6 +39,16 @@ export const MESSENGER_KEYS = {
   PINS: 'msm:chat_pins',
   ARCHIVE: 'msm:chat_archive',
   MENTIONS: 'msm:chat_mentions',
+  GERAETE_STAND: 'msm:chat_geraete_stand',
+  EIGENE_WIRKUNGEN: 'msm:chat_eigene_wirkungen',
+  /**
+   * Laufende Verlaufsübergaben an eigene Geräte (Quelle) und der empfangene
+   * Fortschritt (Ziel). Beides ist Fortschritt, kein Inhalt: die Schlüssel
+   * sagen nur, welche Teile einer Übertragung schon beantwortet sind. Beim
+   * Abmelden fällt er mit der kontogebundenen Ablage weg.
+   */
+  VERLAUF_TRANSFER: 'msm:chat_verlauf_transfer',
+  VERLAUF_EMPFANG: 'msm:chat_verlauf_empfang',
 } as const
 
 /** Zwischenspeicher der Kontaktliste (`hooks/useKontaktdaten.ts`). Er kommt vom Server wieder. */

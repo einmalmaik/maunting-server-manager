@@ -76,6 +76,7 @@ from routers import (
     livekit_admin_router,
     browser_suche_router,
     browser_wetter_router,
+    notification_channels_router,
 )
 from middleware.rate_limit import limiter, auth_rate_limit
 from services.steam_service import close_steam_service
@@ -194,6 +195,13 @@ async def lifespan(app: FastAPI):
                 exc,
             )
             raise
+
+    # Erst **nach** den Migrationen: `migrations/env.py` ruft `fileConfig` mit
+    # `alembic.ini` auf, und dort steht `[logger_root] level = WARN`. Ein
+    # früh gesetzter Level wird davon wieder überschrieben — die Stufe bleibt
+    # sonst bei WARNING hängen, und jede `logger.info`-Zeile der Dienste fällt
+    # aus dem Log.
+    _protokoll_einrichten()
 
     # The web process synchronizes runtime registration and checks that
     # the schema contains the required tables/columns.
@@ -786,6 +794,47 @@ async def lifespan(app: FastAPI):
     await close_steam_service()
 
 
+def _protokoll_einrichten() -> None:
+    """Bringt die Protokolle der Anwendung in die Standardausgabe.
+
+    uvicorn richtet nur seine eigenen Protokolle ein (`uvicorn`,
+    `uvicorn.access`); die Wurzel bekommt keinen Handler und bleibt auf
+    `WARNING`. Alles, was die Dienste mit `logger.info` schreiben — der Weg
+    einer Nachricht, Zustellungen, Aufräumläufe —, war damit **unsichtbar**:
+    im Log stand nur `POST /api/social/e2ee/relay 200`, und niemand konnte
+    sagen, ob der Umschlag ankam, ins Konto ging oder in einer abonnierten
+    Mailbox landete (bis 22.10.2026).
+
+    Stufe aus `MSM_LOG_LEVEL` (CRITICAL/ERROR/WARNING/INFO/DEBUG), sonst
+    `WARNING`. Der Dev-Stack setzt `INFO` (`docker-compose.dev.yml`,
+    `start-dev.bat`), damit ein Nachrichtenweg nachvollziehbar ist; der
+    Betrieb bleibt damit nicht von sich aus gesprächig.
+    """
+    import logging
+
+    stufen = {
+        "CRITICAL": logging.CRITICAL,
+        "ERROR": logging.ERROR,
+        "WARNING": logging.WARNING,
+        "INFO": logging.INFO,
+        "DEBUG": logging.DEBUG,
+    }
+    gewaehlt = (os.getenv("MSM_LOG_LEVEL") or "").strip().upper()
+    stufe = stufen.get(gewaehlt, logging.WARNING)
+
+    wurzel = logging.getLogger()
+    if not wurzel.handlers:
+        handler = logging.StreamHandler()
+        # Wie uvicorn: knapp, mit Ursprung. `disable_existing_loggers` bleibt
+        # unberührt — hier kommt nur ein Handler dazu, kein eigenes dictConfig.
+        handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+        wurzel.addHandler(handler)
+    # Nie strenger machen als gewünscht: uvicorn hat hier nichts gesetzt, und
+    # eine Test-/Debug-Stufe soll sich nicht an einer fremden 30 festhalten.
+    if wurzel.level > stufe:
+        wurzel.setLevel(stufe)
+
+
 # Die automatischen Doku-Routen sind bewusst abgeschaltet und werden weiter
 # unten unter /api/* neu registriert. Zwei Gruende:
 #
@@ -1014,6 +1063,8 @@ app.include_router(notes_router)
 app.include_router(vault_router)
 app.include_router(sync_events_router)
 app.include_router(sync_alias_router)
+# Dauerhafte Ausweise fuer den Hintergrundkanal eines Geraets.
+app.include_router(notification_channels_router)
 app.include_router(social_router)
 app.include_router(social_calls_router)
 app.include_router(livekit_admin_router)

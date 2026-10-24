@@ -233,10 +233,19 @@ def test_freigegebenes_geraet_entfernt_nur_ein_freigegebenes(db: Session, clean_
 
     # Das wartende Geraet selbst darf jeder Teil des Kontos entfernen.
     assert e2ee_device_service.vergessen(db, user, "laptop-00002") is True
-    # Und das Telefon sich selbst — mit Unterschrift.
-    assert e2ee_device_service.vergessen(
-        db, user, "telefon-0001", "telefon-0001", _entfernen(tel_priv, user.id, "telefon-0001", RSA_A)
-    ) is True
+
+    # Das eigene Geraet entfernt sich nicht selbst — auch nicht mit eigener
+    # Unterschrift. Bis 10/2026 ging genau das durch: ein Geraet warf sich
+    # hinaus und hinterliess ein Verzeichnis, in dem es fehlte.
+    try:
+        e2ee_device_service.vergessen(
+            db, user, "telefon-0001", "telefon-0001", _entfernen(tel_priv, user.id, "telefon-0001", RSA_A)
+        )
+    except e2ee_device_service.GeraeteaenderungAbgelehntError:
+        pass
+    else:
+        raise AssertionError("Geraet durfte sich selbst entfernen")
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["telefon-0001"]
 
 
 def _sitzung(db: Session, user: User):
@@ -248,6 +257,8 @@ def _sitzung(db: Session, user: User):
 def test_entfernen_sperrt_das_geraet_sofort(client: TestClient, db: Session, clean_db):
     """Das Access-Token des entfernten Geraets faellt beim naechsten Aufruf, nicht nach 15 Minuten."""
     user = _konto(db, "freigabe7")
+    user.password_hash = AuthService.hash_password("richtig-genug-7")
+    db.commit()
     tel_kopf, _ = _sitzung(db, user)
     lap_kopf, _ = _sitzung(db, user)
     tel_priv, tel_ecdsa = _ecdsa_paar()
@@ -267,12 +278,19 @@ def test_entfernen_sperrt_das_geraet_sofort(client: TestClient, db: Session, cle
 
     # Ohne Unterschrift: 403, der Laptop bleibt.
     assert client.post("/api/social/e2ee/devices/self/remove", headers=tel_kopf, json={
-        "device_id": "laptop-00002",
+        "device_id": "laptop-00002", "password": "richtig-genug-7",
+    }).status_code == 403
+
+    # Ohne Nachweis ebenfalls: die Unterschrift allein oeffnet den Weg nicht.
+    assert client.post("/api/social/e2ee/devices/self/remove", headers=tel_kopf, json={
+        "device_id": "laptop-00002", "approver_device_id": "telefon-0001",
+        "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
     }).status_code == 403
 
     assert client.post("/api/social/e2ee/devices/self/remove", headers=tel_kopf, json={
         "device_id": "laptop-00002", "approver_device_id": "telefon-0001",
         "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+        "password": "richtig-genug-7",
     }).json() == {"ok": True}
 
     assert client.get(f"/api/social/e2ee/devices/{user.id}", headers=lap_kopf).status_code == 401
@@ -449,13 +467,15 @@ def test_gekoppeltes_geraet_ohne_namen_heisst_wie_die_einladung(db: Session, cle
     neu = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-01", RSA_A, "", ecdsa, familie="fam-mss")
     assert neu.label == "Arbeitsrechner"
 
-    # Ein selbst gewaehlter Name bleibt; ein Browser ohne Einladung bleibt leer.
+    # Ein selbst gewaehlter Name bleibt; ein Browser ohne Einladung heisst
+    # nicht „unbenannt", sondern wie das Produkt (`STANDARD_BEZEICHNUNG`).
     _, ecdsa2 = _ecdsa_paar()
     eigen = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-02", RSA_B, "Laptop", ecdsa2, familie="fam-mss")
     assert eigen.label == "Laptop"
     _, ecdsa3 = _ecdsa_paar()
     browser = e2ee_device_service.veroeffentlichen(db, user, "browser-0003", RSA_X, "", ecdsa3, familie="fam-web")
-    assert browser.label == ""
+    assert browser.label == e2ee_device_service.STANDARD_BEZEICHNUNG == "Web-Frontend"
+    assert e2ee_device_service.eintrag_als_dict(browser)["label"] == "Web-Frontend"
 
 
 def test_wiedergemeldetes_geraet_ohne_namen_bekommt_den_der_einladung(db: Session, clean_db):
@@ -475,3 +495,582 @@ def test_wiedergemeldetes_geraet_ohne_namen_bekommt_den_der_einladung(db: Sessio
     db.commit()
     wieder = e2ee_device_service.veroeffentlichen(db, user, "mss-geraet-01", RSA_A, "", ecdsa, familie="fam-mss")
     assert wieder.label == "Arbeitsrechner"
+
+
+def test_schluesselwechsel_beim_einzigen_geraet_laesst_es_warten(db: Session, clean_db):
+    """Der Widerspruch aus dem Fehlerbericht: „freigegeben" ohne Unterschrift.
+
+    Bis 10/2026 blieb `is_approved` beim einzigen Geraet stehen, waehrend
+    `approved_by` und `approval_signature` geloescht wurden. Die Liste zeigte
+    „freigegeben", die Signaturkette fand nie wieder eine gueltige Freigabe,
+    und jedes Gegenueber warnte: „es bekommt nichts".
+    """
+    user = _konto(db, "freigabe9")
+    _, ecdsa = _ecdsa_paar()
+    erst = e2ee_device_service.veroeffentlichen(
+        db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie="fam-eins"
+    )
+    assert erst.is_approved is True
+
+    # Neuer Primaerschluessel, dieselbe Sitzung: das Geraet wartet jetzt —
+    # und der Zustand sagt die Wahrheit ueber die fehlende Unterschrift.
+    neu = e2ee_device_service.veroeffentlichen(
+        db, user, "einziges-0001", RSA_X, "Telefon", ecdsa, familie="fam-eins"
+    )
+    assert neu.is_approved is False
+    assert neu.approved_by is None and neu.approval_signature is None
+    assert [g["device_id"] for g in e2ee_device_service.ausstehende_geraete(db, user)] == [
+        "einziges-0001"
+    ]
+    assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True) == []
+
+
+def test_nachgereichter_signaturschluessel_ist_ein_wechsel(db: Session, clean_db):
+    """Auch der erste Signaturschluessel nimmt die Freigabe.
+
+    Ein Altbestand ohne Signaturschluessel kam einmal ohne Freigabe davon. Das
+    war der bequeme Weg, sich Freigaberecht zu verschaffen: wer das Token
+    dieses Geraets hat, legt darunter seinen eigenen Signaturschluessel ab,
+    bleibt freigegeben — und unterschreibt damit Freigaben fuer weitere
+    Geraete. Ein abgegriffenes Token wurde so zur Freigabeinstanz.
+
+    Der Preis ist eine Nachbestaetigung: `wieder_freigeben` mit frischem
+    Nachweis, oder die Unterschrift eines freigegebenen Geraets.
+    """
+    user = _konto(db, "freigabe10")
+    e2ee_device_service.veroeffentlichen(db, user, "altgeraet-01", RSA_A, "Telefon", "", familie="fam-alt")
+    _, ecdsa = _ecdsa_paar()
+
+    nach = e2ee_device_service.veroeffentlichen(
+        db, user, "altgeraet-01", RSA_A, "Telefon", ecdsa, familie="fam-alt"
+    )
+    assert nach.is_approved is False
+    assert nach.signing_public_key_jwk == ecdsa
+    assert nach.approved_by is None and nach.approval_signature is None
+    # Und der Weg zurueck steht offen, weil es das einzige Geraet ist.
+    assert e2ee_device_service.wieder_freigeben(db, user, "altgeraet-01") is True
+    assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)[0]["device_id"] == "altgeraet-01"
+
+
+def test_wieder_freigeben_ohne_nachweis_bleibt_an_der_unterschrift(db: Session, clean_db):
+    """Ohne den frischen Nachweis bleibt der alte Weg versperrt."""
+    user = _konto(db, "freigabe11")
+    _zwei_geraete(db, user)
+    try:
+        e2ee_device_service.wieder_freigeben(db, user, "laptop-00002")
+    except e2ee_device_service.GeraeteaenderungAbgelehntError:
+        pass
+    else:
+        raise AssertionError("Freigabe am freigegebenen Geraet vorbei")
+
+    lap = next(g for g in e2ee_device_service.ausstehende_geraete(db, user))
+    assert lap["device_id"] == "laptop-00002"
+
+
+def test_wieder_freigeben_mit_nachweis_neben_anderem_geraet(db: Session, clean_db):
+    """Mit geprueftem Passwort/2FA darf sich das Geraet selbst freigeben.
+
+    Der Nachweis ist derselbe wie beim Anmelden. Ohne ihn bleibt es bei der
+    Unterschrift des freigegebenen Geraets; ein gestohlenes Token allein kommt
+    nicht durch (`test_wieder_freigeben_ohne_nachweis_bleibt_an_der_unterschrift`).
+    """
+    user = _konto(db, "freigabe11b")
+    user.password_hash = AuthService.hash_password("richtig-genug-3")
+    db.commit()
+    _zwei_geraete(db, user)
+
+    assert e2ee_device_service.wieder_freigeben(
+        db, user, "laptop-00002", mit_nachweis=True
+    ) is True
+    freigegeben = {g["device_id"] for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)}
+    assert freigegeben == {"telefon-0001", "laptop-00002"}
+
+
+def test_wieder_freigeben_verlangt_frischen_nachweis(client: TestClient, db: Session, clean_db):
+    """Nur das Access-Token reicht nicht — sonst haette jeder Token wieder Zutritt."""
+    user = _konto(db, "freigabe12")
+    user.password_hash = AuthService.hash_password("richtig-genug-2")
+    db.commit()
+    kopf, familie = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie=familie)
+    # Schluesselwechsel: das Geraet wartet.
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_X, "Telefon", ecdsa, familie=familie)
+    assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True) == []
+
+    pfad = "/api/social/e2ee/devices/self/reapprove"
+    assert client.post(pfad, headers=kopf, json={"device_id": "einziges-0001"}).status_code == 403
+    assert client.post(
+        pfad, headers=kopf, json={"device_id": "einziges-0001", "password": "falsch"}
+    ).status_code == 403
+    assert e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True) == []
+
+    antwort = client.post(
+        pfad, headers=kopf, json={"device_id": "einziges-0001", "password": "richtig-genug-2"}
+    )
+    assert antwort.status_code == 200
+    eintrag = next(g for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True))
+    assert eintrag["device_id"] == "einziges-0001"
+    # Freigegeben heisst nicht beglaubigt: niemand hat den Schluessel unterschrieben.
+    assert eintrag["approved_by"] == "" and eintrag["approval_signature"] == ""
+
+
+def test_reapprove_mit_passwort_neben_freigegebenem_geraet(client: TestClient, db: Session, clean_db):
+    """Der Mensch mit Passwort kommt auch dann zurueck, wenn ein altes Geraet noch freigegeben ist.
+
+    Der Fall: das alte Telefon ist weg, das neue wartet. Ohne diesen Weg bliebe
+    nur das Zuruecksetzen aller Geraete. Der Nachweis ist derselbe wie beim
+    Anmelden; ohne ihn bleibt es bei der Unterschrift.
+    """
+    user = _konto(db, "freigabe12b")
+    user.password_hash = AuthService.hash_password("richtig-genug-12b")
+    db.commit()
+    _zwei_geraete(db, user)
+    kopf, _ = _sitzung(db, user)
+    pfad = "/api/social/e2ee/devices/self/reapprove"
+
+    assert client.post(pfad, headers=kopf, json={"device_id": "laptop-00002"}).status_code == 403
+    antwort = client.post(
+        pfad,
+        headers=kopf,
+        json={"device_id": "laptop-00002", "password": "richtig-genug-12b"},
+    )
+    assert antwort.status_code == 200
+    freigegeben = {g["device_id"] for g in e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)}
+    assert freigegeben == {"telefon-0001", "laptop-00002"}
+
+
+def test_zwei_wartende_geraete_geben_sich_nicht_gegenseitig_frei(clean_db):
+    """Gleichzeitige Selbstfreigaben: genau eine kommt durch.
+
+    Ohne Sperre lesen beide „kein freigegebenes Geraet" und schreiben beide
+    `is_approved = true` — die Unterschrift des ersten waere umgangen, und das
+    Konto haette zwei Geraete, von denen keines die andere bestaetigt hat.
+
+    Zwei eigene Verbindungen, Start an einer Barriere: auf der geteilten
+    Verbindung der Suite gaebe es keinen Nebenlauf (AGENTS.md 43).
+    """
+    import threading
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    import database as db_module
+    from models import UserE2eeDevice
+
+    aufbau = db_module.SessionLocal()
+    try:
+        user = _konto(aufbau, "freigabe14")
+        _, ecdsa_a = _ecdsa_paar()
+        _, ecdsa_b = _ecdsa_paar()
+        # Beide warten: keine Unterschrift, keine Freigabe.
+        e2ee_device_service.veroeffentlichen(
+            aufbau, user, "geraet-00001", RSA_A, "Telefon", ecdsa_a, familie="fam-a"
+        )
+        e2ee_device_service.veroeffentlichen(
+            aufbau, user, "geraet-00002", RSA_B, "Laptop", ecdsa_b, familie="fam-b"
+        )
+        aufbau.query(UserE2eeDevice).filter(UserE2eeDevice.user_id == user.id).update(
+            {"is_approved": False, "approved_by": None, "approval_signature": None}
+        )
+        aufbau.commit()
+        konto_id = user.id
+    finally:
+        aufbau.close()
+
+    engine = create_engine(db_module.engine.url, poolclass=NullPool)
+    sitzung = sessionmaker(bind=engine)
+    barriere = threading.Barrier(2)
+    ergebnis: dict[str, object] = {}
+    fehler: list[BaseException] = []
+
+    def lauf(kennung: str) -> None:
+        s = sitzung()
+        try:
+            konto = s.get(User, konto_id)
+            try:
+                barriere.wait(timeout=5)
+            except threading.BrokenBarrierError:
+                pass
+            ergebnis[kennung] = e2ee_device_service.wieder_freigeben(s, konto, kennung)
+        except e2ee_device_service.GeraeteaenderungAbgelehntError:
+            ergebnis[kennung] = "abgelehnt"
+        except BaseException as e:  # noqa: BLE001 - im Test sichtbar machen
+            fehler.append(e)
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=lauf, args=(k,)) for k in ("geraet-00001", "geraet-00002")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    engine.dispose()
+
+    assert not fehler, fehler
+    assert sorted(str(v) for v in ergebnis.values()) == ["True", "abgelehnt"]
+
+    kontrolle = db_module.SessionLocal()
+    try:
+        freigegeben = (
+            kontrolle.query(UserE2eeDevice)
+            .filter(UserE2eeDevice.user_id == konto_id, UserE2eeDevice.is_approved.is_(True))
+            .count()
+        )
+    finally:
+        kontrolle.close()
+    assert freigegeben == 1
+
+
+def test_abgelehnte_freigabe_verbraucht_keinen_code(client: TestClient, db: Session, clean_db):
+    """Der Nachweis gilt genau einmal — er darf nicht an einer 404 verfallen.
+
+    Die Pruefung „Geraet unbekannt" steht vor dem Nachweis. Stand sie danach,
+    verbrannte ein gueltiger Code fuer eine Antwort, die ohnehin 404 lautet.
+    Danach war derselbe Code fuer das echte Geraet nicht mehr zu gebrauchen.
+    """
+    from services.dis_client import DisClient
+    from tests._totp import totp_now
+
+    user = _konto(db, "freigabe15")
+    user.two_factor_enabled = True
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
+    db.commit()
+    kopf, _ = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    # Eigene Familien: das Entfernen des ersten Geraets sperrt dessen Sitzung,
+    # nicht die des Testclients.
+    e2ee_device_service.veroeffentlichen(db, user, "erstes-0001", RSA_A, "Telefon", ecdsa, familie="fam-erstes")
+    e2ee_device_service.veroeffentlichen(db, user, "zweites-0002", RSA_B, "Laptop", ecdsa, familie="fam-zweites")
+
+    pdaf = "/api/social/e2ee/devices/self/reapprove"
+    code = totp_now(secret)
+    assert client.post(
+        pdaf, headers=kopf, json={"device_id": "gibt-es-nicht", "otp_code": code}
+    ).status_code == 404
+
+    # Derselbe Code, diesmal fuer das echte Geraet. Mit frischem Nachweis darf
+    # es sich auch neben dem freigegebenen Telefon zulassen.
+    antwort = client.post(pdaf, headers=kopf, json={"device_id": "zweites-0002", "otp_code": code})
+    assert antwort.status_code == 200, antwort.text
+
+
+def test_wieder_freigeben_mit_zweitem_faktor(client: TestClient, db: Session, clean_db):
+    """Bei 2FA zaehlt nur der eingerichtete Faktor, nie das Passwort allein."""
+    from services.dis_client import DisClient
+    from tests._totp import totp_now
+
+    user = _konto(db, "freigabe13")
+    user.password_hash = AuthService.hash_password("richtig-genug-3")
+    user.two_factor_enabled = True
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
+    db.commit()
+    kopf, familie = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie=familie)
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_X, "Telefon", ecdsa, familie=familie)
+
+    pfad = "/api/social/e2ee/devices/self/reapprove"
+    assert client.post(pfad, headers=kopf, json={"device_id": "einziges-0001"}).status_code == 403
+    # Das Passwort allein oeffnet ein 2FA-Konto nicht.
+    assert client.post(
+        pfad, headers=kopf, json={"device_id": "einziges-0001", "password": "richtig-genug-3"}
+    ).status_code == 403
+    assert client.post(
+        pfad, headers=kopf, json={"device_id": "einziges-0001", "otp_code": "000000"}
+    ).status_code == 403
+    assert client.post(
+        pfad, headers=kopf, json={"device_id": "einziges-0001", "otp_code": totp_now(secret)}
+    ).status_code == 200
+    assert len(e2ee_device_service.geraete(db, user.id, nur_bestaetigt=True)) == 1
+
+def test_bestandsgeraet_ohne_namen_wird_als_web_frontend_ausgeliefert(db: Session, clean_db):
+    """Ein Eintrag von vor 10/2026 stand auf jedem anderen Geraet als „Unbenanntes Geraet".
+
+    Der Client von damals meldete ohne Label, und `_auffrischen` ueberschreibt
+    ein leeres Feld nie — es blieb fuer immer leer. Gelesen wird es jetzt als
+    Standardname, ohne dass die Zeile angefasst werden muss.
+    """
+    from models import UserE2eeDevice
+
+    user = _konto(db, "bestandslabel")
+    _, ecdsa = _ecdsa_paar()
+    eintrag = e2ee_device_service.veroeffentlichen(db, user, "altbestand-01", RSA_A, "", ecdsa)
+    # Zustand von vor dem Fix nachstellen: Spalte leer.
+    db.query(UserE2eeDevice).filter(UserE2eeDevice.id == eintrag.id).update(
+        {UserE2eeDevice.label: ""}, synchronize_session=False
+    )
+    db.commit()
+
+    liste = e2ee_device_service.geraete(db, user.id)
+    assert liste[0]["label"] == e2ee_device_service.STANDARD_BEZEICHNUNG
+    assert e2ee_device_service.ausstehende_geraete(db, user) == []
+
+    # Und die Anzeige eint ein Browser, der sich ohne Namen meldet.
+    _, ecdsa2 = _ecdsa_paar()
+    frisch = e2ee_device_service.veroeffentlichen(db, user, "browser-0002", RSA_B, "", ecdsa2)
+    assert frisch.label == "Web-Frontend"
+
+
+def test_erstes_geraet_beglaubigt_sich_selbst(db: Session, clean_db):
+    """Fall A: das erste Geraet gibt sich frei — mit Unterschrift, nicht nur mit einem Wort.
+
+    Bis 10/2026 blieb `approval_signature` leer. `is_approved` sagte „ja", die
+    Signaturkette fand nichts, und jedes andere Geraet zeigte „Ohne gueltige
+    Freigabe" neben einem Eintrag, den der Server freigegeben nannte.
+    """
+    user = _konto(db, "selbstsig1")
+    priv, ecdsa = _ecdsa_paar()
+    signatur = _freigabe(priv, user.id, "erstgeraet-1", RSA_A, ecdsa)
+
+    erst = e2ee_device_service.veroeffentlichen(
+        db, user, "erstgeraet-1", RSA_A, "Web-Frontend", ecdsa, self_signature=signatur
+    )
+    assert erst.is_approved is True
+    assert erst.approved_by == "erstgeraet-1"
+    assert erst.approval_signature == signatur
+    assert e2ee_device_service.eintrag_als_dict(erst)["approval_signature"] == signatur
+
+    # Eine Unterschrift ueber andere Schluessel bleibt draussen.
+    fremd_priv, _ = _ecdsa_paar()
+    falsch = _freigabe(fremd_priv, user.id, "erstgeraet-1", RSA_A, ecdsa)
+    wieder = e2ee_device_service.veroeffentlichen(
+        db, user, "erstgeraet-1", RSA_A, "", ecdsa, self_signature=falsch
+    )
+    assert wieder.approval_signature == signatur
+
+
+def test_freigabe_wird_fuer_ein_freigegebenes_geraet_nachgezogen(db: Session, clean_db):
+    """Ein freigegebenes Geraet ohne Unterschrift laesst sich von einem anderen beglaubigen.
+
+    Der Fall aus dem Fehlerbericht: auf dem Telefon stand das Web-Frontend als
+    freigegeben, aber „ohne gueltige Freigabe" — der Knopf daneben fehlte, und
+    `bestaetigen` haette ohnehin nichts getan (`is_approved` war ja wahr).
+    """
+    from models import UserE2eeDevice
+
+    user = _konto(db, "nachziehen1")
+    tel_priv, _, _, lap_ecdsa = _zwei_geraete(db, user)
+    assert e2ee_device_service.bestaetigen(
+        db,
+        user,
+        "laptop-00002",
+        "telefon-0001",
+        _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa),
+    )
+
+    # Zustand „freigegeben, aber ohne Unterschrift" — so kommt es aus
+    # `wieder_freigeben` fuer ein Geraet ohne andere freigegebene.
+    db.query(UserE2eeDevice).filter(UserE2eeDevice.device_id == "laptop-00002").update(
+        {UserE2eeDevice.approved_by: None, UserE2eeDevice.approval_signature: None},
+        synchronize_session=False,
+    )
+    db.commit()
+
+    assert e2ee_device_service.bestaetigen(
+        db,
+        user,
+        "laptop-00002",
+        "telefon-0001",
+        _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa),
+    )
+    nachgezogen = [g for g in e2ee_device_service.geraete(db, user.id) if g["device_id"] == "laptop-00002"][0]
+    assert nachgezogen["is_approved"] is True
+    assert nachgezogen["approved_by"] == "telefon-0001"
+    assert nachgezogen["approval_signature"]
+
+    # Und eine falsche Unterschrift aendert nichts: das Geraet ist beglaubigt,
+    # eine ungueltige Unterschrift daneben ist kein Grund, das zu verwerfen.
+    fremd_priv, _ = _ecdsa_paar()
+    assert e2ee_device_service.bestaetigen(
+        db,
+        user,
+        "laptop-00002",
+        "telefon-0001",
+        _freigabe(fremd_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa),
+    )
+    unveraendert = [g for g in e2ee_device_service.geraete(db, user.id) if g["device_id"] == "laptop-00002"][0]
+    assert unveraendert["approval_signature"] == nachgezogen["approval_signature"]
+
+
+def test_wieder_freigeben_traegt_die_eigene_unterschrift_ein(db: Session, clean_db):
+    """Fall C: die Selbstfreigabe traegt die eigene Unterschrift — unbelegt bleibt sie erklaert."""
+    user = _konto(db, "selbstsig2")
+    priv, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie="fam-1")
+    # Schluesselwechsel bei der Sitzung selbst: das Geraet wartet jetzt, und
+    # `wieder_freigeben` ist sein Weg zurueck.
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_X, "Telefon", ecdsa, familie="fam-1")
+
+    signatur = _freigabe(priv, user.id, "einziges-0001", RSA_X, ecdsa)
+    assert e2ee_device_service.wieder_freigeben(db, user, "einziges-0001", signatur=signatur)
+    eintrag = e2ee_device_service.geraete(db, user.id)[0]
+    assert eintrag["is_approved"] is True
+    assert eintrag["approved_by"] == "einziges-0001"
+    assert eintrag["approval_signature"] == signatur
+
+    # Ohne Unterschrift bleibt der Zustand wie vorher: freigegeben, nicht
+    # beglaubigt — aeltere Clients kennen den neuen Parameter nicht.
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie="fam-1")
+    assert e2ee_device_service.wieder_freigeben(db, user, "einziges-0001")
+    eintrag = e2ee_device_service.geraete(db, user.id)[0]
+    assert eintrag["is_approved"] is True
+    assert eintrag["approved_by"] == ""
+    assert eintrag["approval_signature"] == ""
+
+
+def test_entfernen_verlangt_den_nachweis_des_kontos(client: TestClient, db: Session, clean_db):
+    """Die Kaskade vor dem Entfernen: zweiter Faktor, sonst Passwort, sonst Sitzung."""
+    from services.dis_client import DisClient
+    from tests._totp import totp_now
+
+    user = _konto(db, "entfernen1")
+    user.password_hash = AuthService.hash_password("richtig-genug-8")
+    user.two_factor_enabled = True
+    secret = DisClient.generate_totp_secret()
+    user.two_factor_secret_encrypted = AuthService.encrypt_secret(secret, aad=f"msm:user:{user.id}:2fa")
+    db.commit()
+
+    kopf, familie = _sitzung(db, user)
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    _, lap_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie=familie)
+    _, fremd_familie = _sitzung(db, user)
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "Laptop", lap_ecdsa, familie=fremd_familie)
+    # Erst freigeben: nur ein freigegebenes Geraet bekommt Nachrichten — und
+    # nur bei ihm haengt der Nachweis davor.
+    assert e2ee_device_service.bestaetigen(
+        db, user, "laptop-00002", "telefon-0001", _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    )
+
+    pfad = "/api/social/e2ee/devices/self/remove"
+    rumpf = {
+        "device_id": "laptop-00002",
+        "approver_device_id": "telefon-0001",
+        "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+    }
+
+    # Stufe 1/2: das Konto hat 2FA, das Passwort allein oeffnet nicht.
+    assert client.post(pfad, headers=kopf, json={**rumpf, "password": "richtig-genug-8"}).status_code == 403
+    assert client.post(pfad, headers=kopf, json={**rumpf, "otp_code": "000000"}).status_code == 403
+    # Ein erfundenes Feld oeffnet nichts (Punkt 41 der Projektregeln).
+    assert client.post(pfad, headers=kopf, json={**rumpf, "passkey_verified": True}).status_code == 403
+    assert len(e2ee_device_service.geraete(db, user.id)) == 2
+
+    # Ein falscher Beleg verbraucht den Code nicht: die Unterschrift wird
+    # vorher geprueft. Sonst waere der gueltige Code fuer eine 403 weg.
+    code = totp_now(secret)
+    falsch = {**rumpf, "signature": _entfernen(tel_priv, user.id, "drittes-0003", RSA_X), "otp_code": code}
+    assert client.post(pfad, headers=kopf, json=falsch).status_code == 403
+
+    assert client.post(pfad, headers=kopf, json={**rumpf, "otp_code": code}).status_code == 200
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["telefon-0001"]
+
+    # Ein wartendes Geraet braucht keinen Nachweis: es hat nie etwas bekommen,
+    # und die Kopplung mit falscher Sicherheitsnummer muss sofort abbrechbar
+    # bleiben (`AiDevicePairingCard`).
+    _, drittes_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "drittes-0003", RSA_X, "Drittes", drittes_ecdsa)
+    assert client.post(
+        pfad, headers=kopf, json={"device_id": "drittes-0003"}
+    ).status_code == 200
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["telefon-0001"]
+
+
+def test_entfernen_teilt_die_strenge_anmeldegrenze(client: TestClient, db: Session, clean_db):
+    """Ein Ort zum Raten weniger.
+
+    Die Geräteunterschrift davor ist wiederverwendbar: wer ein freigegebenes
+    Gerät kontrolliert, kann sie beliebig oft vorlegen und dazwischen Passwort
+    oder Einmalcode raten. Ohne `auth_rate_limit` war diese Route dafür ein
+    eigener, großzügigerer Ort neben dem Login.
+    """
+    user = _konto(db, "entfernen4")
+    user.password_hash = AuthService.hash_password("richtig-genug-8")
+    db.commit()
+
+    kopf, familie = _sitzung(db, user)
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    _, lap_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie=familie)
+    _, fremd_familie = _sitzung(db, user)
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "Laptop", lap_ecdsa, familie=fremd_familie)
+    assert e2ee_device_service.bestaetigen(
+        db, user, "laptop-00002", "telefon-0001", _freigabe(tel_priv, user.id, "laptop-00002", RSA_B, lap_ecdsa)
+    )
+
+    rumpf = {
+        "device_id": "laptop-00002",
+        "approver_device_id": "telefon-0001",
+        "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+        "password": "falsch-aber-lang",
+    }
+    antworten = [
+        client.post("/api/social/e2ee/devices/self/remove", headers=kopf, json=rumpf).status_code
+        for _ in range(12)
+    ]
+
+    assert antworten[0] == 403
+    assert 429 in antworten
+    # Nichts wurde entfernt — die Grenze greift vor der Wirkung.
+    assert len(e2ee_device_service.geraete(db, user.id)) == 2
+
+
+def test_entfernen_ohne_passwort_und_ohne_faktor_kommt_mit_der_sitzung_aus(
+    client: TestClient, db: Session, clean_db
+):
+    """Stufe 4: ein Social-Login-Konto ohne Passwort und ohne zweiten Faktor.
+
+    Mehr hat dieses Konto nicht herzugeben. Ein Feld zu verlangen, das es nicht
+    gibt, waere eine Sackgasse — und der Nutzer koennte ein fremdes Geraet nie
+    entfernen.
+    """
+    user = _konto(db, "entfernen2")
+    user.has_password = False
+    user.password_hash = ""
+    db.commit()
+
+    kopf, familie = _sitzung(db, user)
+    tel_priv, tel_ecdsa = _ecdsa_paar()
+    _, lap_ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "telefon-0001", RSA_A, "Telefon", tel_ecdsa, familie=familie)
+    _, fremd_familie = _sitzung(db, user)
+    e2ee_device_service.veroeffentlichen(db, user, "laptop-00002", RSA_B, "Laptop", lap_ecdsa, familie=fremd_familie)
+
+    antwort = client.post(
+        "/api/social/e2ee/devices/self/remove",
+        headers=kopf,
+        json={
+            "device_id": "laptop-00002",
+            "approver_device_id": "telefon-0001",
+            "signature": _entfernen(tel_priv, user.id, "laptop-00002", RSA_B),
+        },
+    )
+    assert antwort.status_code == 200, antwort.text
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["telefon-0001"]
+
+
+def test_eigenes_geraet_entfernt_sich_nicht(client: TestClient, db: Session, clean_db):
+    """Auch ueber die Sitzung erkannt: das eigene Geraet ist kein Ziel.
+
+    Der Nachweis darf dabei nicht verbraucht werden — geprueft wird vorher
+    (`entfernen_hindernis`), sonst waere ein Einmalcode fuer eine 403 weg.
+    """
+    user = _konto(db, "entfernen3")
+    user.password_hash = AuthService.hash_password("richtig-genug-9")
+    db.commit()
+    kopf, familie = _sitzung(db, user)
+    _, ecdsa = _ecdsa_paar()
+    e2ee_device_service.veroeffentlichen(db, user, "einziges-0001", RSA_A, "Telefon", ecdsa, familie=familie)
+
+    antwort = client.post(
+        "/api/social/e2ee/devices/self/remove",
+        headers=kopf,
+        json={"device_id": "einziges-0001", "password": "richtig-genug-9"},
+    )
+    assert antwort.status_code == 403
+    assert "selbst" in antwort.json()["detail"]
+    assert [g["device_id"] for g in e2ee_device_service.geraete(db, user.id)] == ["einziges-0001"]

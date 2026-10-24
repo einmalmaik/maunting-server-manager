@@ -16,6 +16,7 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { BrowserBestaetigungDialog } from '@/components/BrowserBestaetigungDialog'
 import { AnrufEbene } from '@/components/calling/AnrufEbene'
 import { PanelPopupModal } from '@/components/popups/PanelPopupModal'
+import { ServerIncidentNotifier } from '@/components/notifications/ServerIncidentNotifier'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PromptDialog } from '@/components/ui/PromptDialog'
 import { eingangBeobachten } from '@/desktop/vault/tresorEingang'
@@ -33,7 +34,9 @@ import { Navigationsleiste } from './kopf/Navigationsleiste'
 import { Suchleiste } from './kopf/Suchleiste'
 import { VertikaleTableiste } from './kopf/VertikaleTableiste'
 import { Panel } from './leiste/Panel'
+import { panelAusPfad } from './leiste/module'
 import { Seitenleiste } from './leiste/Seitenleiste'
+import { MessengerHintergrund } from './MessengerHintergrund'
 import { useOhneEdgeMenue } from './seite/EigenesMenue'
 import { FormularLeiste } from './seite/FormularLeiste'
 import { Meldungsleiste } from './seite/Meldungsleiste'
@@ -118,6 +121,11 @@ function Wurzel() {
   const panelSeite = useEinstellungenStore((s) => s.panelSeite)
   const tabAusrichtung = useEinstellungenStore((s) => s.tabAusrichtung)
   const handy = istAndroid()
+  // `/user/<id>` liegt zwar im Chat-Panel, zeigt aber das Profil statt der
+  // Messenger-Seite; dort läuft der Kern nicht. Nur wenn die Messenger-Seite
+  // wirklich montiert ist, pausiert die Hintergrundwache.
+  const messengerOffen =
+    panelAusPfad(pathname) === 'chat' && !pathname.startsWith('/user/')
   const [imVollbild, setImVollbild] = useState(false)
 
   useSitzungsLauf()
@@ -247,6 +255,10 @@ function Wurzel() {
     <div
       className={`flex h-dvh flex-col overflow-hidden bg-background text-on-surface ${handy && !imVollbild ? 'pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)]' : ''}`}
     >
+      {/* Dieselbe Meldestelle wie in Web und MSS: Zahl, Ton und Toast. */}
+      {angemeldet && <ServerIncidentNotifier />}
+      {/* Bei geschlossenem Messenger hält Pontis das Gerätepostfach offen. */}
+      {angemeldet && social && gekoppelt && !messengerOffen && <MessengerHintergrund />}
       {handy ? (
         !imVollbild && (
           <div className="shrink-0 bg-surface-container px-2 py-1.5 pt-[calc(var(--msm-oben-sicher)+0.375rem)]">

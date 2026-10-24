@@ -38,6 +38,10 @@ function drUmschlag(klartext: string, vonKonto: number = 1): string {
   return `sv-e2ee-dr-v1:${vonKonto}.testgeraet.zielgeraet.` + btoa(unescape(encodeURIComponent(klartext)))
 }
 
+// Eine Fälschung für beide Lesewege: der Messenger holt eine Mailbox
+// inzwischen seitenweise, die Tests setzen aber weiter `fetchE2eeEnvelopes`.
+const e2eeEnvelopeMock = vi.hoisted(() => vi.fn())
+
 vi.mock('@/api/social', () => ({
   getFriends: vi.fn(),
   getGroups: vi.fn().mockResolvedValue([]),
@@ -57,7 +61,8 @@ vi.mock('@/api/social', () => ({
   getE2eeKeyring: vi.fn().mockResolvedValue({ wrapped_keyring: null, public_key: null, version: 0 }),
   putE2eeKeyring: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
-  fetchE2eeEnvelopes: vi.fn(),
+  fetchE2eeEnvelopes: e2eeEnvelopeMock,
+  fetchAlleE2eeEnvelopes: e2eeEnvelopeMock,
   getPublicProfiles: vi.fn().mockResolvedValue([]),
   sendFriendRequest: vi.fn().mockResolvedValue({ success: true, message: 'Anfrage gesendet' }),
   sendTypingSignal: vi.fn().mockResolvedValue({ ok: true }),
@@ -120,7 +125,13 @@ vi.mock('@/services/messengerLocalStore', async () => {
   return {
     ...echt,
     loadLocalMessages: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
+    // Der strenge Weg liest und schreibt dieselbe Ablage: der Empfangsweg
+    // quittiert erst, wenn die Zeile wirklich liegt (`uebernimmLesungen`).
+    loadLocalMessagesStrict: vi.fn(async (mid: string) => nachrichten.get(mid) ?? []),
     saveLocalMessages: vi.fn(async (mid: string, msgs: any[]) => {
+      nachrichten.set(mid, msgs)
+    }),
+    saveLocalMessagesStrict: vi.fn(async (mid: string, msgs: any[]) => {
       nachrichten.set(mid, msgs)
     }),
     updateMessageInLocalStore: vi.fn(async () => {}),
@@ -147,6 +158,7 @@ vi.mock('@/services/ratchetSitzung', () => {
   const einpacken = (t: string, von: number = 1) => PREFIX + `${von}.testgeraet.zielgeraet.` + btoa(unescape(encodeURIComponent(t)))
   const auspacken = (u: string) => decodeURIComponent(escape(atob(u.split('.').slice(3).join('.'))))
   return {
+    sendeAusstehendeZustellungen: vi.fn(async () => ({ gesendet: 0, offen: 0 })),
     DR_PREFIX: PREFIX,
     DR_INIT_TYP: 'dr-init',
     einpackenDr: einpacken,

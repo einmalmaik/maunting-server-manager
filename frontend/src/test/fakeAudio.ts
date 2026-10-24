@@ -138,6 +138,30 @@ export class FakeMesser {
   }
 }
 
+/** Ein Oszillator, wie ihn der Hinweiston benutzt. */
+export class FakeOszillator {
+  type = 'sine'
+  frequenzStart: number | null = null
+  frequenzEnde: number | null = null
+  startZeit: number | null = null
+  stoppZeit: number | null = null
+  readonly frequency = {
+    setValueAtTime: (wert: number) => {
+      this.frequenzStart = wert
+    },
+    exponentialRampToValueAtTime: (wert: number) => {
+      this.frequenzEnde = wert
+    },
+  }
+  connect(): void {}
+  start(zeit: number): void {
+    this.startZeit = zeit
+  }
+  stop(zeit: number): void {
+    this.stoppZeit = zeit
+  }
+}
+
 export class FakeAudioContext {
   static instances: FakeAudioContext[] = []
   /** Womit neue Kontexte starten — siehe `gesperrt` in `installFakeAudio`. */
@@ -152,6 +176,7 @@ export class FakeAudioContext {
   state: 'running' | 'suspended'
   readonly destination = {}
   readonly quellen: FakeBufferSource[] = []
+  readonly oszillatoren: FakeOszillator[] = []
   readonly prozessoren: FakeScriptProcessor[] = []
   readonly verstaerker: { gain: { value: number } }[] = []
   readonly messer: FakeMesser[] = []
@@ -187,6 +212,12 @@ export class FakeAudioContext {
     const quelle = new FakeBufferSource()
     this.quellen.push(quelle)
     return quelle
+  }
+
+  createOscillator(): FakeOszillator {
+    const oszillator = new FakeOszillator()
+    this.oszillatoren.push(oszillator)
+    return oszillator
   }
 
   createMediaStreamSource(): { connect: () => void; disconnect: () => void } {

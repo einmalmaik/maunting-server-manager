@@ -22,7 +22,7 @@ import shutil
 import sys
 from pathlib import Path
 
-REPO = "einmalmaik/maunting-server-manager"
+REPO = "mauntingstudios/maunting-service-manager"
 INSTALLER = "MauntingPontis-Setup.exe"
 MAIN_EXE = "MauntingPontis.exe"
 MANIFEST = "latest-msb.json"

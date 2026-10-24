@@ -11,7 +11,7 @@
  * geblieben; die Namen im Inneren sind die der Seite.
  */
 
-import { ladeAnhangHoch, relayE2eeEnvelope } from '@/api/social'
+import { ladeAnhangHoch, relayE2eeEnvelope, sendMessageQueue, type QueueEnvelope } from '@/api/social'
 import type {
   AntwortBezug,
   CalendarAttachment,
@@ -30,6 +30,30 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 import type { AugenblickMarke, RettungsMarke } from './funkenService'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
+import { eigenesGeraet } from './e2eeGeraet'
+import { speichereMedium } from './messengerLocalStore'
+/**
+ * Legt den Anhang zusätzlich dauerhaft ab.
+ *
+ * Der Arbeitsspeicher allein reicht nicht: bis 10/2026 lag ein gesendetes Bild
+ * nur im RAM und war nach dem Neuladen weg, obwohl der Server es noch 30 Tage
+ * hält. Der lokale Bestand ist die Zusage, und der Arbeitsspeicher ist nur die
+ * Optimierung darüber.
+ *
+ * Scheitert das Ablegen, geht die Nachricht trotzdem raus: der Anhang liegt
+ * beim Server, und der Empfänger holt ihn sich von dort.
+ */
+async function sichereLokal(
+  mediaId: string,
+  klartext: string,
+  name?: string,
+): Promise<void> {
+  try {
+    await speichereMedium(mediaId, klartext, name ?? null)
+  } catch {
+    // Kein Grund, das Senden abzubrechen.
+  }
+}
 
 /** Macht aus einer Aufnahme die Zeichenkette, die `medienKrypto` verschlüsselt. */
 function blobAlsDataUrl(blob: Blob): Promise<string> {
@@ -116,6 +140,7 @@ export async function ladeAnhaengeHoch(
         const mimeType = img.dataUrl.split(';')[0]?.replace('data:', '') || 'image/png'
         const zeiger = await anhangHochladen(img.dataUrl, img.name || 'bild.png', mimeType)
         chatMediaBlobCache.set(zeiger.mediaId, img.dataUrl)
+        await sichereLokal(zeiger.mediaId, img.dataUrl, img.name)
         finalImg = { ...zeiger, name: img.name }
       } catch {
         finalImg = { name: img.name }
@@ -141,6 +166,7 @@ export async function ladeAnhaengeHoch(
           file.mimeType || 'application/octet-stream'
         )
         chatMediaBlobCache.set(zeiger.mediaId, file.dataUrl)
+        await sichereLokal(zeiger.mediaId, file.dataUrl, file.name)
         finalFile = {
           ...zeiger,
           name: file.name,
@@ -163,6 +189,7 @@ export async function ladeAnhaengeHoch(
       audio.mimeType || 'audio/webm'
     )
     chatMediaBlobCache.set(zeiger.mediaId, audio.dataUrl)
+    await sichereLokal(zeiger.mediaId, audio.dataUrl, 'sprachnachricht.webm')
     finalAudio = {
       ...zeiger,
       durationSeconds: audio.durationSeconds,
@@ -174,6 +201,7 @@ export async function ladeAnhaengeHoch(
     const dataUrl = await blobAlsDataUrl(videoNote.blob)
     const zeiger = await anhangHochladen(dataUrl, 'videonotiz.webm', videoNote.mimeType)
     chatMediaBlobCache.set(zeiger.mediaId, dataUrl)
+    await sichereLokal(zeiger.mediaId, dataUrl, 'videonotiz.webm')
     finalVideoNote = {
       ...zeiger,
       durationSeconds: videoNote.durationSeconds,
@@ -264,57 +292,86 @@ export function baueNutzlast(angaben: Nutzlastangaben): Record<string, unknown> 
   return payloadObj
 }
 
+/** Der HTTP-Status eines Fehlers, sofern er einen trägt. */
+function statusVon(fehler: unknown): number | null {
+  const status = (fehler as { status?: unknown } | null)?.status
+  return typeof status === 'number' ? status : null
+}
+
 /**
  * Stellt die Umschläge einer Nachricht zu, oder reiht sie für später ein.
  */
 export async function stelleZu(
   auftraege: Versandauftrag[],
-): Promise<{ niedrigsteId: number; verbindungsfehler: boolean }> {
-  /**
-   * Die niedrigste Umschlagkennung der Auffächerung gilt als Kennung dieser
-   * Nachricht. Quittungen der Gegenstelle nennen die Kennung der Kopie, die
-   * *sie* gesehen hat — also eine aus derselben Auffächerung und damit nie
-   * kleinere. Der Vergleich `quittiert >= meine` trägt deshalb weiter.
-   */
+): Promise<{ niedrigsteId: number; verbindungsfehler: boolean; ueberInbox: boolean }> {
+  if (auftraege.length === 0) {
+    return { niedrigsteId: 0, verbindungsfehler: false, ueberInbox: true }
+  }
+
+  const erster = auftraege[0]
+  if (erster && erster.chat_type && erster.chat_id) {
+    const baseUuid = erster.client_uuid.split('#')[0]
+    try {
+      const ownDevice = await eigenesGeraet().catch(() => null)
+      const envelopes: QueueEnvelope[] = auftraege.map((a) => ({
+        target_device_id: a.target_device_db_id,
+        device_id: a.target_device_id,
+        encrypted_payload: a.ciphertext_envelope,
+      }))
+
+      await sendMessageQueue({
+        client_uuid: baseUuid,
+        chat_type: erster.chat_type,
+        chat_id: erster.chat_id,
+        envelopes,
+        device_id: ownDevice?.kennung,
+      })
+      return { niedrigsteId: 1, verbindungsfehler: false, ueberInbox: true }
+    } catch (fehler) {
+      const status = statusVon(fehler)
+      if (!status || status >= 500) {
+        for (const a of auftraege) {
+          enqueueMessageMutation(a)
+        }
+        return { niedrigsteId: 0, verbindungsfehler: true, ueberInbox: true }
+      }
+      throw fehler
+    }
+  }
+
+  // Fallback für Mailbox-Altsysteme / Tests:
   let niedrigsteId = 0
   let verbindungsfehler = false
   const gescheiterteGeraete = new Set<string>()
   let ueberspringeNaechsteNachricht = false
 
-  for (const auftrag of auftraege) {
-    // H-6: Paarbildung im Sendepfad. Scheitert ein Auftrag (z. B. dr-init),
-    // darf die zugehörige Ratchet-Nachricht desselben Zielgeräts nicht gesendet
-    // werden, sondern muss ebenfalls eingereiht werden, um Sitzungsbrüche zu verhindern.
-    const raute = auftrag.client_uuid ? auftrag.client_uuid.indexOf('#') : -1
-    const rawSuffix = raute !== -1 ? auftrag.client_uuid.slice(raute + 1) : ''
-    const geraetKey = rawSuffix.startsWith('i') ? rawSuffix.slice(1) : rawSuffix
-
+  for (const a of auftraege) {
+    const geraetKey = a.client_uuid ? a.client_uuid.split('#')[1]?.replace(/^i/, '') : ''
     const mussUeberspringen =
-      (ueberspringeNaechsteNachricht && !auftrag.is_control) ||
+      (ueberspringeNaechsteNachricht && !a.is_control) ||
       Boolean(geraetKey && gescheiterteGeraete.has(geraetKey))
 
     if (mussUeberspringen) {
-      enqueueMessageMutation(auftrag)
+      enqueueMessageMutation(a)
       ueberspringeNaechsteNachricht = false
       continue
     }
 
     try {
-      const r = await relayE2eeEnvelope(auftrag)
-      if (!auftrag.is_control && r && typeof r.id === 'number') {
-        if (niedrigsteId === 0 || r.id < niedrigsteId) niedrigsteId = r.id
+      const r = await relayE2eeEnvelope(a)
+      if (!a.is_control && r && typeof r.id === 'number') {
+        if (niedrigsteId === 0 || r.id < niedrigsteId) {
+          niedrigsteId = r.id
+        }
       }
     } catch {
-      if (geraetKey) {
-        gescheiterteGeraete.add(geraetKey)
-      }
-      if (auftrag.is_control && auftrag.control_type === 'dr-init') {
+      if (geraetKey) gescheiterteGeraete.add(geraetKey)
+      if (a.is_control && a.control_type === 'dr-init') {
         ueberspringeNaechsteNachricht = true
       }
-      enqueueMessageMutation(auftrag)
+      enqueueMessageMutation(a)
       verbindungsfehler = true
     }
   }
-
-  return { niedrigsteId, verbindungsfehler }
+  return { niedrigsteId, verbindungsfehler, ueberInbox: false }
 }

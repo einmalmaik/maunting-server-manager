@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-benachrichtigung-senden"
+description = "Enables the benachrichtigung_senden command without any pre-configured scope."
+commands.allow = ["benachrichtigung_senden"]
+
+[[permission]]
+identifier = "deny-benachrichtigung-senden"
+description = "Denies the benachrichtigung_senden command without any pre-configured scope."
+commands.deny = ["benachrichtigung_senden"]

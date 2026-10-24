@@ -89,11 +89,20 @@ interface Umschlag {
 }
 
 let mailbox: Umschlag[] = []
+/** Mit welchem `since_id` die Geräte-Mailbox abgefragt wurde. */
+const standAbrufe: number[] = []
 let naechsteId = 1
 /** Die Mitgliedschaft laut Server. `beforeEach` setzt sie je Test. */
 let serverMitglieder: number[] = []
 /** Lässt jeden Relais-Aufruf scheitern, für den Fall „erreicht niemanden". */
 let relaisKaputt = false
+/**
+ * Lässt einzelne Zustellungen scheitern — je nach Inhalt des Umschlags.
+ *
+ * Damit lässt sich der Fall „ein Gerät erreicht, ein anderes nicht" nachstellen:
+ * der Umschlag nennt den öffentlichen Schlüssel des Empfängers.
+ */
+let relaisScheitertWenn: ((p: { ciphertext_envelope: string }) => boolean) | null = null
 /**
  * Jede Registrierung eines Besitznachweises, in der Reihenfolge.
  *
@@ -112,7 +121,7 @@ vi.mock('@/api/social', () => ({
     client_uuid?: string | null
     control_type?: string | null
   }) => {
-    if (relaisKaputt) throw new Error('Relais nicht erreichbar')
+    if (relaisKaputt || relaisScheitertWenn?.(payload)) throw new Error('Relais nicht erreichbar')
     const umschlag: Umschlag = {
       id: naechsteId++,
       mailboxId: payload.blind_mailbox_id,
@@ -125,6 +134,11 @@ vi.mock('@/api/social', () => ({
   },
   fetchE2eeEnvelopes: async (mid: string, seit = 0) =>
     mailbox.filter((u) => u.mailboxId === mid && u.id > seit),
+  // Der Lesepfad holt die Geräte-Mailbox vollständig, Seite für Seite.
+  fetchAlleE2eeEnvelopes: async (mid: string, seit = 0) => {
+    standAbrufe.push(seit)
+    return mailbox.filter((u) => u.mailboxId === mid && u.id > seit)
+  },
   // Die Mitgliederliste, wie der Server sie sieht. Absichtlich getrennt von der
   // Liste, die der Aufrufer im Kontext mitgibt: genau dieses Auseinanderlaufen
   // ist der Fall, den ein Nachzügler auslöst.
@@ -141,8 +155,10 @@ import {
   GRUPPE_PREFIX,
   abonniereBekannteGespraeche,
   dmZiele,
+  fordereDmGeheimnis,
   entschluesseleGruppenUmschlag,
   erzeugeGruppenSchluessel,
+  verteileOffeneZustellungenAller,
   fordereGruppenSchluessel,
   holeGeraeteSteuerung,
   gruppenZiele,
@@ -161,10 +177,21 @@ import {
   type GruppenGeheimnis,
   type GruppenKontext,
   type GruppenSchluesselEintrag,
+  type GruppenZustellung,
 } from './gruppenSchluessel'
 import { leereMailboxNachweise, mailboxNachweis } from './mailboxNachweis'
 import { signiereNutzlast } from './nutzlastSignatur'
 import { leereMailboxAbos, offeneMailboxAbos } from './mailboxAbo'
+import { MESSENGER_KEYS, getStorageItem, leereOfflineAblage } from '@/lib/offlineAblage'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+
+// Der Geräte-Cursor liegt kontogebunden in der Ablage. Zwischen zwei Tests
+// darf weder der Stand noch ein Konto stehenbleiben, sonst überspringt der
+// nächste Test genau die Umschläge, die er prüfen will.
+beforeEach(() => {
+  setzeAngemeldetesKonto(null)
+  leereOfflineAblage()
+})
 
 const ALICE = 1
 const BOB = 2
@@ -187,6 +214,7 @@ function neueAblage(): TestAblage {
   const beantwortet = new Set<string>()
   const geheimnisse = new Map<number, GruppenGeheimnis>()
   const dmGeheimnisse = new Map<number, DmGeheimnis>()
+  const zustellungen = new Map<string, GruppenZustellung>()
   return {
     async liesGeheimnis(groupId) {
       return geheimnisse.get(groupId) ?? null
@@ -203,14 +231,32 @@ function neueAblage(): TestAblage {
       if (dmGeheimnisse.has(eintrag.peerId)) return
       dmGeheimnisse.set(eintrag.peerId, eintrag)
     },
-    async merkeDmVerteilung(peerId, wann) {
-      // Wie die echte Ablage: nur die Marke, nie das Geheimnis.
+    async merkeDmVerteilung(peerId, wann, eigeneGeraete = []) {
+      // Wie die echte Ablage: nur die Marke und die Liste der eigenen Geräte,
+      // nie das Geheimnis. `verteiltAm` wird nicht zurückgenommen.
       const vorhanden = dmGeheimnisse.get(peerId)
-      if (!vorhanden || vorhanden.verteiltAm) return
-      dmGeheimnisse.set(peerId, { ...vorhanden, verteiltAm: wann })
+      if (!vorhanden) return
+      const bekannt = vorhanden.verteiltAn ?? []
+      const verteiltAn = [...new Set([...bekannt, ...eigeneGeraete])]
+      dmGeheimnisse.set(peerId, {
+        ...vorhanden,
+        verteiltAm: vorhanden.verteiltAm ?? wann,
+        verteiltAn,
+      })
     },
     async lies(groupId, keyId) {
       return keys.get(`${groupId}:${keyId}`) ?? null
+    },
+    async liesZustellungen(groupId) {
+      return [...zustellungen.values()].filter(
+        (z) => groupId === undefined || z.groupId === groupId,
+      )
+    },
+    async schreibeZustellung(eintrag) {
+      zustellungen.set(`${eintrag.groupId}:${eintrag.keyId}`, eintrag)
+    },
+    async loescheZustellung(groupId, keyId) {
+      zustellungen.delete(`${groupId}:${keyId}`)
     },
     async liesAktuellen(groupId) {
       const keyId = aktuelle.get(groupId)
@@ -237,6 +283,9 @@ function neueAblage(): TestAblage {
       geheimnisse.delete(groupId)
       for (const marke of [...beantwortet]) {
         if (marke.startsWith(`${groupId}:`)) beantwortet.delete(marke)
+      }
+      for (const [platz, wert] of [...zustellungen]) {
+        if (wert.groupId === groupId) zustellungen.delete(platz)
       }
     },
     anzahl: () => keys.size,
@@ -385,6 +434,7 @@ describe('gruppenSchluessel', () => {
     serverMitglieder = [...alle]
     relaisKaputt = false
     registrierungen.length = 0
+    standAbrufe.length = 0
     leereGeraeteStand()
   })
 
@@ -433,6 +483,37 @@ describe('gruppenSchluessel', () => {
     } finally {
       relaisKaputt = false
     }
+  })
+
+  it('liefert einem Gerät nach, das den Schlüssel zuerst nicht bekam', async () => {
+    /*
+     * Der Teilfehler, der bis 10/2026 still war: Bobs Gerät war beim
+     * Verteilen nicht erreichbar, und nur Bobs eigene Nachfrage holte den
+     * Schlüssel manchmal nach. Der Auftrag liegt jetzt dauerhaft, und der
+     * nächste Anlass liefert ihn.
+     */
+    relaisScheitertWenn = (p) => p.ciphertext_envelope.includes('pub-bob-handy')
+    try {
+      await sende(alice, alle, 'erst an Carol')
+    } finally {
+      relaisScheitertWenn = null
+    }
+
+    // Carol kann die Nachricht lesen, Bob noch nicht.
+    expect((await lies(carol, alle)).texte).toEqual(['erst an Carol'])
+    expect((await lies(bob, alle)).texte).toEqual([])
+
+    // Der Auftrag nennt genau das Gerät, das fehlte.
+    const offen = await alice.ablage.liesZustellungen(GRUPPE)
+    expect(offen).toHaveLength(1)
+    expect(offen[0].offen).toEqual([bob.kennung])
+
+    // Der nächste Anlass holt ihn nach — und danach ist der Auftrag erledigt.
+    aktiviere(alice)
+    await verteileOffeneZustellungenAller(ALICE)
+    expect(await alice.ablage.liesZustellungen(GRUPPE)).toHaveLength(0)
+
+    expect((await lies(bob, alle)).texte).toEqual(['erst an Carol'])
   })
 
   it('stellt den Schlüssel an jedes Gerät zu, und jeder öffnet genau seinen Umschlag', async () => {
@@ -1343,6 +1424,47 @@ describe('Zustellung über die Geräte-Mailbox', () => {
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
   })
 
+  it('rückt den Lesestand nicht über eine gescheiterte Verarbeitung', async () => {
+    /*
+     * Bis 10/2026 verschluckten die inneren `catch`-Zweige jeden
+     * Verarbeitungsfehler und setzten den Stand trotzdem auf die Kennung des
+     * Umschlags. Der äußere `angehalten`-Schutz sah davon nichts: die Wirkung
+     * lag hinter dem Cursor, wurde nie wieder versucht und war ohne Meldung
+     * verloren.
+     */
+    const empfangen: number[] = []
+    for (const nummer of [1, 2]) {
+      const payload = JSON.stringify({
+        type: 'reaction',
+        mailbox: 'dm:1:2',
+        actor_id: BOB,
+        emoji: nummer === 1 ? '👍' : '🎉',
+      })
+      mailbox.push({
+        id: naechsteId++,
+        mailboxId: 'dev:2',
+        ciphertext_envelope: `${HYBRID}${bob.oeffentlich}.${Buffer.from(payload, 'utf-8').toString('base64')}`,
+        client_uuid: `ctrl-${nummer}#own0`,
+        control_type: 'reaction',
+      })
+    }
+
+    aktiviere(bob)
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (_text, env) => {
+      if (env.id === 1) throw new Error('Ablage voll')
+      empfangen.push(env.id)
+    })
+    // Die zweite Wirkung lief weiter — ein Fehler hält die übrigen nicht auf.
+    expect(empfangen).toEqual([2])
+
+    // Der gescheiterte Umschlag kommt beim nächsten Durchlauf wieder.
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (_text, env) => {
+      empfangen.push(env.id)
+    })
+    expect(empfangen).toContain(1)
+    expect(empfangen.filter((id) => id === 1)).toHaveLength(1)
+  })
+
   it('geht über fremden Inhalt derselben Mailbox hinweg', async () => {
     /*
      * Die Geräte-Mailbox gehört nicht dem Messenger allein — Notizen und
@@ -1599,6 +1721,84 @@ describe('Chatgeheimnis des Direktchats', () => {
     expect(await dmZiele(ALICE, BOB, ALT, { erzeuge: true })).toEqual(beiAlice)
   })
 
+  it('holt ein eigenes Gerät nach, das erst nach der Zustellung dazukommt', async () => {
+    /*
+     * Der Kern von Problem B: bis 10/2026 bediente die Verteilung die eigenen
+     * Geräte genau einmal. `verteiltAm` stand danach, und ein später
+     * gekoppeltes Gerät las die neue Mailbox, ohne das Geheimnis je zu
+     * bekommen — jedes andere Gerät schrieb ausschließlich dorthin, und sein
+     * Verlauf blieb für immer leer.
+     */
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    // Nur ein eigenes Gerät (dieses hier): nichts nachzutragen.
+    expect((await alice.ablage.liesDmGeheimnis(BOB))?.verteiltAn ?? []).toEqual([])
+
+    // Alice koppelt ein zweites Gerät.
+    const aliceZweit = geraet(ALICE, 'alice-handy')
+    mailbox.length = 0
+
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    // Genau ein Umschlag, in die Geräte-Mailbox der eigenen Seite — und nicht
+    // ein zweiter an die Gegenstelle, die es längst hat.
+    expect(mailbox.map((u) => u.mailboxId)).toEqual(['dev:1'])
+    expect((await alice.ablage.liesDmGeheimnis(BOB))?.verteiltAn).toEqual([
+      aliceZweit.kennung,
+    ])
+
+    // Das neue Gerät kann es damit öffnen und landet auf derselben Mailbox.
+    aktiviere(aliceZweit)
+    expect(await holeGeraeteSteuerung(ALICE, entsiegleFuer(aliceZweit))).toBe(1)
+    expect(await dmZiele(ALICE, BOB, ALT)).toEqual(beiAlice)
+
+    // Und ein weiterer Versand schickt nichts mehr: es hat es jetzt.
+    aktiviere(alice)
+    mailbox.length = 0
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(mailbox).toHaveLength(0)
+  })
+
+  it('holt ein eigenes Gerät auch auf der grösseren Kontokennung nach', async () => {
+    /*
+     * Die Erzeugungsregel gilt fürs **Erzeugen**, nicht fürs Weiterreichen.
+     * Bob (die grössere Kennung) hat das Geheimnis von Alice bekommen; sein
+     * neu gekoppeltes Gerät braucht es von ihm. Bis 20.10.2026 trug der
+     * Umschlag dabei Bobs Kennung, sein eigenes Gerät wies ihn als „von der
+     * grösseren Kennung" ab — und weil Bob das Gerät trotzdem in `verteiltAn`
+     * vermerkte, versuchte es kein späterer Versand je wieder.
+     */
+    // Bobs Tablet ist noch nicht gekoppelt — es bekommt also nichts von Alice.
+    verzeichnis.set(
+      BOB,
+      (verzeichnis.get(BOB) ?? []).filter((g) => g.device_id !== bobZweit.kennung),
+    )
+
+    aktiviere(alice)
+    const beiAlice = await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    expect(await dmZiele(BOB, ALICE, ALT, { erzeuge: true })).toEqual(beiAlice)
+
+    // Erst jetzt koppelt Bob sein Tablet.
+    const tablett = geraet(BOB, 'bob-tablet')
+    mailbox.length = 0
+
+    await dmZiele(BOB, ALICE, ALT, { erzeuge: true })
+
+    // Genau ein Umschlag, an das eigene Gerät — und keiner an Alice.
+    expect(mailbox.map((u) => u.mailboxId)).toEqual(['dev:2'])
+    expect((await bob.ablage.liesDmGeheimnis(ALICE))?.verteiltAn).toEqual([
+      tablett.kennung,
+    ])
+
+    // Das neue Gerät nimmt es an und landet auf derselben Mailbox.
+    aktiviere(tablett)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(tablett))).toBe(1)
+    expect(await dmZiele(BOB, ALICE, ALT)).toEqual(beiAlice)
+  })
+
   it('hinterlegt den Besitznachweis auf der neuen Kennung, nie auf der alten', async () => {
     /*
      * Ein Nachweis auf der alten Kennung wäre der Fehler aus 3b: durch sie
@@ -1795,6 +1995,81 @@ describe('Chatgeheimnis des Direktchats', () => {
     expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(2)
     expect(await bob.ablage.liesAktuellen(GRUPPE)).not.toBeNull()
     expect(await bob.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
+  })
+
+  it('merkt sich den Lesestand der Geräte-Mailbox über einen Neustart', async () => {
+    // Bis 10/2026 lag der Cursor nur im Arbeitsspeicher. Nach jedem Öffnen las
+    // das Gerät wieder die ältesten 200 Umschläge und bekam die Schlüssel
+    // dahinter nie zu sehen.
+    setzeAngemeldetesKonto(BOB)
+    const alice = geraet(ALICE, 'alice-laptop')
+    const bob = geraet(BOB, 'bob-handy')
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+
+    aktiviere(bob)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(1)
+    const stand = Number(getStorageItem(MESSENGER_KEYS.GERAETE_STAND))
+    expect(stand).toBeGreaterThan(0)
+    expect(standAbrufe.at(-1)).toBe(0)
+
+    // Neustart: nur der Arbeitsspeicher fällt, die Ablage bleibt.
+    leereGeraeteStand()
+    standAbrufe.length = 0
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bob))).toBe(0)
+    expect(standAbrufe).toEqual([stand])
+  })
+
+  it('holt ein fehlendes Chatgeheimnis bei den eigenen Geschwistern nach', async () => {
+    // Ein frisch gekoppeltes Gerät kennt die neue Mailbox nicht. Ohne Nachfrage
+    // bliebe es für immer auf der alten, während die anderen längst in die
+    // neue schreiben.
+    const alice = geraet(ALICE, 'alice-laptop')
+    const bobHandy = geraet(BOB, 'bob-handy')
+    aktiviere(alice)
+    await dmZiele(ALICE, BOB, ALT, { erzeuge: true })
+    expect(await bobHandy.ablage.liesDmGeheimnis(ALICE)).toBeNull()
+
+    // Bobs Zweitgerät kommt später dazu und hat das Geheimnis nie gesehen.
+    const bobTablet = geraet(BOB, 'bob-tablet')
+    aktiviere(bobTablet)
+    expect(await fordereDmGeheimnis(BOB, ALICE)).toBe(true)
+
+    // Das Geschwister hat es und antwortet genau diesem Gerät.
+    aktiviere(bobHandy)
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bobHandy))
+
+    aktiviere(bobTablet)
+    expect(await holeGeraeteSteuerung(BOB, entsiegleFuer(bobTablet))).toBe(1)
+    expect(await bobTablet.ablage.liesDmGeheimnis(ALICE)).not.toBeNull()
+  })
+
+  it('reicht Wirkungen aus der Geräte-Mailbox an den Aufrufer weiter', async () => {
+    // Quittung, Bearbeitung, Löschung und Reaktion der eigenen Zweitgeräte
+    // reisen hierher. Der Aufrufer entscheidet an `mailbox`, ob sie zu seinem
+    // offenen Gespräch gehören.
+    const bob = geraet(BOB, 'bob-handy')
+    const payload = JSON.stringify({
+      type: 'reaction',
+      mailbox: 'dm:1:2',
+      actor_id: BOB,
+      emoji: '👍',
+    })
+    mailbox.push({
+      id: naechsteId++,
+      mailboxId: `dev:${BOB}`,
+      ciphertext_envelope: `${HYBRID}${bob.oeffentlich}.${Buffer.from(payload, 'utf-8').toString('base64')}`,
+      client_uuid: 'ctrl-1#own0',
+      control_type: 'reaction',
+    })
+
+    aktiviere(bob)
+    const empfangen: { text: string; id: number }[] = []
+    await holeGeraeteSteuerung(BOB, entsiegleFuer(bob), (text, env) => {
+      empfangen.push({ text, id: env.id })
+    })
+
+    expect(empfangen).toEqual([{ text: payload, id: 1 }])
   })
 })
 

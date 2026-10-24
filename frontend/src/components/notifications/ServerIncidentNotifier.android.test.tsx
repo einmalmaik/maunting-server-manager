@@ -23,10 +23,6 @@ vi.mock('@/lib/benachrichtigung', () => ({
 }))
 vi.mock('@/services/pushAbo', () => ({ abonniere: vi.fn(), kuendige: vi.fn() }))
 vi.mock('@/services/mailboxPush', () => ({ kuendigeMailboxPush: vi.fn().mockResolvedValue(undefined) }))
-vi.mock('@/services/deliveryReceiptService', () => ({
-  sendE2eeDeliveryReceipt: vi.fn(),
-  checkAndDispatchPendingDeliveryReceipts: vi.fn(),
-}))
 vi.mock('@/lib/offlineSync', () => ({
   loadCalendarEventsOfflineFirst: vi.fn(async () => ({ events: termine.liste, isOffline: false })),
 }))
@@ -39,6 +35,7 @@ vi.mock('@/stores/messengerNotificationStore', () => ({
     }),
   },
   playNotificationChime: vi.fn(),
+  chimeEntsperren: vi.fn(),
 }))
 
 import { ServerIncidentNotifier } from './ServerIncidentNotifier'

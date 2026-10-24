@@ -2,8 +2,11 @@ import { generateAesGcmKey } from '@msdis/shield/aead'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { setzeInhaltsSchluessel, setzeSiegelAktiv } from './lokaleVersiegelung'
+import i18n from '@/i18n'
 import {
   entferneLokaleNachricht,
+  entfernePlatzhalterUndDubletten,
+  istVerschluesselterPlatzhalter,
   loadLocalMessages,
   saveLocalMessages,
   schreibeNachrichtenBestandNeu,
@@ -21,6 +24,9 @@ import {
   speichereEntwurf,
   ladeEntwurf,
   ladeAlleEntwuerfe,
+  leseMedium,
+  loescheMedium,
+  speichereMedium,
   type LocalStoredMessage,
 } from './messengerLocalStore'
 
@@ -91,6 +97,9 @@ function installMockIndexedDb() {
         } else if (storeName === 'envelope_plaintexts') {
           // Zusammengesetzter Schlüssel wie im Schema: `[blindMailboxId, envelopeId]`.
           key = `${item.blindMailboxId}:${item.envelopeId}`
+        } else if (storeName === 'medien') {
+          // Eigener Schlüssel wie im Schema: die Medienkennung.
+          key = String(item.mediaId)
         } else {
           key = String(item.blindMailboxId)
         }
@@ -369,6 +378,24 @@ describe('messengerLocalStore (IndexedDB Chat Persistence & F5 Hydration)', () =
     expect(await leseUmschlagKlartext('box-klartext', 43)).toBeNull()
     expect(await leseUmschlagKlartext('box-anders', 42)).toBeNull()
     expect((await ladeUmschlagKlartexte('box-klartext')).get(42)).toBe('Hallo')
+  })
+
+  it('hält einen Anhang dauerhaft fest und gibt ihn wieder her', async () => {
+    /*
+     * Bis 10/2026 lag ein empfangenes Bild nur im Arbeitsspeicher. Nach dem
+     * Neuladen war es weg, und der Server behält den Blob nur 30 Tage — die
+     * Nachricht trägt keinen Inhalt, sondern einen Zeiger darauf.
+     */
+    const inhalt = 'data:image/png;base64,iVBORw0KGgo='
+    await speichereMedium('media-1', inhalt, 'bild.png')
+
+    expect(await leseMedium('media-1')).toBe(inhalt)
+    expect(await leseMedium('media-2')).toBeNull()
+
+    // Und weg mit ihm: das Löschen einer Nachricht muss auch ihren Anhang
+    // aus der Ablage nehmen.
+    await loescheMedium('media-1')
+    expect(await leseMedium('media-1')).toBeNull()
   })
 
   it('übersteht simulierten F5-Reload und stellt Verlauf ohne Keys neu einzugeben wieder her', async () => {
@@ -904,6 +931,91 @@ describe('Entwürfe je Chat', () => {
   })
 })
 
+describe('Platzhalter und Doppelungen in der Ablage', () => {
+  beforeEach(() => {
+    setzeAngemeldetesKonto(TEST_KONTO)
+    installMockIndexedDb()
+  })
+
+  const base = (ueber: Partial<LocalStoredMessage> & { id: number }): LocalStoredMessage => ({
+    senderId: 1,
+    text: '',
+    createdAt: '2026-10-01T12:00:00.000Z',
+    isSelf: false,
+    ...ueber,
+  })
+  const platzhalter = (id: number, uuid: string, senderId = 2) =>
+    base({ id, clientUuid: uuid, senderId, text: i18n.t('messenger.encryptedMessage') })
+
+  it('erkennt nur den Platzhalter, nicht eine echte Nachricht mit demselben Wortlaut', () => {
+    expect(istVerschluesselterPlatzhalter(platzhalter(1, 'a'))).toBe(true)
+    expect(istVerschluesselterPlatzhalter(platzhalter(2, 'b', 1))).toBe(true)
+    // Von mir, bearbeitet oder mit Anhang: eine echte Nachricht.
+    expect(istVerschluesselterPlatzhalter(platzhalter(3, 'c', 1))).toBe(true)
+    expect(
+      istVerschluesselterPlatzhalter({ ...platzhalter(4, 'd'), isSelf: true }),
+    ).toBe(false)
+    expect(
+      istVerschluesselterPlatzhalter({ ...platzhalter(5, 'e'), isEdited: true }),
+    ).toBe(false)
+    expect(
+      istVerschluesselterPlatzhalter({ ...platzhalter(6, 'f'), imageAttachment: { mediaId: 1 } }),
+    ).toBe(false)
+  })
+
+  it('zeigt einen Platzhalter nicht an', async () => {
+    const mid = 'box-platzhalter'
+    await saveLocalMessages(mid, [
+      platzhalter(1, 'a'),
+      base({ id: 2, clientUuid: 'b', text: 'echt' }),
+    ])
+    expect((await loadLocalMessages(mid)).map((m) => m.text)).toEqual(['echt'])
+  })
+
+  it('löscht einen Platzhalter nur, wenn die echte Zeile danebenliegt', async () => {
+    const mid = 'box-bereinigen'
+    // Mit der Gruppenart geschrieben: beide Absender bleiben als eigene Zeile
+    // stehen, genau wie es die alte Ablage getan hat.
+    await saveLocalMessages(
+      mid,
+      [platzhalter(1, 'gleiche-uuid', 2), base({ id: 2, clientUuid: 'gleiche-uuid', text: 'echt' })],
+      'gruppe',
+    )
+    expect(mockStores.get('messages')!.size).toBe(2)
+
+    expect(await entfernePlatzhalterUndDubletten(mid, 'direkt')).toEqual({
+      platzhalter: 1,
+      dubletten: 0,
+    })
+    expect(mockStores.get('messages')!.size).toBe(1)
+    expect((await loadLocalMessages(mid)).map((m) => m.text)).toEqual(['echt'])
+  })
+
+  it('lässt einen alleinstehenden Platzhalter liegen und blendet ihn nur aus', async () => {
+    const mid = 'box-einzeln'
+    await saveLocalMessages(mid, [platzhalter(1, 'allein')])
+
+    expect(await loadLocalMessages(mid)).toEqual([])
+    expect(await entfernePlatzhalterUndDubletten(mid, 'direkt')).toEqual({
+      platzhalter: 0,
+      dubletten: 0,
+    })
+    expect(mockStores.get('messages')!.size).toBe(1)
+  })
+
+  it('legt bestätigte Doppelungen auf eine Zeile zusammen', async () => {
+    const mid = 'box-dublette'
+    await saveLocalMessages(mid, [
+      base({ id: 10, clientUuid: 'doppelt', text: 'erste Fassung' }),
+      base({ id: 11, clientUuid: 'doppelt', text: 'zweite Fassung' }),
+    ])
+
+    const geladen = await loadLocalMessages(mid)
+    expect(geladen).toHaveLength(1)
+    expect(geladen[0].text).toBe('zweite Fassung')
+  })
+})
+
 describe('mischeVerlauf', () => {
   const nachricht = (
     ueber: Partial<LocalStoredMessage> & { id: number }
@@ -970,7 +1082,31 @@ describe('mischeVerlauf', () => {
     expect(zusammen[0].text).toBe('neu')
   })
 
-  it('überschreibt keine Nachricht eines anderen Absenders mit gleicher clientUuid', () => {
+  it('legt im Direktchat die Kopie beider Absender auf eine Zeile zusammen', () => {
+    // Dieselbe Nachricht liegt einmal als eigene Kopie und einmal als die des
+    // Gegenübers vor — gleicher `clientUuid`, anderer `senderId`. Mit dem
+    // Absender im Schlüssel blieben beide stehen, und genau so überlebte der
+    // Platzhalter (Absender = Gegenüber oder 0) neben der echten Zeile.
+    const lokal = [
+      nachricht({
+        id: 10,
+        senderId: 2,
+        clientUuid: 'gleiche-uuid',
+        text: 'Nachricht von mir',
+        isSelf: true,
+      }),
+    ]
+    const frisch = [
+      nachricht({ id: 11, senderId: 1, clientUuid: 'gleiche-uuid', text: 'Nachricht von mir' }),
+    ]
+
+    const zusammen = mischeVerlauf(lokal, frisch, 'direkt')
+    expect(zusammen).toHaveLength(1)
+  })
+
+  it('trennt in einer Gruppe weiterhin nach Absender', () => {
+    // In einer Gruppe trägt jede Nachricht ihre eigene logische Kennung; zwei
+    // Menschen mit derselben dürfen trotzdem nicht auf eine Zeile fallen.
     const lokal = [
       nachricht({
         id: 10,
@@ -990,10 +1126,32 @@ describe('mischeVerlauf', () => {
       }),
     ]
 
-    const zusammen = mischeVerlauf(lokal, frisch)
+    const zusammen = mischeVerlauf(lokal, frisch, 'gruppe')
     expect(zusammen).toHaveLength(2)
     expect(zusammen.find((m) => m.senderId === 1)?.text).toBe('Nachricht von Opfer')
     expect(zusammen.find((m) => m.senderId === 2)?.text).toBe('Nachricht von Angreifer')
+  })
+
+  it('lässt die echte Zeile den Platzhalter verdrängen', () => {
+    const platzhalter = nachricht({
+      id: 20,
+      senderId: 2,
+      clientUuid: 'gleiche-uuid',
+      text: 'Verschlüsselte Nachricht',
+    })
+    const echt = nachricht({
+      id: 21,
+      senderId: 1,
+      clientUuid: 'gleiche-uuid',
+      text: 'der echte Text',
+      isRead: true,
+    })
+
+    const zusammen = mischeVerlauf([platzhalter], [echt], 'direkt')
+    expect(zusammen).toHaveLength(1)
+    expect(zusammen[0].text).toBe('der echte Text')
+    // Was nur der Verlierer kennt, kommt mit.
+    expect(zusammen[0].isRead).toBe(true)
   })
 })
 

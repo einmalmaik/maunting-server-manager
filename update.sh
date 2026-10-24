@@ -177,9 +177,28 @@ if [[ -f "$ENV_FILE" ]]; then
     AUTO_UPDATE=$(grep -E '^MSM_AUTO_UPDATE=' "$ENV_FILE" | cut -d'=' -f2 || echo "false")
 fi
 
-GITHUB_OWNER="${GITHUB_OWNER:-einmalmaik}"
-GITHUB_REPO="${GITHUB_REPO:-maunting-server-manager}"
+GITHUB_OWNER="${GITHUB_OWNER:-mauntingstudios}"
+GITHUB_REPO="${GITHUB_REPO:-maunting-service-manager}"
 AUTO_UPDATE="${AUTO_UPDATE:-false}"
+
+# Umzug des offiziellen Repos (10/2026): bestehende .env-Dateien tragen noch
+# den alten Owner und den alten Repo-Namen. Nur die exakten alten offiziellen
+# Werte werden ersetzt; ein bewusst eingetragener Fork bleibt unangetastet.
+if [[ "$GITHUB_OWNER" == "einmalmaik" || "$GITHUB_REPO" == "maunting-server-manager" ]]; then
+    if [[ "$GITHUB_OWNER" == "einmalmaik" ]]; then
+        GITHUB_OWNER="mauntingstudios"
+        if [[ -f "$ENV_FILE" ]]; then
+            sed -i 's#^MSM_GITHUB_OWNER=.*#MSM_GITHUB_OWNER="mauntingstudios"#' "$ENV_FILE" 2>/dev/null || true
+        fi
+    fi
+    if [[ "$GITHUB_REPO" == "maunting-server-manager" ]]; then
+        GITHUB_REPO="maunting-service-manager"
+        if [[ -f "$ENV_FILE" ]]; then
+            sed -i 's#^MSM_GITHUB_REPO=.*#MSM_GITHUB_REPO="maunting-service-manager"#' "$ENV_FILE" 2>/dev/null || true
+        fi
+    fi
+    log "Offizielles Repository umgestellt: $GITHUB_OWNER/$GITHUB_REPO"
+fi
 
 SYSTEMD_AVAILABLE=false
 if [[ -d /run/systemd/system ]] && command -v systemctl &>/dev/null; then

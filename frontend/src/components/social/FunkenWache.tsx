@@ -79,6 +79,10 @@ function DirektWache({ partnerId, eigeneId, identitaetRef }: WacheProps) {
         }
         versuche = 0
         const ereignisse = await werteAugenblickeAus(gelesen, { mid, ich: eigeneId, partner: partnerId })
+        // Diese Wache liest nur mit; der Stand gehört ihr allein (eigener
+        // `useKonversation`). Erst nach dem Auswerten übernehmen, sonst gingen
+        // Augenblicke verloren, falls `nimmAuf` wirft.
+        konversation.uebernimmLesestand(gelesen)
         if (lebt && ereignisse.length) await useFunkenStore.getState().nimmAuf(partnerId, ereignisse)
         await frageKennungen()
       } finally {

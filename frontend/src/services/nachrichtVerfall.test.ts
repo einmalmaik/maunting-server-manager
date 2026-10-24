@@ -14,13 +14,29 @@ vi.mock('./messengerLocalStore', () => ({
   loadLocalMessages: vi.fn(async () => []),
 }))
 vi.mock('./nachrichtLoeschen', () => ({
-  tilgeNachrichtBeimServer: vi.fn(async () => {}),
+  baueLoeschauftrag: vi.fn(
+    (mailbox: string, msg: { id: number; clientUuid?: string }, fremd: boolean) => ({
+      id: `${mailbox}:${msg.clientUuid ?? `#${msg.id}`}:eigen`,
+      mailbox,
+      clientUuid: msg.clientUuid ?? null,
+      nachrichtId: msg.id,
+      medien: [],
+      fremd,
+      angelegtAm: 0,
+      versuche: 0,
+      naechsterVersuch: 0,
+    }),
+  ),
   tilgeNachrichtLokal: vi.fn(async () => {}),
+}))
+vi.mock('./loeschNachholen', () => ({
+  merkeUndRaeumeServerkopien: vi.fn(async () => {}),
 }))
 
 import type { ChatGroupItem } from '@/api/social'
 import { listeLokaleMailboxen, loadLocalMessages } from './messengerLocalStore'
-import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoeschen'
+import { baueLoeschauftrag, tilgeNachrichtLokal } from './nachrichtLoeschen'
+import { merkeUndRaeumeServerkopien } from './loeschNachholen'
 import {
   durfteVerfallStellen,
   faelligeZeilen,
@@ -134,13 +150,49 @@ describe('Durchgang über alle Chats', () => {
     )
 
     expect(await raeumeAlleChats()).toBe(4)
-    // Lokal geht alles Fällige weg, beim Server nur das eigene: mehr darf
-    // keine der beiden Seiten, und zusammen ist danach nichts mehr da.
+    // Lokal geht alles Fällige weg; beim Server räumt nur, wer selbst gesendet
+    // hat. Der Serverteil läuft als dauerhafter Auftrag, nicht als einzelner
+    // Best-Effort-Aufruf.
     expect(vi.mocked(tilgeNachrichtLokal)).toHaveBeenCalledTimes(4)
-    expect(vi.mocked(tilgeNachrichtBeimServer)).toHaveBeenCalledTimes(2)
-    for (const [, msg] of vi.mocked(tilgeNachrichtBeimServer).mock.calls) {
+    expect(vi.mocked(baueLoeschauftrag)).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(merkeUndRaeumeServerkopien)).toHaveBeenCalledTimes(2)
+    for (const [, msg] of vi.mocked(baueLoeschauftrag).mock.calls) {
       expect((msg as { isSelf: boolean }).isSelf).toBe(true)
     }
+  })
+
+  it('löscht lokal auch dann, wenn das Serveraufräumen scheitert', async () => {
+    vi.mocked(listeLokaleMailboxen).mockResolvedValue(['mb-a'])
+    vi.mocked(loadLocalMessages).mockResolvedValue([
+      { id: 1, clientUuid: 'eigen', verfaelltAm: '2020-01-01T00:00:00.000Z', isSelf: true },
+    ] as never)
+    vi.mocked(merkeUndRaeumeServerkopien).mockRejectedValueOnce(new Error('Netz weg'))
+
+    // Der Plan (§10): lokales Löschen hängt nicht am Servererfolg.
+    expect(await raeumeAlleChats()).toBe(1)
+    expect(vi.mocked(tilgeNachrichtLokal)).toHaveBeenCalledTimes(1)
+  })
+
+  it('baut den Auftrag, solange die Zeile noch ihre Medienzeiger trägt', async () => {
+    vi.mocked(listeLokaleMailboxen).mockResolvedValue(['mb-a'])
+    vi.mocked(loadLocalMessages).mockResolvedValue([
+      {
+        id: 1,
+        clientUuid: 'eigen',
+        verfaelltAm: '2020-01-01T00:00:00.000Z',
+        isSelf: true,
+        imageAttachment: { mediaId: 'm-1', name: 'a.png' },
+      },
+    ] as never)
+
+    await raeumeAlleChats()
+
+    expect(vi.mocked(baueLoeschauftrag).mock.calls[0][1]).toMatchObject({
+      imageAttachment: { mediaId: 'm-1' },
+    })
+    expect(vi.mocked(baueLoeschauftrag).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(tilgeNachrichtLokal).mock.invocationCallOrder[0],
+    )
   })
 
   it('macht mit dem nächsten Chat weiter, wenn einer nicht lesbar ist', async () => {

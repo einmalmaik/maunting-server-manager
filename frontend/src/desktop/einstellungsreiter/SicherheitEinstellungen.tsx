@@ -8,6 +8,7 @@
 import { useTranslation } from 'react-i18next'
 
 import { MessengerSicherheitTab } from '@/pages/profile/MessengerSicherheitTab'
+import { GeraeteKarten } from '@/pages/profile/DevicesTab'
 import { TresorSicherheitTab } from '../vault/TresorSicherheitTab'
 import { usePublicSettingsStore } from '@/stores/publicSettingsStore'
 
@@ -39,6 +40,19 @@ export function SicherheitEinstellungen({
             {t('mss.einstellungen.sicherheit.messenger')}
           </h2>
           <MessengerSicherheitTab />
+        </section>
+      )}
+      {/*
+        Geräte gehören hierher, nicht nur ins Profil: wer in MSS oder im
+        Pondys Browser nachsieht, welches Gerät seine Nachrichten bekommt und
+        wie es entfernt wird, sucht unter Sicherheit.
+      */}
+      {social && (
+        <section aria-labelledby="sicherheit-geraete" className="flex flex-col gap-3 pt-2">
+          <h2 id="sicherheit-geraete" className={GRUPPENTITEL}>
+            {t('mss.einstellungen.sicherheit.geraete')}
+          </h2>
+          <GeraeteKarten social={social} />
         </section>
       )}
       {tresorAn && (

@@ -190,38 +190,78 @@ function calcTotal(unread: Record<string, number>, mutes: Record<string, number>
  * Erzeugt einen kristallklaren, unaufdringlichen Zweiton-Glockenklang (880 Hz -> 1320 Hz)
  * ohne externe Audio-Dateien oder Netzwerklatenz.
  */
-export function playNotificationChime() {
-  if (typeof window === 'undefined') return
-  try {
-    const AudioContextClass =
-      window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-    if (!AudioContextClass) return
-    const ctx = new AudioContextClass()
-    if (ctx.state === 'suspended') {
-      void ctx.resume()
+let chimeKontext: AudioContext | null = null
+let chimeEntsperrungEingerichtet = false
+
+function holeChimeKontext(): AudioContext | null {
+  if (typeof window === 'undefined') return null
+  const AudioContextClass =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextClass) return null
+  if (!chimeKontext || chimeKontext.state === 'closed') {
+    chimeKontext = new AudioContextClass()
+  }
+  return chimeKontext
+}
+
+/**
+ * Beim ersten Nutzergriff aufrufen.
+ *
+ * Ein Browser hebt die Autoplay-Sperre nur in einer echten Geste auf. Der
+ * Aufruf richtet die beiden Listener einmal ein; danach darf der Kontext
+ * weiterverwendet werden. Ohne diesen Schritt blieb der erste Ton nach dem
+ * Start stumm.
+ */
+export function chimeEntsperren(): void {
+  if (typeof window === 'undefined' || chimeEntsperrungEingerichtet) return
+  chimeEntsperrungEingerichtet = true
+  const entsperren = () => {
+    const ctx = holeChimeKontext()
+    if (ctx?.state === 'suspended') void ctx.resume().catch(() => {})
+    window.removeEventListener('pointerdown', entsperren, true)
+    window.removeEventListener('keydown', entsperren, true)
+  }
+  window.addEventListener('pointerdown', entsperren, true)
+  window.addEventListener('keydown', entsperren, true)
+}
+
+export function playNotificationChime(): void {
+  const ctx = holeChimeKontext()
+  if (!ctx) return
+
+  const spielen = () => {
+    try {
+      const now = ctx.currentTime
+
+      // Oszillator: Grundton A5 (880 Hz) gleitet kurz auf E6 (1320 Hz)
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(880, now)
+      osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09)
+
+      // Sanfte Lautstärken-Hüllkurve
+      gain.gain.setValueAtTime(0.18, now)
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42)
+
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+
+      osc.start(now)
+      osc.stop(now + 0.43)
+    } catch {
+      // Stiller Fallback bei blockiertem AudioContext
     }
+  }
 
-    const now = ctx.currentTime
-
-    // Oszillator: Grundton A5 (880 Hz) gleitet kurz auf E6 (1320 Hz)
-    const osc = ctx.createOscillator()
-    const gain = ctx.createGain()
-
-    osc.type = 'sine'
-    osc.frequency.setValueAtTime(880, now)
-    osc.frequency.exponentialRampToValueAtTime(1320, now + 0.09)
-
-    // Sanfte Lautstärken-Hüllkurve
-    gain.gain.setValueAtTime(0.18, now)
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42)
-
-    osc.connect(gain)
-    gain.connect(ctx.destination)
-
-    osc.start(now)
-    osc.stop(now + 0.43)
-  } catch {
-    // Stiller Fallback bei blockiertem AudioContext
+  // Erst nach dem Aufheben der Sperre planen: ein sofort geplanter Oszillator
+  // verfällt, während `resume()` noch läuft.
+  if (ctx.state === 'suspended') {
+    ctx.resume().then(spielen).catch(() => {})
+  } else {
+    spielen()
   }
 }
 

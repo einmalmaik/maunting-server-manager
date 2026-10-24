@@ -44,11 +44,13 @@ vi.mock('@/services/messengerLocalStore', () => ({
   loadLocalMessages: async () => [{ id: 1, text: 'Hallo Anna', createdAt: '2026-09-27T10:00:00Z' }],
   ladeAlleEntwuerfe: async () => ({}),
   ladeFunkenAkten: async () => [],
+  listeMedien: vi.fn(async () => [] as { mediaId: string; name: string | null; klartext: string }[]),
 }))
 vi.mock('@/services/gespraechsListe', () => ({ ladeGespraeche: async () => new Map() }))
 vi.mock('@/services/gruppenName', () => ({ ladeGruppenNamen: async () => new Map() }))
 
 import { exportErstellen } from './datenexport'
+import { listeMedien } from '@/services/messengerLocalStore'
 
 function paket() {
   return {
@@ -130,6 +132,19 @@ describe('exportErstellen', () => {
     const offenerTresor = await exportErstellen({}, { entsperrt: true, eintraege: eintraegeTresor })
     expect(offenerTresor.tresor).toBe('enthalten')
     expect(inhalt('tresor/eintraege.json')).toEqual([{ service: 'Bank', password: 'pw' }])
+  })
+
+  it('nimmt die Anhänge dieses Geräts mit', async () => {
+    // Der Anhang liegt seit 10/2026 dauerhaft in der Ablage des Kontos. Ein
+    // Export, der den Verlauf mitnimmt und die Bilder weglässt, wäre
+    // unvollständig, ohne es zu sagen.
+    vi.mocked(listeMedien).mockResolvedValueOnce([
+      { mediaId: 'media-1', name: 'bild.png', klartext: 'data:image/png;base64,aGk=' },
+    ])
+    const ergebnis = await exportErstellen({})
+    expect(ergebnis).toBeTruthy()
+    expect(datei('geraet/messenger/medien/media-1')?.inhalt).toBeInstanceOf(Uint8Array)
+    expect(inhalt('geraet/messenger/medien.json')).toEqual([{ mediaId: 'media-1', name: 'bild.png' }])
   })
 
   it('bricht ab, wenn während der Anfrage ein anderes Konto angemeldet wurde', async () => {

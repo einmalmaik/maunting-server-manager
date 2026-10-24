@@ -234,22 +234,38 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          feed_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json")] | last | .url // empty')"
+          # Neueste Veroeffentlichung mit MSS-Feed, ueber alle Seiten.
+          #
+          # `--paginate` wendet `--jq` je Seite an, und `last` gibt dort den
+          # aeltesten Eintrag der Seite zurueck. Mit Vorgaenger und aktuellem
+          # Tag im Feed verglich ein zweiter Lauf fuer denselben Tag deshalb mit
+          # dem Vorgaenger und baute ein Delta gegen den falschen Stand
+          # (20.10.2026). Sortiert wird nach `published_at`, nicht nach der
+          # Reihenfolge der Seiten.
+          feed_releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.mss.json")) | [.published_at, .tag_name, (.assets[] | select(.name == "releases.mss.json") | .url)] | @tsv')"
+          neueste="$(printf '%s\n' "$feed_releases" | sort | tail -1)"
+          feed_asset="$(printf '%s' "$neueste" | cut -f3)"
           if [[ -n "$feed_asset" ]]; then
-            feed_version="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.mss.json"))] | last | .tag_name // empty' | sed 's/^v//')"
+            feed_tag="$(printf '%s' "$neueste" | cut -f2)"
+            feed_version="$(printf '%s' "$feed_tag" | sed 's/^v//')"
             [[ -n "$feed_version" ]] || { echo "Version des MSS-Feeds fehlt." >&2; exit 1; }
             # Ein zweiter Lauf fuer denselben Tag findet das eigene Paket als
             # "vorheriges"; vpk pack bricht dann mit "exists" ab (20.10.2026).
             if [[ "$feed_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
               mkdir -p smart-system-velopack
               gh api "$feed_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json
-              feed_sig_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json.sig")] | last | .url // empty')"
+              # Signatur aus **demselben** Release wie der Feed. Bis 10/2026
+              # kam sie aus dem aeltesten Treffer der Seite; passt sie nicht
+              # zum Feed, verwirft der Updater das Update.
+              feed_sig_asset="$(gh release view "$feed_tag" --json assets \
+                --jq '.assets[] | select(.name == "releases.mss.json.sig") | .url')"
               [[ -n "$feed_sig_asset" ]] || { echo "Vorhandene MSS-Feed-Signatur fehlt." >&2; exit 1; }
               gh api "$feed_sig_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json.sig
               # vpk 1.2 kennt kein --release; github laedt die neueste
               # veroeffentlichte Fassung des Kanals. Der Feed oben stammt aus
               # demselben Release, deshalb passen Delta und Vollpaket zusammen.
-              vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss"
+              vpk download github --repoUrl "https://github.com/mauntingstudios/maunting-service-manager" --outputDir "smart-system-velopack" --channel "mss"
             else
               echo "Der MSS-Feed im Release ist bereits diese Version; das Paket wird ohne Delta gebaut."
             fi

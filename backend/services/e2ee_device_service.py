@@ -40,6 +40,17 @@ MAX_GERAETE = 10
 MAX_BEZEICHNUNG = 64
 MAX_KENNUNG = 64
 
+# Der Name, den ein Browser-Login ohne eigene Bezeichnung bekommt.
+#
+# Wer sich im Panel anmeldet, tippt keinen Geraetenamen ein, und eine
+# Kopplungseinladung gibt es dafuer auch nicht. Bis 10/2026 blieb `label`
+# deshalb leer, und das Web-Frontend stand auf jedem anderen Geraet als
+# „Unbenanntes Geraet" — nicht von einem Menschen gewaehlt, sondern die
+# Auskunft, dass niemand einen Namen vergeben hat. Der Name ist Produkt, kein
+# Satz: er steht in der Datenbank und wird auch in der englischen Oberflaeche
+# so angezeigt (dieselbe Zeichenkette in `geraeteBezeichnung.ts`).
+STANDARD_BEZEICHNUNG = "Web-Frontend"
+
 
 def _jetzt() -> datetime:
     return datetime.now(timezone.utc)
@@ -68,6 +79,8 @@ def veroeffentlichen(
     label: str = "",
     signing_public_key_jwk: str = "",
     familie: str | None = None,
+    self_signature: str = "",
+    inbox_hash: str = "",
 ) -> UserE2eeDevice:
     """Legt den Schluessel dieses Geraets ab oder frischt ihn auf.
 
@@ -83,6 +96,15 @@ def veroeffentlichen(
 
     `familie` ist die Sitzungskette der Anfrage. Sie wird am Geraet vermerkt,
     damit Entfernen genau diese Sitzung aussperren kann.
+
+    `self_signature` ist die Unterschrift des Geraets ueber seine eigene
+    Freigabe (`_selbst_beglaubigen`). Sie wird nur eingetragen, solange das
+    Geraet freigegeben ist — ein wartendes hat nichts zu beglaubigen.
+
+    `inbox_hash` ist die opake Zustelladresse des Geraets. Sie entsteht aus
+    einem Geheimnis, das nur das Geraet kennt; der Server kann sie nicht
+    nachrechnen. Leer heisst: das Geraet benutzt den alten Weg (geteilte
+    Mailbox) und kennt die Zustellung mit Quittung nicht.
     """
     from schemas.social import validate_ecdsa_public_key_jwk, validate_rsa_public_key_jwk
 
@@ -97,7 +119,11 @@ def veroeffentlichen(
 
     bestand = _geraet(db, user.id, kennung)
     if bestand is not None:
-        return _auffrischen(db, user, bestand, public_key_jwk, signatur, label, familie)
+        eintrag = _auffrischen(
+            db, user, bestand, public_key_jwk, signatur, label, familie, self_signature
+        )
+        _inbox_merken(db, eintrag, inbox_hash)
+        return eintrag
 
     _deckel_einhalten(db, user)
 
@@ -109,12 +135,18 @@ def veroeffentlichen(
         device_id=kennung,
         public_key_jwk=public_key_jwk,
         signing_public_key_jwk=signatur or None,
-        label=((label or "").strip() or _name_der_einladung(db, user.id, familie))[:MAX_BEZEICHNUNG],
+        label=(
+            (label or "").strip()
+            or _name_der_einladung(db, user.id, familie)
+            or STANDARD_BEZEICHNUNG
+        )[:MAX_BEZEICHNUNG],
         is_approved=_freigegebene(db, user.id).count() == 0,
         auth_family=familie or None,
         created_at=_jetzt(),
         last_seen_at=_jetzt(),
     )
+    if eintrag.is_approved and self_signature:
+        _selbst_beglaubigen(eintrag, user.id, self_signature)
     db.add(eintrag)
     try:
         db.commit()
@@ -134,10 +166,58 @@ def veroeffentlichen(
         bestand = _geraet(db, user.id, kennung)
         if bestand is None:
             raise
-        return _auffrischen(db, user, bestand, public_key_jwk, signatur, label, familie)
+        eintrag = _auffrischen(
+            db, user, bestand, public_key_jwk, signatur, label, familie, self_signature
+        )
+        _inbox_merken(db, eintrag, inbox_hash)
+        return eintrag
     db.refresh(eintrag)
+    _inbox_merken(db, eintrag, inbox_hash)
     _verzeichnis_geaendert(user.id)
     return eintrag
+
+
+def _inbox_merken(db: Session, eintrag: UserE2eeDevice, inbox_hash: str) -> None:
+    """Traegt die Zustelladresse des Geraets ein (oder laesst sie weg).
+
+    Leer heisst: das Geraet benutzt den alten Weg. Es wird **nicht**
+    nachgetragen — ein Geraet, das seine Adresse nicht kennt, soll keine
+    bekommen.
+    """
+    if not (inbox_hash or "").strip():
+        return
+    from services.social import zustellung
+
+    zustellung.inbox_registrieren(db, eintrag, inbox_hash.strip())
+
+
+def _selbst_beglaubigen(eintrag: UserE2eeDevice, user_id: int, signatur: str | None) -> bool:
+    """Traegt die Selbst-Signatur eines Erstgeraets ein, wenn sie stimmt.
+
+    Das erste Geraet eines Kontos gibt sich selbst frei — es gibt niemanden,
+    der es freigeben koennte. Bis 10/2026 blieben `approved_by` und
+    `approval_signature` dabei leer, und die Clients, die statt `is_approved`
+    die Unterschrift pruefen, sahen „freigegeben, aber ohne gueltige Freigabe".
+    Jetzt steht die Unterschrift darunter, und beides sagt dasselbe.
+
+    **Eine Selbst-Signatur belegt nichts ueber ein Gegenueber** — nur das
+    Geraet selbst kennt seinen Schluessel. Sie ist deshalb ausdruecklich
+    ersetzbar: sobald ein freigegebenes Geraet die Freigabe unterschreibt,
+    ueberschreibt `bestaetigen` sie.
+
+    Stimmt die Unterschrift nicht, bleibt das Feld leer statt abgelehnt: sie
+    ist Beiwerk zur Freigabe, kein Zugang.
+    """
+    if not signatur or not eintrag.signing_public_key_jwk:
+        return False
+    daten = freigabe_daten(
+        user_id, eintrag.device_id, eintrag.public_key_jwk, eintrag.signing_public_key_jwk
+    )
+    if not _pruefe_signatur(daten, eintrag.signing_public_key_jwk, signatur):
+        return False
+    eintrag.approved_by = eintrag.device_id
+    eintrag.approval_signature = signatur
+    return True
 
 
 def _verzeichnis_geaendert(user_id: int) -> None:
@@ -195,17 +275,34 @@ def _auffrischen(
     signatur: str,
     label: str,
     familie: str | None,
+    self_signature: str = "",
 ) -> UserE2eeDevice:
     """Frischt einen Eintrag auf. Ein neuer Schluessel verliert die Freigabe.
 
     Wer das Passwort hat, kann unter jeder bekannten Kennung neue Schluessel
     ablegen. Gaelte die alte Freigabe weiter, schriebe ihm jedes Gegenueber.
-    Dazu zaehlt auch ein nachgereichter Signaturschluessel: die Freigabe
+    Dazu zaehlt auch ein **ersetzter** Signaturschluessel: die Freigabe
     unterschreibt beide Schluessel, und ein neuer ist durch sie nicht gedeckt.
     Einen neuen Schluessel legt nur die Sitzung ab, an die das Geraet
-    gebunden ist. Ohne ein anderes freigegebenes Geraet bleibt die Freigabe —
-    sonst kaeme das einzige Geraet eines Kontos nie wieder hinein; die
-    Gegenueber sehen den Wechsel dann als Warnung.
+    gebunden ist.
+
+    **Die Freigabe bleibt nie mehr stehen, auch nicht beim einzigen Geraet.**
+    Bis 10/2026 galt hier eine Ausnahme: gab es kein anderes freigegebenes
+    Geraet, blieb `is_approved = true` — sonst kaeme das einzige Geraet nie
+    wieder hinein. Genau daraus entstand der Widerspruch aus dem Fehlerbericht:
+    die Liste zeigte „freigegeben", obwohl keine Unterschrift mehr existierte,
+    und jedes Gegenueber warnte „es bekommt nichts". Jetzt ist der Eintrag
+    ehrlich wartend, und der Weg zurueck steht in `wieder_freigeben` — mit
+    frischem Nachweis statt mit einem stehengebliebenen Wort.
+
+    **Auch ein nachgereichter Signaturschluessel ist ein Wechsel.** Er ist der
+    bequeme Weg, sich Freigaberecht zu verschaffen: wer das Token dieses Geraets
+    hat, legt unter derselben Kennung seinen eigenen Signaturschluessel ab und
+    unterschreibt damit Freigaben fuer weitere Geraete. Eine Ausnahme fuer den
+    Altbestand (Feld war leer) gab es kurz und sie war genau das Loch — ein
+    abgegriffenes Token wurde damit zur Freigabeinstanz. Der Preis ist eine
+    einmalige Nachbestaetigung fuer Geraete von vor 09/2026; sie laeuft ueber
+    `wieder_freigeben` oder die Unterschrift eines freigegebenen Geraets.
     """
     neuer_schluessel = bestand.public_key_jwk != public_key_jwk or (
         bool(signatur) and (bestand.signing_public_key_jwk or "") != signatur
@@ -229,24 +326,37 @@ def _auffrischen(
     if neuer_schluessel:
         bestand.approved_by = None
         bestand.approval_signature = None
-        andere = _freigegebene(db, user.id).filter(UserE2eeDevice.id != bestand.id).count()
-        if andere > 0:
-            bestand.is_approved = False
+        bestand.is_approved = False
     vorher = (bestand.public_key_jwk, bestand.signing_public_key_jwk, bestand.label, bestand.is_approved)
     bestand.public_key_jwk = public_key_jwk
     if signatur:
         bestand.signing_public_key_jwk = signatur
     if label.strip():
         bestand.label = label.strip()[:MAX_BEZEICHNUNG]
-    elif not bestand.label:
-        bestand.label = _name_der_einladung(db, user.id, familie)[:MAX_BEZEICHNUNG]
+    elif not bestand.label or bestand.label == STANDARD_BEZEICHNUNG:
+        # Auch der Standardname gilt hier als „noch nichts gewaehlt": ein
+        # Geraet, das sich vor seiner Einladung gemeldet hat, bekommt den Namen
+        # der Einladung, sobald es mit deren Sitzungskette wiederkommt. Ein von
+        # Hand vergebener Name wird nie ueberschrieben.
+        gewaehlt = _name_der_einladung(db, user.id, familie)
+        if gewaehlt:
+            bestand.label = gewaehlt[:MAX_BEZEICHNUNG]
+        elif not bestand.label:
+            bestand.label = STANDARD_BEZEICHNUNG
     if familie:
         bestand.auth_family = familie
+    if bestand.is_approved and not bestand.approval_signature and self_signature:
+        _selbst_beglaubigen(bestand, user.id, self_signature)
     bestand.last_seen_at = _jetzt()
     db.commit()
     db.refresh(bestand)
     # Jeder Start meldet sich neu; das allein ist keine Aenderung der Liste.
-    if vorher != (bestand.public_key_jwk, bestand.signing_public_key_jwk, bestand.label, bestand.is_approved):
+    if vorher != (
+        bestand.public_key_jwk,
+        bestand.signing_public_key_jwk,
+        bestand.label,
+        bestand.is_approved,
+    ):
         _verzeichnis_geaendert(user.id)
     return bestand
 
@@ -296,15 +406,36 @@ def _deckel_einhalten(db: Session, user: User) -> None:
         raise GeraetedeckelErreichtError()
 
 
-def eintrag_als_dict(e: UserE2eeDevice) -> dict:
+def eintrag_als_dict(e: UserE2eeDevice, db: Session | None = None) -> dict:
+    """Der Eintrag, wie er im Verzeichnis herauskommt.
+
+    `db` wird gebraucht, um die Zustelladresse des Geraets zu finden. Ohne
+    Sitzung (etwa in einem Aufruf ohne Datenbank) bleibt das Feld leer — der
+    Eintrag nennt dann nur, was ohnehin am Geraet steht.
+    """
+    inbox_hash = ""
+    transport = ""
+    if db is not None:
+        from services.social import zustellung
+
+        inbox = zustellung.inbox_von_geraet(db, e.id)
+        if inbox is not None:
+            inbox_hash = inbox.inbox_hash
+            transport = "geraet-v1"
     return {
+        "id": e.id,
         "device_id": e.device_id,
         "public_key": e.public_key_jwk,
         "signing_public_key": e.signing_public_key_jwk or "",
-        "label": e.label or "",
+        # Bestand von vor 10/2026: das Feld ist leer, weil es damals niemand
+        # gefuellt hat. Die Anzeige nennt trotzdem einen Namen, statt auf jedem
+        # anderen Geraet „Unbenanntes Geraet" zu zeigen.
+        "label": (e.label or "").strip() or STANDARD_BEZEICHNUNG,
         "is_approved": bool(e.is_approved),
         "approved_by": e.approved_by or "",
         "approval_signature": e.approval_signature or "",
+        "inbox_hash": inbox_hash,
+        "transport": transport,
     }
 
 
@@ -320,7 +451,10 @@ def geraete(db: Session, user_id: int, nur_bestaetigt: bool = False) -> list[dic
     query = db.query(UserE2eeDevice).filter(UserE2eeDevice.user_id == user_id)
     if nur_bestaetigt:
         query = query.filter(UserE2eeDevice.is_approved.is_(True))
-    return [eintrag_als_dict(e) for e in query.order_by(UserE2eeDevice.last_seen_at.desc()).all()]
+    return [
+        eintrag_als_dict(e, db)
+        for e in query.order_by(UserE2eeDevice.last_seen_at.desc()).all()
+    ]
 
 
 def _hash(wert: str | None) -> str:
@@ -351,6 +485,19 @@ def entfernen_daten(user_id: int, device_id: str, public_key_jwk: str) -> str:
     Anmeldung unter derselben Kennung wieder entfernen kann.
     """
     return f"msm:device-removal:v1:{user_id}:{device_id}:{_hash(public_key_jwk)}"
+
+
+def pruefe_geraetesignatur(daten: str, signing_jwk_str: str, signatur_b64: str) -> bool:
+    """Prueft eine Geraeteunterschrift — ECDSA P-256 / SHA-256, WebCrypto-Format.
+
+    Der oeffentliche Name fuer die Wege, die nicht selbst ein Geraet
+    freigeben, sondern nur **belegen** wollen, dass der Absender dieses
+    Geraet ist: die gerätebezogene Zustellung. Dort ist die Unterschrift
+    keine Freigabe, sondern ein Besitznachweis.
+    """
+    if not signing_jwk_str or not signatur_b64:
+        return False
+    return _pruefe_signatur(daten, signing_jwk_str, signatur_b64)
 
 
 def _pruefe_signatur(daten: str, signing_jwk_str: str, signatur_b64: str) -> bool:
@@ -409,30 +556,38 @@ def bestaetigen(
     approver_device_id: str | None = None,
     signature: str | None = None,
 ) -> bool:
-    """Gibt ein wartendes Geraet frei.
+    """Gibt ein wartendes Geraet frei — mit der Unterschrift eines freigegebenen.
 
     Die Freigabe braucht die Unterschrift eines freigegebenen Geraets mit
     Signaturschluessel ueber `freigabe_daten`. Ein Geraet ohne
     Signaturschluessel gibt nichts frei: sonst genuegte es, seine Kennung zu
     nennen, und die steht in jeder Geraeteliste.
 
-    Einzige Ausnahme: gibt es ueberhaupt kein freigegebenes Geraet mehr — das
-    letzte hat sich selbst entfernt —, wird ein wartendes zum ersten.
+    **Keine Ausnahme mehr fuer das letzte Geraet.** Bis 10/2026 wurde ein
+    wartendes ohne jede Unterschrift freigegeben, sobald es kein freigegebenes
+    Geraet mehr gab. Damit holte sich jeder, der nur ein Access-Token hatte,
+    wieder Zutritt. Den Fall uebernimmt `wieder_freigeben`, und der verlangt
+    einen frischen Nachweis.
+
+    **Auch ein schon freigegebenes Geraet laesst sich nachziehen.** Bis 10/2026
+    antwortete diese Funktion bei `is_approved` sofort mit `True` und schrieb
+    nichts: ein Geraet, das ohne Unterschrift freigegeben war (Erstgeraet nach
+    `wieder_freigeben`), blieb auf jedem anderen Geraet „ohne gueltige
+    Freigabe", und der Knopf daneben tat nichts. Jetzt unterschreibt ein
+    freigegebenes Geraet auch nach, solange die vorhandene Unterschrift nur
+    eine Selbst-Signatur ist.
     """
     kennung = (device_id or "").strip()
     eintrag = _geraet(db, user.id, kennung)
     if eintrag is None:
         return False
-    if eintrag.is_approved:
-        return True
-    if _freigegebene(db, user.id).count() == 0:
-        eintrag.is_approved = True
-        db.commit()
-        _verzeichnis_geaendert(user.id)
+    # Von einem anderen Geraet beglaubigt: dabei bleibt es. Eine Selbst-Signatur
+    # (`approved_by == device_id`) ist ausdruecklich ersetzbar.
+    if eintrag.is_approved and eintrag.approval_signature and eintrag.approved_by != kennung:
         return True
     unterzeichner = _unterzeichner(db, user, approver_device_id)
     if unterzeichner is None or unterzeichner.device_id == kennung or not signature:
-        return False
+        return eintrag.is_approved
     daten = freigabe_daten(
         user.id, kennung, eintrag.public_key_jwk, eintrag.signing_public_key_jwk
     )
@@ -446,6 +601,92 @@ def bestaetigen(
     return True
 
 
+def freigabe_hindernis(db: Session, user: User, device_id: str) -> str | None:
+    """Was einer Selbstfreigabe im Weg steht, bevor ein Nachweis verbraucht wird.
+
+    Ein Passkey oder ein Einmalcode gilt genau einmal. Prueft die Route erst
+    *nach* dem Nachweis, ob es das Geraet ueberhaupt gibt und ob ein anderes
+    freigegebenes Geraet existiert, verbrennt eine veraltete Geraeteliste einen
+    gueltigen Nachweis fuer eine Antwort, die 403 oder 404 lautet.
+
+    Zurueck kommt `"nicht_gefunden"`, `"anderes_freigegeben"` oder `None`. Die
+    Entscheidung selbst faellt hier **nicht**: zwischen dieser Abfrage und dem
+    Schreiben kann ein anderes Geraet dazukommen, deshalb prueft
+    `wieder_freigeben` unter der Kontosperre noch einmal.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        return "nicht_gefunden"
+    if eintrag.is_approved:
+        return None
+    if _freigegebene(db, user.id).count() > 0:
+        return "anderes_freigegeben"
+    return None
+
+
+def wieder_freigeben(
+    db: Session,
+    user: User,
+    device_id: str,
+    signatur: str | None = None,
+    *,
+    mit_nachweis: bool = False,
+) -> bool:
+    """Holt ein wartendes Geraet zurueck.
+
+    Der Gegenpol zu `_auffrischen`: wer seinen Schluessel verloren und neu
+    erzeugt hat, sitzt sonst in einem Wartezustand, den niemand aufloesen kann
+    — es gibt kein zweites freigegebenes Geraet, das unterschreiben koennte.
+
+    **Mit `mit_nachweis` auch neben einem freigegebenen Geraet.** Der Aufrufer
+    hat dann Passwort oder zweiten Faktor bereits geprueft. Das ist derselbe
+    frische Nachweis, den Regel 21 fuer alles verlangt, was einen neuen Zugang
+    erzeugt. Ohne ihn bleibt die alte Regel: ein freigegebenes Geraet muss
+    unterschreiben. Ein gestohlenes Sitzungs-Token allein kommt so nicht durch.
+
+    **Gelesen und geschrieben unter einer Sperre.** Zwei wartende Geraete, die
+    gleichzeitig anfragen, saehen sonst beide „kein freigegebenes" und gäben
+    beide frei; die Unterschrift des ersten waere umgangen. Die Sperre liegt auf
+    der Kontozeile, weil sie die gemeinsame Zeile beider Anfragen ist.
+
+    `approved_by` und `approval_signature` bleiben ohne `signatur` leer, und
+    das ist der Unterschied zwischen „freigegeben" und „beglaubigt": der Server
+    gibt das Geraet fuer die Zustellung frei, aber niemand hat den Schluessel
+    unterschrieben. Die Gegenueber sehen genau das („Ohne gueltige Freigabe")
+    und entscheiden selbst, ob sie die Sicherheitsnummer vergleichen.
+
+    Reicht der Client seine eigene Unterschrift mit (`signatur`), steht sie
+    danach darunter — `is_approved` und `approval_signature` sagen dann
+    dasselbe. Sie belegt nur, dass dieses Geraet seinen eigenen Schluessel
+    kennt, und wird von der Unterschrift eines anderen freigegebenen Geraets
+    ersetzt (`bestaetigen`).
+    """
+    # Sperre vor dem Lesen: PostgreSQL serialisiert damit alle gleichzeitigen
+    # Selbstfreigaben desselben Kontos, auch wenn sie verschiedene Geraete
+    # betreffen.
+    db.query(User.id).filter(User.id == user.id).with_for_update().one()
+
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        db.rollback()
+        return False
+    if eintrag.is_approved:
+        db.rollback()
+        return True
+    if not mit_nachweis and _freigegebene(db, user.id).count() > 0:
+        db.rollback()
+        raise GeraeteaenderungAbgelehntError(
+            "Ein freigegebenes Geraet muss dieses Geraet freigeben."
+        )
+    eintrag.is_approved = True
+    eintrag.approved_by = None
+    eintrag.approval_signature = None
+    _selbst_beglaubigen(eintrag, user.id, signatur)
+    db.commit()
+    _verzeichnis_geaendert(user.id)
+    return True
+
+
 def ausstehende_geraete(db: Session, user: User) -> list[dict]:
     """Geraete des Kontos, die noch auf Freigabe warten."""
     eintraege = (
@@ -454,7 +695,7 @@ def ausstehende_geraete(db: Session, user: User) -> list[dict]:
         .order_by(UserE2eeDevice.created_at.desc())
         .all()
     )
-    return [eintrag_als_dict(e) for e in eintraege]
+    return [eintrag_als_dict(e, db) for e in eintraege]
 
 
 def _sperre_sitzung(db: Session, user: User, familie: str | None) -> None:
@@ -464,12 +705,89 @@ def _sperre_sitzung(db: Session, user: User, familie: str | None) -> None:
         AuthService.revoke_refresh_family(db, user.id, familie)
 
 
+def entfernen_hindernis(
+    db: Session, user: User, device_id: str, anfrage_familie: str | None = None
+) -> str | None:
+    """Was dem Entfernen im Weg steht, bevor ein Nachweis verbraucht wird.
+
+    Ein Passkey und ein Einmalcode gelten genau einmal. Prueft die Route erst
+    *nach* der Nachweispflicht, ob es das Geraet gibt und ob es das eigene ist,
+    ist der Nachweis fuer eine 404 oder 403 weg (dieselbe Regel wie in
+    `freigabe_hindernis`).
+
+    Zurueck kommt `"selbst"`, `"nicht_gefunden"` oder `None`. Die Entscheidung
+    faellt trotzdem in `vergessen` noch einmal — zwischen dieser Abfrage und dem
+    Loeschen kann sich das Verzeichnis aendern.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        return "nicht_gefunden"
+    if _ist_eigenes_geraet(eintrag, anfrage_familie):
+        return "selbst"
+    return None
+
+
+def entfernen_beleg_gilt(
+    db: Session,
+    user: User,
+    device_id: str,
+    approver_device_id: str | None = None,
+    signature: str | None = None,
+) -> bool:
+    """Wuerde `vergessen` diese Unterschrift annehmen? Prueft nur, schreibt nicht.
+
+    Die Route fragt das **vor** dem Nachweis: ein Einmalcode oder Passkey gilt
+    genau einmal, und ein abgelehnter Beleg ist kein Grund, ihn zu verbrauchen
+    (dieselbe Regel wie `freigabe_hindernis`).
+
+    Ein wartendes Geraet braucht keinen Beleg — es hat nie etwas bekommen.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    if eintrag is None:
+        return False
+    if not eintrag.is_approved:
+        return True
+    return unterschrift_gilt(
+        db,
+        user,
+        approver_device_id,
+        entfernen_daten(user.id, eintrag.device_id, eintrag.public_key_jwk),
+        signature,
+    )
+
+
+def eintrag_ist_freigegeben(db: Session, user: User, device_id: str) -> bool:
+    """Ist das Ziel freigegeben — bekommt es also ueberhaupt Nachrichten?
+
+    Der Unterschied entscheidet, ob vor dem Entfernen ein Nachweis faellig ist.
+    Ein wartendes Geraet hat nie etwas bekommen; es zu entfernen nimmt niemandem
+    etwas weg, und genau das ist der Weg „das ist nicht mein Geraet, sofort
+    raus" nach einer Kopplung mit falscher Sicherheitsnummer
+    (`AiDevicePairingCard`). Ein Nachweisfenster davor waere hier eine Bremse
+    an der falschen Stelle.
+    """
+    eintrag = _geraet(db, user.id, (device_id or "").strip())
+    return bool(eintrag and eintrag.is_approved)
+
+
+def _ist_eigenes_geraet(eintrag: UserE2eeDevice, anfrage_familie: str | None) -> bool:
+    """Fragt *dieses* Geraet nach seinem eigenen Eintrag?
+
+    Die Sitzungskette ist die verlaessliche Spur: sie kommt aus dem Token der
+    Anfrage und steht am Geraet (`auth_family`). Fehlt einer der beiden Werte,
+    gilt es als fremd — „unbekannt" heisst hier nicht „egal" (Punkt 58 der
+    Projektregeln).
+    """
+    return bool(anfrage_familie and eintrag.auth_family == anfrage_familie)
+
+
 def vergessen(
     db: Session,
     user: User,
     device_id: str,
     approver_device_id: str | None = None,
     signature: str | None = None,
+    anfrage_familie: str | None = None,
 ) -> bool:
     """Nimmt ein Geraet aus dem Verzeichnis und sperrt seine Sitzung aus.
 
@@ -482,12 +800,33 @@ def vergessen(
     danach das erste und damit freigegeben. Ein wartendes Geraet darf jeder
     angemeldete Teil des Kontos entfernen; es hat nie etwas bekommen.
 
+    **Das eigene Geraet entfernt sich nie selbst.** Bis 10/2026 durfte es das
+    mit seiner eigenen Unterschrift; in der Oberflaeche gab es dafuer keinen
+    Knopf, aber ein Aufruf mit `device_id == approver_device_id` kam durch. Ein
+    Geraet, das sich selbst hinauswirft, ist kein Entfernen, sondern ein
+    Abmelden — dafuer gibt es `/auth/logout`, und der sperrt nicht das ganze
+    Verzeichnis. Erkannt wird es an der Sitzungskette der Anfrage und an der
+    Kennung des Unterzeichners.
+
     Die Sitzungskette des Geraets wird gesperrt: sein Access-Token gilt ab dem
     naechsten Aufruf nicht mehr (`dependencies._user_from_token`).
+
+    Mit der Zeile fallen per ``ON DELETE CASCADE`` auch die Zustelladresse des
+    Geraets und seine offenen Zustellauftraege. Das Chiffretextobjekt und der
+    Idempotenzrest haengen nicht an der Inbox und bleiben bis zu ihrer Frist
+    liegen (siehe `models/e2ee_delivery.py`); `abgelaufene_raeumen` nimmt sie
+    dann mit. Kein eigener Loeschweg hier — sonst liefen zwei Wege aneinander
+    vorbei.
     """
     eintrag = _geraet(db, user.id, (device_id or "").strip())
     if eintrag is None:
         return False
+    if _ist_eigenes_geraet(eintrag, anfrage_familie) or (
+        (approver_device_id or "").strip() == eintrag.device_id
+    ):
+        raise GeraeteaenderungAbgelehntError(
+            "Ein Gerät kann sich nicht selbst aus der Geräteliste entfernen."
+        )
     if eintrag.is_approved:
         unterzeichner = _unterzeichner(db, user, approver_device_id)
         daten = entfernen_daten(user.id, eintrag.device_id, eintrag.public_key_jwk)
@@ -521,6 +860,9 @@ def zuruecksetzen(db: Session, user: User, familie_behalten: str | None) -> int:
     familien = {e.auth_family for e in eintraege if e.auth_family}
     for e in eintraege:
         db.delete(e)
+    # Mit jeder Geraetezeile fallen ihre Zustelladresse und ihre offenen
+    # Auftraege (ON DELETE CASCADE). Chiffretextobjekte und Idempotenzreste
+    # bleiben bis zu ihrer Frist; `abgelaufene_raeumen` raeumt sie ab.
     # Der Notizschluessel lag auf diesen Geraeten. Ohne sie gibt es niemanden
     # mehr, der ihn hat oder den Eintrag beglaubigen koennte: das naechste
     # Geraet setzt den Kontoschluessel neu (`kontoschluesselAbgleichen`).

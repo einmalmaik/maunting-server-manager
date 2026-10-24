@@ -357,6 +357,49 @@ describe('Steuerpakete', () => {
     expect(ergebnis.decryptedList).toEqual([])
   })
 
+  it('nimmt ausdrückliche Kennungen und lässt die Obergrenze dabei liegen', async () => {
+    const idsGelesen = vi.fn()
+    const idsZugestellt = vi.fn()
+    const k = kontext({ quittiertGelesenIds: idsGelesen, quittiertZugestelltIds: idsZugestellt })
+    const ergebnis = await werteUmschlaegeAus(
+      [
+        klartext({
+          type: 'read_receipt',
+          reader_id: BERT,
+          read_up_to_id: 900,
+          read_ids: ['u-a', 'u-b'],
+        }),
+        klartext({
+          type: 'delivery_receipt',
+          receiver_id: BERT,
+          delivered_up_to_id: 900,
+          delivered_ids: ['u-a'],
+        }),
+      ],
+      k,
+    )
+    expect(idsGelesen).toHaveBeenCalledWith(['u-a', 'u-b'])
+    // Wer gelesen hat, hat auch empfangen.
+    expect(idsZugestellt).toHaveBeenCalledWith(['u-a', 'u-b'])
+    expect(idsZugestellt).toHaveBeenCalledWith(['u-a'])
+    // Die Zahl daneben gilt hier nicht mehr — sonst wären alle Zeilen bis 900
+    // „gelesen", obwohl nur zwei benannt sind.
+    expect(k.quittiertGelesen).not.toHaveBeenCalled()
+    expect(k.quittiertZugestellt).not.toHaveBeenCalled()
+    expect(ergebnis).toMatchObject({ maxPartnerReadId: 0, maxPartnerDeliveredId: 0 })
+  })
+
+  it('versteht weiter die Obergrenze einer älteren Quittung', async () => {
+    const idsGelesen = vi.fn()
+    const k = kontext({ quittiertGelesenIds: idsGelesen })
+    await werteUmschlaegeAus(
+      [klartext({ type: 'read_receipt', reader_id: BERT, read_up_to_id: 7 })],
+      k,
+    )
+    expect(idsGelesen).not.toHaveBeenCalled()
+    expect(k.quittiertGelesen).toHaveBeenCalledWith(7)
+  })
+
   it('meldet eine Quittung sofort und nicht erst am Ende des Durchlaufs', async () => {
     const k = kontext()
     let gemeldetVorDemZweiten = -1
@@ -468,8 +511,14 @@ describe('Altbestand und Unlesbares', () => {
     expect(decryptedList).toEqual([])
   })
 
-  it('schweigt bei einem unlesbaren Steuerumschlag und zeigt sonst einen Platzhalter', async () => {
-    const { decryptedList, maxIncomingId } = await werteUmschlaegeAus(
+  it('zeigt für einen unlesbaren Umschlag keine Zeile mehr, sondern zählt ihn', async () => {
+    // Bis 10/2026 wurde daraus eine Zeile „Verschlüsselte Nachricht". Sie trug
+    // einen anderen Absender als die echte Zeile, blieb bei jedem Laden neben
+    // ihr stehen und reiste über die Verlaufsübergabe weiter. Eine Aussage
+    // darüber, was dieser Stand **nicht** lesen kann, gehört nicht in den
+    // Verlauf: sie sagt nichts über den Inhalt und alles über den Zustand des
+    // Geräts.
+    const { decryptedList, maxIncomingId, unlesbar } = await werteUmschlaegeAus(
       [
         { art: 'unlesbar', env: umschlag('receipt:abc') },
         { art: 'unlesbar', env: umschlag('n-9') },
@@ -477,9 +526,11 @@ describe('Altbestand und Unlesbares', () => {
       ],
       kontext(),
     )
-    expect(decryptedList).toHaveLength(1)
-    expect(decryptedList[0]).toMatchObject({ text: 'messenger.encryptedMessage', senderId: BERT })
-    expect(maxIncomingId).toBe(decryptedList[0].id)
+    expect(decryptedList).toEqual([])
+    expect(unlesbar).toBe(1)
+    // Eine unlesbare Nachricht quittiert man nicht — sonst stünde beim Absender
+    // „zugestellt" für etwas, das nie jemand gesehen hat.
+    expect(maxIncomingId).toBe(0)
   })
 
   it('zeigt jeden Umschlag und jede logische Nachricht nur einmal', async () => {

@@ -57,9 +57,11 @@
  */
 
 import type { ChatGroupItem } from '@/api/social'
+import { merkeUndRaeumeServerkopien } from './loeschNachholen'
+import type { LoeschAuftrag } from './loeschAuftraege'
 import { listeLokaleMailboxen, loadLocalMessages } from './messengerLocalStore'
 import { zeitAlsZahl } from './nachrichtBezug'
-import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoeschen'
+import { baueLoeschauftrag, tilgeNachrichtLokal, type TilgbareNachricht } from './nachrichtLoeschen'
 
 /**
  * Die wählbaren Fristen. `0` heißt aus.
@@ -69,11 +71,13 @@ import { tilgeNachrichtBeimServer, tilgeNachrichtLokal } from './nachrichtLoesch
  * Satzbau, der die Zahl umstellt. Im Englischen sind beide gleich — die
  * Sprachdatei entscheidet das, nicht diese Liste.
  *
- * **Die längste Stufe hat ein Gegenstück im Backend.** Ein hochgeladener Anhang
- * wird dort nach `MEDIEN_AUFBEWAHRUNG_TAGE` (`chat_media_service.py`) abgeräumt.
- * Steht hier eine längere Frist als dort, lebt die Nachricht weiter und ihr
- * Anhang ist schon weg: die Anlage bricht mit einem 410 weg, ohne dass jemand
- * etwas gelöscht hat. Wer hier eine Stufe ergänzt, zieht die Zahl dort mit.
+ * **Die Serverfrist ist nicht diese Frist.** Ein hochgeladener Anhang liegt
+ * serverseitig 30 Tage (`MEDIEN_AUFBEWAHRUNG_TAGE` in
+ * `chat_media_service.py`) und dient nur dem Erstdownload. Die lokale Frist
+ * hier reicht bis 90 Tage: ein Gerät, das den Anhang vorher gesichert hat,
+ * behält ihn, auch wenn der Server seine Kopie längst gelöscht hat. Wer hier
+ * eine Stufe ergänzt, verlängert damit nicht die Serverkopie; die Serverfrist
+ * ersetzt umgekehrt nicht diese lokale Frist.
  */
 export const VERFALL_STUFEN = [
   { sekunden: 0, labelKey: 'messenger.retention.off', dativKey: 'messenger.retentionDative.off' },
@@ -225,6 +229,54 @@ export function faelligeZeilen<T extends { verfaelltAm?: string; isDeleted?: boo
 }
 
 /**
+ * Eine fällige Zeile: erst lokal, dann der Server als dauerhafter Auftrag.
+ *
+ * Das lokale Löschen hängt **nicht** am Servererfolg (§10). Die Reihenfolge
+ * ist Absicht: der Auftrag wird gebaut, solange die Zeile noch ihre
+ * Medienzeiger trägt; danach fällt der Inhalt hier, und erst dann geht der
+ * Serverteil hinaus. Ohne Netz bleibt der Auftrag liegen, bis ein Anlass ihn
+ * nachholt — die Zeile ist hier trotzdem weg.
+ *
+ * Nur wer selbst gesendet hat, räumt die Serverkopie; eine fremde Zeile
+ * verschwindet allein lokal. Der Auftrag wird vor dem ersten Serveraufruf
+ * abgelegt (`merkeUndRaeumeServerkopien`), nie danach.
+ */
+export async function raeumeVerfalleneZeilen(
+  blindMailboxId: string,
+  zeilen: readonly (TilgbareNachricht & {
+    isSelf?: boolean
+    senderId?: number
+    verfaelltAm?: string
+  })[],
+  jetzt = Date.now(),
+): Promise<number> {
+  if (!blindMailboxId || zeilen.length === 0) return 0
+  const zeitpunkt = new Date(jetzt).toISOString()
+  const auftraege: LoeschAuftrag[] = []
+  let weggeraeumt = 0
+
+  for (const msg of zeilen) {
+    let auftrag: LoeschAuftrag | null = null
+    try {
+      auftrag = msg.isSelf ? baueLoeschauftrag(blindMailboxId, msg, false, jetzt) : null
+    } catch {
+      auftrag = null
+    }
+    try {
+      await tilgeNachrichtLokal(blindMailboxId, msg, zeitpunkt)
+      weggeraeumt += 1
+      if (auftrag) auftraege.push(auftrag)
+    } catch {
+      // Was jetzt nicht wegging, geht beim nächsten Durchgang.
+    }
+  }
+
+  // Ein Fehler im Serverteil darf den lokalen Erfolg nicht umwerfen.
+  await merkeUndRaeumeServerkopien(auftraege).catch(() => {})
+  return weggeraeumt
+}
+
+/**
  * Einmal über **alle** Chats, nicht nur über den offenen.
  *
  * Ohne diesen Durchgang verschwände eine Nachricht erst, wenn man ihren Chat
@@ -236,7 +288,6 @@ export function faelligeZeilen<T extends { verfaelltAm?: string; isDeleted?: boo
  */
 export async function raeumeAlleChats(jetzt = Date.now()): Promise<number> {
   let weggeraeumt = 0
-  const zeitpunkt = new Date(jetzt).toISOString()
   for (const mailboxId of await listeLokaleMailboxen()) {
     let faellig: Awaited<ReturnType<typeof loadLocalMessages>> = []
     try {
@@ -244,17 +295,7 @@ export async function raeumeAlleChats(jetzt = Date.now()): Promise<number> {
     } catch {
       continue
     }
-    for (const msg of faellig) {
-      try {
-        // Beim Server räumt jede Seite nur ihr eigenes ab. Zusammen ist danach
-        // nichts mehr da; allein wäre keine der beiden dazu berechtigt.
-        if (msg.isSelf) await tilgeNachrichtBeimServer(mailboxId, msg)
-        await tilgeNachrichtLokal(mailboxId, msg, zeitpunkt)
-        weggeraeumt += 1
-      } catch {
-        // Was jetzt nicht wegging, geht beim nächsten Durchgang.
-      }
-    }
+    weggeraeumt += await raeumeVerfalleneZeilen(mailboxId, faellig, jetzt)
   }
   return weggeraeumt
 }

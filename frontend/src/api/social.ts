@@ -113,6 +113,13 @@ export interface BlindEnvelopeItem {
   ciphertext_envelope: string
   client_uuid?: string | null
   created_at: string
+  /**
+   * Die globale Annahmenummer aus dem Gerätepostfach.
+   *
+   * Der neue Weg vergibt sie beim Annehmen; sie ist die Kennung, an der der
+   * Absender seine Häkchen misst. Fehlt sie (alte Mailbox), gilt `id`.
+   */
+  annahme_seq?: number
 }
 
 export async function getFriends(): Promise<FriendItem[]> {
@@ -223,6 +230,7 @@ export async function updatePrivacy(payload: {
 }
 
 export interface E2eeGeraetItem {
+  id?: number
   device_id: string
   public_key: string
   /**
@@ -236,6 +244,15 @@ export interface E2eeGeraetItem {
   /** Das Gerät, das dieses freigegeben hat, und seine Unterschrift (`vertrauteGeraete`). */
   approved_by?: string
   approval_signature?: string
+  /**
+   * Die opake Zustelladresse des Geräts, falls es den neuen Weg kennt.
+   *
+   * Sie entsteht aus einem Geheimnis, das nur das Gerät kennt; allein bringt
+   * sie nichts, zum Abholen gehört der Gerätebeleg dazu.
+   */
+  inbox_hash?: string
+  /** Die Transportfähigkeit des Geräts. Leer heißt: der alte Weg. */
+  transport?: string
 }
 
 /**
@@ -249,6 +266,16 @@ export async function putEigenesGeraet(payload: {
   publicKey: string
   signingPublicKey?: string
   label?: string
+  /** Selbst-Signatur des Erstgeräts über seine eigene Freigabe. */
+  approvalSignature?: string
+  /**
+   * Die opake Zustelladresse dieses Geräts.
+   *
+   * Sie entsteht aus dem geheimen Schlüsselpaar des Geräts und ist damit
+   * nur für dieses Gerät berechenbar. Fehlt sie, benutzt das Gerät den alten
+   * Weg (geteilte Mailbox) und kennt die Zustellung mit Quittung nicht.
+   */
+  inboxHash?: string
 }): Promise<E2eeGeraetItem> {
   return api<E2eeGeraetItem>('/social/e2ee/devices/self', {
     method: 'PUT',
@@ -257,6 +284,8 @@ export async function putEigenesGeraet(payload: {
       public_key: payload.publicKey,
       signing_public_key: payload.signingPublicKey ?? '',
       label: payload.label ?? '',
+      approval_signature: payload.approvalSignature ?? '',
+      inbox_hash: payload.inboxHash ?? '',
     }),
   })
 }
@@ -283,18 +312,59 @@ export async function approveEigenesGeraet(
   })
 }
 
+export interface ReapproveEigenesGeraetInput {
+  password?: string | null
+  confirmation?: string | null
+  otp_code?: string | null
+  /** Unterschriebene Passkey-Antwort (`passkeyNachweis('e2ee_reapprove')`). */
+  passkey?: Zweitnachweis | null
+  /** Eigene Unterschrift über die Freigabe — belegt nur den eigenen Schlüssel. */
+  signature?: string | null
+}
+
+/**
+ * Holt das eigene Geraet zurueck, wenn es das einzige ist (`gibMichSelbstFrei`).
+ *
+ * Nur ohne ein anderes freigegebenes Geraet — sonst antwortet der Server 403,
+ * weil die Unterschrift der vorgesehene Weg ist. Der Nachweis ist Pflicht.
+ */
+export async function reapproveEigenesGeraet(
+  deviceId: string,
+  input: ReapproveEigenesGeraetInput = {},
+): Promise<{ ok: boolean; is_approved: boolean }> {
+  return api<{ ok: boolean; is_approved: boolean }>('/social/e2ee/devices/self/reapprove', {
+    method: 'POST',
+    body: JSON.stringify({ device_id: deviceId, ...input }),
+  })
+}
+
 export async function getPendingE2eeGeraete(): Promise<E2eeGeraetItem[]> {
   return api<E2eeGeraetItem[]>('/social/e2ee/devices/self/pending')
 }
 
 /**
+ * Der gestaffelte Nachweis vor dem Entfernen eines Geräts.
+ *
+ * Genau das, was das Konto hergibt: der eingerichtete zweite Faktor (Passkey
+ * oder Code), sonst das Passwort. Ein Konto ohne beides — Social Login ohne
+ * Passwort — braucht nichts, dort ist die Sitzung der Nachweis.
+ */
+export interface EntfernenNachweis {
+  password?: string | null
+  otp_code?: string | null
+  passkey?: Zweitnachweis | null
+}
+
+/**
  * Entfernt ein Gerät und sperrt seine Sitzung sofort. Ein freigegebenes
- * verlangt die Unterschrift eines freigegebenen (`entferneGeraet`).
+ * verlangt die Unterschrift eines freigegebenen (`entferneGeraet`), dazu den
+ * Nachweis aus `EntfernenNachweis`.
  */
 export async function removeEigenesGeraet(
   deviceId: string,
   approverDeviceId?: string,
   signature?: string,
+  nachweis: EntfernenNachweis = {},
 ): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/social/e2ee/devices/self/remove', {
     method: 'POST',
@@ -302,6 +372,9 @@ export async function removeEigenesGeraet(
       device_id: deviceId,
       approver_device_id: approverDeviceId ?? '',
       signature: signature ?? '',
+      password: nachweis.password ?? null,
+      otp_code: nachweis.otp_code ?? null,
+      passkey: nachweis.passkey ?? null,
     }),
   })
 }
@@ -673,12 +746,58 @@ export async function syncE2eeMailboxes(sinceId = 0): Promise<E2eeMailboxSyncRes
 
 export async function fetchE2eeEnvelopes(
   blindMailboxId: string,
-  sinceId?: number
+  sinceId?: number,
+  limit?: number,
+  oldestFirst?: boolean,
 ): Promise<BlindEnvelopeItem[]> {
-  const query = sinceId ? `?since_id=${sinceId}` : ''
+  const params = new URLSearchParams()
+  if (sinceId) params.set('since_id', String(sinceId))
+  if (limit) params.set('limit', String(limit))
+  if (oldestFirst) params.set('oldest_first', 'true')
+  const query = params.size > 0 ? `?${params.toString()}` : ''
   return api<BlindEnvelopeItem[]>(`/social/e2ee/mailbox/${blindMailboxId}${query}`, {
     headers: nachweisKopf(blindMailboxId),
   })
+}
+
+/**
+ * Liest eine Mailbox vollständig, Seite für Seite.
+ *
+ * Der Server gibt höchstens 200 Umschläge je Abruf heraus. Wer nur einmal
+ * fragt, bekommt die **ältesten** 200 und verliert alles danach: bei der
+ * eigenen Geräte-Mailbox sind das die Schlüsselzustellungen, bei einem Chat
+ * die Nachrichten. Bis 10/2026 las der Messenger genau so, und ein Gerät,
+ * das eine Weile nicht offen war, sah den Rest nie.
+ *
+ * `since_id` wandert auf die höchste gelesene Kennung, nie auf die Anzahl:
+ * Umschläge werden auch gelöscht, und eine Zählung überspränge dann welche.
+ * Bricht die Verbindung mitten in der zweiten Seite ab, bleibt die Ausnahme
+ * stehen — der nächste Durchlauf beginnt am zuletzt vollständig gelesenen
+ * Stand.
+ *
+ * **Die erste Seite muss die älteste sein.** Ohne `since_id` liefert der Server
+ * die *neuesten* 200. Wer damit beginnt und dann `since_id` auf deren höchste
+ * Kennung setzt, bekommt als zweite Seite nichts mehr: alles dazwischen — bei
+ * einer vollen Mailbox genau die Schlüsselzustellungen — wäre für immer weg,
+ * und ein gespeicherter Cursor machte den Sprung endgültig. Deshalb nennt der
+ * erste Abruf `oldest_first`; ab da sortiert `since_id` von selbst aufsteigend.
+ */
+export async function fetchAlleE2eeEnvelopes(
+  blindMailboxId: string,
+  sinceId = 0,
+): Promise<BlindEnvelopeItem[]> {
+  const SEITE = 200
+  const alle: BlindEnvelopeItem[] = []
+  let seit = sinceId
+  for (;;) {
+    const seite = await fetchE2eeEnvelopes(blindMailboxId, seit, SEITE, seit === 0)
+    alle.push(...seite)
+    if (seite.length < SEITE) return alle
+    const naechste = seite.reduce((hoechste, env) => Math.max(hoechste, env.id), seit)
+    // Ein Server, der dieselbe Seite wiedergibt, darf keine Schleife bauen.
+    if (naechste <= seit) return alle
+    seit = naechste
+  }
 }
 
 export async function sendTypingSignal(payload: {
@@ -878,3 +997,72 @@ export async function recordActivityTime(category: string, seconds: number): Pro
     body: JSON.stringify({ category, seconds }),
   })
 }
+
+// ── E2EE Queue (KISS-Zustellung) ──────────────────────────────────────────────
+
+export interface QueueEnvelope {
+  target_device_id?: number
+  device_id?: string
+  encrypted_payload: string
+}
+
+export interface PendingQueueItem {
+  queue_id: number
+  sender_user_id: number
+  sender_device_id: number | null
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  client_uuid: string
+  encrypted_payload: string
+  created_at: string | null
+}
+
+export async function sendMessageQueue(payload: {
+  client_uuid: string
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  envelopes: QueueEnvelope[]
+  device_id?: string
+}): Promise<{ status: string; client_uuid: string; enqueued: number }> {
+  const headers: Record<string, string> = {}
+  if (payload.device_id) headers['X-Device-Id'] = payload.device_id
+  return api('/social/messages/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_uuid: payload.client_uuid,
+      chat_type: payload.chat_type,
+      chat_id: payload.chat_id,
+      envelopes: payload.envelopes,
+    }),
+    headers,
+  })
+}
+
+export async function fetchPendingQueue(deviceId: string): Promise<{ messages: PendingQueueItem[] }> {
+  return api('/social/messages/pending', {
+    headers: { 'X-Device-Id': deviceId },
+  })
+}
+
+export async function ackQueueMessages(
+  deviceId: string,
+  queueIds: number[]
+): Promise<{ status: string; acknowledged: number }> {
+  return api('/social/messages/ack', {
+    method: 'POST',
+    body: JSON.stringify({ queue_ids: queueIds }),
+    headers: { 'X-Device-Id': deviceId },
+  })
+}
+
+export async function sendReadReceipt(payload: {
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  client_uuids: string[]
+}): Promise<{ status: string }> {
+  return api('/social/messages/read', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+

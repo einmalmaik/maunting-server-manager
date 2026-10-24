@@ -45,9 +45,14 @@ const verzeichnis = new Map<
 const netz = { aus: false, veroeffentlichenScheitert: false }
 
 vi.mock('@/api/social', () => ({
-  getE2eeGeraete: async (uid: number) => {
+  getE2eeGeraete: async (uid: number, includeUnapproved = false) => {
     if (netz.aus) throw new Error('Netzwerk weg')
-    return [...(verzeichnis.get(uid) ?? [])]
+    const liste = verzeichnis.get(uid) ?? []
+    // Wie der Server: Fremde und der eigene Sendepfad ohne `include_unapproved`
+    // sehen nur freigegebene Geräte.
+    return includeUnapproved
+      ? [...liste]
+      : liste.filter((g) => (g as { is_approved?: boolean }).is_approved !== false)
   },
   putEigenesGeraet: async () => ({}),
 }))
@@ -67,7 +72,10 @@ vi.mock('./e2eeGeraet', async (importOriginal) => {
 
 import { erzeugeSignaturPaar, signiere, type SignaturPaar } from './absenderSignatur'
 import { clearGeraeteMemory, freigabeDaten, geraeteVon, verlangeGeraeteVon } from './e2eeGeraet'
-import { setzeAblageFuerTest, sitzungsId, type RatchetAblage } from './ratchetSpeicher'
+import { kennstMarke, setzeAblageFuerTest, sitzungsId, ausstehendeZustellungen, type RatchetAblage } from './ratchetSpeicher'
+import { utf8ToBytes } from '@msdis/shield/core'
+import { sha256Hex } from '@msdis/shield/integrity'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import {
   DR_PREFIX,
   DrGeraetNichtEingetragenError,
@@ -91,9 +99,14 @@ function neueAblage(): RatchetAblage {
     async lies(id) {
       return daten.get(id) ?? null
     },
-    async schreibe(id, zustand, marke) {
+    async schreibe(id, zustand, marke, begleiter) {
       daten.set(id, zustand)
-      if (marke) daten.set(marke, '1')
+      const marken = marke === undefined ? [] : Array.isArray(marke) ? marke : [marke]
+      for (const eine of marken) daten.set(eine, '1')
+      for (const [platz, wert] of Object.entries(begleiter ?? {})) {
+        if (wert === null) daten.delete(platz)
+        else daten.set(platz, wert)
+      }
     },
     async loesche(id) {
       daten.delete(id)
@@ -342,6 +355,13 @@ describe('ratchetSitzung', () => {
 
     aktiviere(bob)
     await verarbeiteBootstrap(kB, oeffneHybrid(erste.bootstrap!))
+    // Erst muss die Sitzung getragen haben. Seit 10/2026 ist ein Bruch nur ein
+    // Bruch, wenn diese Sitzung schon einmal eine Nachricht geöffnet hat —
+    // sonst meldete jeder Erstkontakt einen Neuaufbau, den es nie gab.
+    expect(await liesDrUmschlag(kB, erste.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'echt',
+    })
 
     const teile = erste.nachricht.split('.')
     const roh = Buffer.from(teile[3], 'base64')
@@ -370,33 +390,56 @@ describe('ratchetSitzung', () => {
   })
 
   it('meldet Bruch, wenn der abgelegte Zustand nicht mehr lesbar ist', async () => {
+    const kA = kontextVon(ALICE, BOB)
     const kB = kontextVon(BOB, ALICE)
     aktiviere(alice)
-    const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'hallo', 'u1')
+    const [erste] = await baueZustellungen(kA, 'hallo', 'u1')
+    const [zweite] = await baueZustellungen(kA, 'und weiter', 'u2')
 
     aktiviere(bob)
-    await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))
+    await verarbeiteBootstrap(kB, oeffneHybrid(erste.bootstrap!))
+    // Erst muss die Sitzung getragen haben: nur dann ist ein beschädigter
+    // Zustand ein Sitzungsproblem und kein Erstkontakt.
+    expect(await liesDrUmschlag(kB, erste.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'hallo',
+    })
 
     // Ein beschädigter Zustand ist ein Sitzungsproblem, kein vorübergehendes.
     // Als 'fehler' gemeldet bliebe das Gespräch ohne sichtbaren Grund stehen
     // und jeder Abruf liefe erneut in denselben Fehler.
     const echt = bob.ablage.lies
-    bob.ablage.lies = async (k) => (k.endsWith(alice.kennung) ? 'sv-dr-state-v1:unsinn' : echt(k))
-    const gelesen = await liesDrUmschlag(kB, z.nachricht, verwerfen)
+    bob.ablage.lies = async (k) =>
+      k.startsWith(bob.kennung) ? 'sv-dr-state-v1:unsinn' : echt(k)
+    const gelesen = await liesDrUmschlag(kB, zweite.nachricht, verwerfen)
     bob.ablage.lies = echt
     expect(gelesen.art).toBe('bruch')
   })
 
-  it('meldet Bruch statt Stille, wenn die Sitzung fehlt', async () => {
+  it('meldet keinen Bruch, wenn die Sitzung noch nicht aufgebaut ist', async () => {
     const kB = kontextVon(BOB, ALICE)
     aktiviere(alice)
     const [z] = await baueZustellungen(kontextVon(ALICE, BOB), 'hallo', 'u1')
 
-    // Bobs Gerät hat den Aufbau nie gesehen — etwa weil es damals nicht
-    // existierte oder seine Ablage verloren hat.
+    // Bobs Gerät hat den Aufbau noch nicht gesehen — die Nachricht kam zuerst.
+    // Bis 10/2026 wurde daraus ein Bruch mit Marke, und die Nachricht war für
+    // immer verloren, obwohl der Aufbau im selben Fenster lag.
     aktiviere(bob)
     const gelesen = await liesDrUmschlag(kB, z.nachricht, verwerfen)
-    expect(gelesen).toMatchObject({ art: 'bruch', vonKonto: ALICE, vonGeraet: alice.kennung })
+    expect(gelesen).toEqual({ art: 'keine-sitzung' })
+
+    // Keine Bruchmarke: der nächste Durchlauf versucht es erneut, und zwar so
+    // lange, bis der Aufbau da ist.
+    const rumpf = z.nachricht.split('.')[3]
+    const hash = (await sha256Hex(utf8ToBytes(rumpf))).slice(0, 32)
+    expect(await kennstMarke('bruch', `${ALICE}:${alice.kennung}:${hash}`)).toBe(false)
+
+    // Danach kommt der Aufbau — und dieselbe Nachricht geht auf.
+    await verarbeiteBootstrap(kB, oeffneHybrid(z.bootstrap!))
+    expect(await liesDrUmschlag(kB, z.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'hallo',
+    })
   })
 
   it('verliert keine Nachricht, wenn das Ablegen scheitert', async () => {
@@ -423,6 +466,117 @@ describe('ratchetSitzung', () => {
     // merkt — der teuerste aller stillen Fehler.
     const zweiterVersuch = await liesDrUmschlag(kB, z.nachricht, verwerfen)
     expect(zweiterVersuch).toMatchObject({ art: 'klartext', text: 'wichtig' })
+  })
+
+  it('holt den Ratchet-Zustand nach, wenn der Klartext schon liegt und das Schreiben abbrach', async () => {
+    /*
+     * Klartext und Ratchet-Zustand liegen in zwei Ablagen. Stürzt der Prozess
+     * zwischen beiden Schreibvorgängen ab, liegt der Klartext schon da, der
+     * Zustand aber nicht. Bis 10/2026 las `liesDrUmschlag` in diesem Fall nur
+     * den Klartext und ließ die Sitzung auf der alten Kettenposition stehen:
+     * die nächste Nachricht war nicht mehr entschlüsselbar, ohne dass es eine
+     * Meldung gab.
+     */
+    const kA = kontextVon(ALICE, BOB)
+    const kB = kontextVon(BOB, ALICE)
+    aktiviere(alice)
+    const [erste] = await baueZustellungen(kA, 'eins', 'u1')
+    const [zweite] = await baueZustellungen(kA, 'zwei', 'u2')
+
+    aktiviere(bob)
+    await verarbeiteBootstrap(kB, oeffneHybrid(erste.bootstrap!))
+
+    let abgelegt: string | null = null
+    const fach: KlartextAblage = {
+      lies: async () => abgelegt,
+      lege: async (text) => {
+        abgelegt = text
+      },
+    }
+    const schreibeEcht = bob.ablage.schreibe.bind(bob.ablage)
+    let einmal = true
+    bob.ablage.schreibe = async (id, zustand, marke, begleiter) => {
+      if (einmal) {
+        einmal = false
+        throw new Error('Platte voll')
+      }
+      return schreibeEcht(id, zustand, marke, begleiter)
+    }
+
+    const abgebrochen = await liesDrUmschlag(kB, erste.nachricht, fach)
+    bob.ablage.schreibe = schreibeEcht
+    expect(abgebrochen.art).toBe('fehler')
+    expect(abgelegt).toBe('eins')
+
+    // Der Klartext liegt schon; der Zustand muss trotzdem nachrücken.
+    expect(await liesDrUmschlag(kB, erste.nachricht, fach)).toMatchObject({
+      art: 'klartext',
+      text: 'eins',
+    })
+
+    // Der Beweis ist die Sendekette: ohne fortgeschriebenen Zustand hat Bob
+    // keine, und `baueZustellungen` baute die Sitzung neu auf — genau der
+    // „Die Sicherheitssitzung wurde neu aufgebaut"-Fall aus dem Betrieb.
+    const [antwort] = await baueZustellungen(kontextVon(BOB, ALICE), 'antwort', 'u3')
+    expect(antwort.bootstrap).toBeNull()
+
+    aktiviere(alice)
+    expect(await liesDrUmschlag(kontextVon(ALICE, BOB), antwort.nachricht, verwerfen)).toMatchObject({
+      art: 'klartext',
+      text: 'antwort',
+    })
+  })
+
+  it('verwirft die Sitzung, wenn die Gegenstelle ihren Schlüssel unter derselben Kennung tauscht', async () => {
+    const kA = kontextVon(ALICE, BOB)
+    const kB = kontextVon(BOB, ALICE)
+    aktiviere(alice)
+    const [erste] = await baueZustellungen(kA, 'vor dem Wechsel', 'u1')
+    expect((await zustellen(bob, kB, erste)).art).toBe('klartext')
+
+    // Bob installiert neu: gleiche Geräte-ID, neuer Schlüssel. Die
+    // Ratchet-Sitzung von Alice gehört zu einem Schlüssel, den es nicht mehr
+    // gibt — sie liefe sonst dauerhaft stumm weiter.
+    verzeichnis.get(BOB)![0].public_key = 'pub-bob-neu'
+    clearGeraeteMemory()
+
+    aktiviere(alice)
+    const [nachWechsel] = await baueZustellungen(kA, 'nach dem Wechsel', 'u2')
+    expect(nachWechsel.bootstrap).not.toBeNull()
+
+    // Genau **ein** neuer Aufbau: der zweite Versand läuft auf der neuen
+    // Sitzung.
+    aktiviere(alice)
+    const [gleichDanach] = await baueZustellungen(kA, 'gleich danach', 'u3')
+    expect(gleichDanach.bootstrap).toBeNull()
+
+    // Und der unveränderte Schlüssel bleibt unangetastet: keine Aufbauten mehr.
+    aktiviere(alice)
+    const [nochmal] = await baueZustellungen(kA, 'noch eins', 'u4')
+    expect(nochmal.bootstrap).toBeNull()
+  })
+
+  it('wirft keine Sitzung weg, wenn nur das Ablegen scheitert', async () => {
+    const kA = kontextVon(ALICE, BOB)
+    const kB = kontextVon(BOB, ALICE)
+    aktiviere(alice)
+    const [erste] = await baueZustellungen(kA, 'hallo', 'u1')
+    expect((await zustellen(bob, kB, erste)).art).toBe('klartext')
+
+    aktiviere(alice)
+    const echt = alice.ablage.schreibe
+    alice.ablage.schreibe = async () => {
+      throw new Error('QuotaExceededError')
+    }
+    await expect(baueZustellungen(kA, 'geht verloren', 'u2')).rejects.toThrow(
+      DrZustellungFehlgeschlagenError,
+    )
+    alice.ablage.schreibe = echt
+
+    // Die Sitzung liegt unverändert da — sie wurde nicht wegen eines
+    // Schreibfehlers verworfen und neu aufgebaut.
+    const [danach] = await baueZustellungen(kA, 'kommt an', 'u3')
+    expect(danach.bootstrap).toBeNull()
   })
 
   it('setzt eine Sitzung neu auf, wenn die Gegenstelle ihren Zustand verloren hat', async () => {
@@ -469,7 +623,9 @@ describe('ratchetSitzung', () => {
     aktiviere(alice)
     const [alt] = await baueZustellungen(kA, 'aus einem früheren Leben', 'u-alt')
     aktiviere(bob)
-    expect((await liesDrUmschlag(kB, alt.nachricht, verwerfen)).art).toBe('bruch')
+    // Ohne Sitzung ist das noch kein Bruch — nur eine Nachricht, die (noch)
+    // niemand öffnen kann.
+    expect((await liesDrUmschlag(kB, alt.nachricht, verwerfen)).art).toBe('keine-sitzung')
 
     // Danach läuft ein frisches Gespräch an.
     aktiviere(alice)
@@ -477,9 +633,17 @@ describe('ratchetSitzung', () => {
     const [neu] = await baueZustellungen(kA, 'frisch aufgebaut', 'u-neu')
     expect(await zustellen(bob, kB, neu)).toMatchObject({ art: 'klartext', text: 'frisch aufgebaut' })
 
-    // Der alte Umschlag liegt weiter in der Mailbox und wird wieder gelesen.
-    // Er bleibt unlesbar, darf die laufende Sitzung aber nicht mehr kosten.
+    /*
+     * Der alte Umschlag liegt weiter in der Mailbox und wird wieder gelesen.
+     *
+     * Jetzt gibt es eine etablierte Sitzung, also ist der erste Versuch ein
+     * Bruch — und genau dafür gibt es die Marke: ab dem zweiten ist er
+     * `beurteilt` und kostet nichts mehr. Bis 10/2026 zählte er bei **jedem**
+     * Abruf erneut als Bruch, und ein einziger alter Umschlag zerstörte so bei
+     * jedem Öffnen die frisch aufgebaute Sitzung.
+     */
     aktiviere(bob)
+    expect((await liesDrUmschlag(kB, alt.nachricht, verwerfen)).art).toBe('bruch')
     expect((await liesDrUmschlag(kB, alt.nachricht, verwerfen)).art).toBe('beurteilt')
 
     // Der Beweis, dass die Sitzung noch steht: die nächste Nachricht kommt an.
@@ -739,6 +903,34 @@ describe('ratchetSitzung', () => {
     expect(logischeUuid(z.clientUuid)).toBe(basis)
     expect(logischeUuid(basis)).toBe(basis)
     expect(logischeUuid(null)).toBeUndefined()
+  })
+
+  it('legt den Umschlag mit dem Ratchet-Schritt als Versandabsicht ab', async () => {
+    const kA = kontextVon(ALICE, BOB)
+    aktiviere(alice)
+
+    const [z] = await baueZustellungen(kA, 'geht gleich raus', 'u1', 'mailbox-1')
+    const offen = await ausstehendeZustellungen(ALICE)
+
+    // Aufbau vor Nachricht, und beide Bytes exakt die, die der Versand
+    // zurueckgibt. Ein Retry verschlüsselt nichts neu.
+    expect(offen.map((o) => o.reihenfolge)).toEqual([0, 1])
+    const aufbau = offen.find((o) => o.clientUuid === z.bootstrapClientUuid)
+    expect(aufbau).toMatchObject({
+      eigeneId: ALICE,
+      peerId: BOB,
+      mailbox: 'mailbox-1',
+      ciphertext: z.bootstrap,
+      isControl: true,
+      controlType: 'dr-init',
+    })
+    const nachricht = offen.find((o) => o.clientUuid === z.clientUuid)
+    expect(nachricht).toMatchObject({
+      eigeneId: ALICE,
+      peerId: BOB,
+      mailbox: 'mailbox-1',
+      ciphertext: z.nachricht,
+    })
   })
 
   it('überlebt einen Neustart auf beiden Seiten', async () => {
@@ -1028,6 +1220,26 @@ describe('ratchetSitzung', () => {
       aktiviere(zweites)
       const vomTablet = await baueZustellungen(kontextVon(ALICE, BOB), 'vom Tablet', 'u-da')
       expect(vomTablet.map((z) => z.zielGeraet)).toEqual([bob.kennung])
+    })
+
+    it('sendet auch, solange das eigene Gerät beim Server wartet', async () => {
+      // Ein Gerät, das seinen Signaturschlüssel nachgerüstet hat, führt der
+      // Server als wartend (`_auffrischen`). Es ist aber nicht entfernt — und
+      // genau dieser Unterschied entschied bis 10/2026 darüber, ob jemand
+      // überhaupt senden konnte: `eigenesVerzeichnis` sah das Gerät nicht und
+      // warf `DrGeraetNichtEingetragenError`. Das eigene Gerät zählt für den
+      // eigenen Sendepfad immer; fremde Konten sehen es weiterhin erst nach
+      // der Freigabe.
+      const eintrag = verzeichnis.get(ALICE)!.find((g) => g.device_id === alice.kennung)!
+      ;(eintrag as { is_approved?: boolean }).is_approved = false
+      clearGeraeteMemory()
+      setzeAngemeldetesKonto(ALICE)
+      try {
+        aktiviere(alice)
+        expect(await baueZustellungen(kontextVon(ALICE, BOB), 'trotz Warten', 'u-wartet')).toHaveLength(1)
+      } finally {
+        setzeAngemeldetesKonto(null)
+      }
     })
 
     it('hält eine Liste von vor der eigenen Anmeldung nicht für einen Befund', async () => {

@@ -89,9 +89,20 @@ export interface RatchetAblage {
   lies(id: string): Promise<string | null>
   /**
    * Legt `zustand` unter `id` ab. Ist `marke` gesetzt, liegt sie danach
-   * ebenfalls da, in derselben Transaktion: beide oder keines.
+   * ebenfalls da, in derselben Transaktion: alles oder keines.
+   *
+   * `begleiter` sind zusätzliche Zeilen derselben Transaktion. Sie tragen die
+   * Schlüsselbindung einer Sitzung (`bindung:<id>`): der Abdruck des
+   * öffentlichen Schlüssels, zu dem diese Sitzung gehört. Wechselt die
+   * Gegenstelle ihren Schlüssel unter derselben Geräte-ID, ist die alte
+   * Sitzung wertlos — und darf nicht weiterverwendet werden.
    */
-  schreibe(id: string, zustand: string, marke?: string): Promise<void>
+  schreibe(
+    id: string,
+    zustand: string,
+    marke?: string | string[],
+    begleiter?: Record<string, string | null>,
+  ): Promise<void>
   loesche(id: string): Promise<void>
   /** Alle abgelegten Kennungen. Nur die einmalige Umbenennung braucht das. */
   alleIds(): Promise<string[]>
@@ -131,7 +142,7 @@ const indexedDbAblage: RatchetAblage = {
     const zeile = await entsiegleZeile<{ zustand?: unknown }>(roh, ratchetAad(id))
     return typeof zeile?.zustand === 'string' ? zeile.zustand : null
   },
-  async schreibe(id, zustand, marke) {
+  async schreibe(id, zustand, marke, begleiter) {
     const db = await oeffneDatenbank()
     const jetzt = new Date().toISOString()
     // Versiegeln vor der Transaktion — ein `await` mitten drin bricht sie ab.
@@ -142,7 +153,13 @@ const indexedDbAblage: RatchetAblage = {
         ratchetAad(platz),
       )
     const zeilen = [await versiegle(id, zustand)]
-    if (marke) zeilen.push(await versiegle(marke, MARKE_WERT))
+    const marken = marke === undefined ? [] : Array.isArray(marke) ? marke : [marke]
+    for (const eine of marken) zeilen.push(await versiegle(eine, MARKE_WERT))
+    const zuLoeschen: string[] = []
+    for (const [platz, wert] of Object.entries(begleiter ?? {})) {
+      if (wert === null) zuLoeschen.push(platz)
+      else zeilen.push(await versiegle(platz, wert))
+    }
     // Fertig erst mit `oncomplete`: bis dahin kann die Transaktion noch
     // abbrechen (Kontingent), und dann liegt keine der Zeilen da. Ein
     // gescheitertes `put` bricht sie ebenfalls ab und landet in `onabort`.
@@ -150,6 +167,7 @@ const indexedDbAblage: RatchetAblage = {
       const tx = db.transaction(STORE, 'readwrite')
       const store = tx.objectStore(STORE)
       for (const zeile of zeilen) store.put(zeile)
+      for (const platz of zuLoeschen) store.delete(platz)
       tx.oncomplete = () => resolve()
       tx.onabort = () => reject(tx.error ?? new Error('Transaktion abgebrochen'))
     })
@@ -258,6 +276,49 @@ async function imSchloss<T>(id: string, arbeit: () => Promise<T>): Promise<T> {
 // Der eine Weg an einen Zustand
 // ==========================================
 
+/**
+ * Eine Versandabsicht, die **mit dem Ratchet-Schritt** entsteht.
+ *
+ * Der Nachfolgezustand und der fertige Umschlag gehören zusammen: wer den
+ * Zustand fortschreibt, ohne die Bytes zu behalten, hat eine Kettenposition
+ * verbraucht und nichts, was er noch senden könnte. Beides in einer
+ * Transaktion — der Umschlag ist danach die einzige Fassung dieser Nachricht,
+ * die dieses Gerät je sieht.
+ *
+ * Die Absicht bleibt liegen, bis sie nachweislich hinaus ist. Ein Retry sendet
+ * **dieselben Bytes unter derselben Kennung**; der Server erkennt die
+ * Wiederholung, und die Gegenstelle bekommt keine zweite Kopie.
+ */
+export interface AusstehendeZustellung {
+  /** Die logische Kennung samt Gerätezusatz (`<basis>#<geraet>`). */
+  clientUuid: string
+  /** Wem die Absicht gehört. Ein anderes Konto auf diesem Gerät fasst sie nicht an. */
+  eigeneId: number
+  peerId: number
+  /** Die Mailbox, in die der Umschlag gehört. */
+  mailbox: string
+  /** Die exakten Umschlagbytes. Nie neu verschlüsseln, immer diese senden. */
+  ciphertext: string
+  isControl?: boolean
+  controlType?: string
+  /** Die Zustelladresse des Zielgeräts, falls es den neuen Weg kennt. */
+  zielInbox?: string | null
+  /**
+   * Schon vergebene Kennungen der Geräte-Inbox.
+   *
+   * Sie werden **vor** dem HTTP-Aufruf festgehalten: ging die Antwort verloren,
+   * wiederholt der nächste Lauf den Auftrag mit denselben Kennungen, und der
+   * Server gibt den angenommenen Auftrag zurück, statt einen zweiten anzulegen.
+   */
+  zustellung?: { payloadId: string; deliveryId: string } | null
+  /** Die Inbox hat abgelehnt — nur noch über die geteilte Mailbox. */
+  nurMailbox?: boolean
+  /** Wann die Absicht entstand (ISO), für die Reihenfolge des Wiederaufnehmers. */
+  angelegtAm?: string
+  /** Position im selben Schritt: 0 ist der Aufbau, 1 die Nachricht. */
+  reihenfolge?: number
+}
+
 export interface SchrittErgebnis<T> {
   /** Der Nachfolgezustand. Fehlt er, bleibt der gespeicherte unverändert. */
   naechster?: RatchetState
@@ -267,6 +328,25 @@ export interface SchrittErgebnis<T> {
    * Arbeit noch offen. Ohne `naechster` wird sie nicht geschrieben.
    */
   marke?: { bereich: Markenbereich; kennung: string }
+  /**
+   * Weitere Marken derselben Transaktion. Ein angewandter Sitzungsaufbau setzt
+   * `aufbau` (der Umschlag selbst ist erledigt) — mehr als eine Marke war bis
+   * 10/2026 nicht vorgesehen, und zwei getrennte Schreibvorgänge rissen bei
+   * einem Abbruch dazwischen auseinander.
+   */
+  marken?: { bereich: Markenbereich; kennung: string }[]
+  /**
+   * Der Abdruck des Gegenstellen-Schlüssels, zu dem dieser Zustand gehört.
+   * Wird als `bindung:<id>` in derselben Transaktion geschrieben; `null`
+   * löscht die alte Bindung, wenn der Aufbau keinen Schlüssel zum Vergleichen
+   * hatte.
+   */
+  bindung?: string | null
+  /**
+   * Versandabsichten dieser Transaktion. Sie liegen danach unter
+   * `versand:<clientUuid>` und werden erst nach belegtem Erfolg entfernt.
+   */
+  versand?: AusstehendeZustellung[]
   ergebnis: T
 }
 
@@ -301,8 +381,30 @@ export async function schritt<T>(
 
     if (ausgang.naechster) {
       try {
-        const marke = ausgang.marke && `${ausgang.marke.bereich}:${ausgang.marke.kennung}`
-        await ablage.schreibe(id, serializeRatchetState(ausgang.naechster), marke)
+        const marken = [
+          ...(ausgang.marke ? [ausgang.marke] : []),
+          ...(ausgang.marken ?? []),
+        ].map((m) => `${m.bereich}:${m.kennung}`)
+        const begleiter =
+          ausgang.bindung === undefined
+            ? undefined
+            : { [bindungSchluessel(id)]: ausgang.bindung }
+        /*
+         * Die Versandabsichten gehören in dieselbe Transaktion wie der
+         * Zustand. Zwei getrennte Schreibvorgänge hätten genau die Lücke, gegen
+         * die sie da sind: ein Abbruch dazwischen liesse eine verbrauchte
+         * Kettenposition ohne Umschlag zurück.
+         */
+        const mitVersand: Record<string, string | null> = { ...(begleiter ?? {}) }
+        for (const absicht of ausgang.versand ?? []) {
+          mitVersand[versandSchluessel(absicht.clientUuid)] = JSON.stringify(absicht)
+        }
+        await ablage.schreibe(
+          id,
+          serializeRatchetState(ausgang.naechster),
+          marken,
+          Object.keys(mitVersand).length > 0 ? mitVersand : undefined,
+        )
       } catch (fehler) {
         // Der Nachfolger liegt jetzt nirgends und wird nie gebraucht, der
         // Vorgänger liegt unverändert in der Ablage. Beide RAM-Kopien können
@@ -324,6 +426,31 @@ export async function hatSitzung(id: string): Promise<boolean> {
   return (await ablage.lies(id)) !== null
 }
 
+/** Wo der abgelegte Schlüsselabdruck einer Sitzung liegt. */
+export function bindungSchluessel(id: string): string {
+  return `bindung:${id}`
+}
+
+/**
+ * Wo eine Versandabsicht liegt. Das Präfix aus Buchstaben schliesst eine
+ * Verwechslung mit einer `sitzungsId` (`<geraet>:<konto>:<geraet>`) aus.
+ */
+export function versandSchluessel(clientUuid: string): string {
+  return `versand:${clientUuid}`
+}
+
+/**
+ * Der Abdruck des Gegenstellen-Schlüssels, zu dem diese Sitzung gehört, oder
+ * `null`.
+ *
+ * `null` heißt „nicht bekannt" — etwa bei einer Sitzung aus der Zeit vor
+ * dieser Bindung. Dann wird nichts verworfen: eine fehlende Angabe ist kein
+ * Befund.
+ */
+export async function leseBindung(id: string): Promise<string | null> {
+  return ablage.lies(bindungSchluessel(id))
+}
+
 /**
  * Wirft eine Sitzung weg.
  *
@@ -332,7 +459,14 @@ export async function hatSitzung(id: string): Promise<boolean> {
  * Gegenstück hält, ist nur noch im Weg.
  */
 export async function verwirfSitzung(id: string): Promise<void> {
-  await imSchloss(id, () => ablage.loesche(id))
+  await imSchloss(id, async () => {
+    await ablage.loesche(id)
+    // Die Bindungszeile und die Marke „war schon einmal etabliert" gehen mit.
+    // Sonst gälte ein neuer Aufbau unter derselben Kennung als Wiederaufbau
+    // einer Sitzung, die es nicht mehr gibt.
+    await ablage.loesche(bindungSchluessel(id)).catch(() => {})
+    await ablage.loesche(`etabliert:${id}`).catch(() => {})
+  })
 }
 
 // ==========================================
@@ -362,7 +496,7 @@ export async function verwirfSitzung(id: string): Promise<void> {
  *   nächste Durchlauf nicht mehr, dass eine unlesbare Nachricht dieses Geräts
  *   zu einer Fälschung gehört — und würfe ihretwegen die echte Sitzung weg.
  */
-export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen'
+export type Markenbereich = 'aufbau' | 'bruch' | 'abgewiesen' | 'etabliert'
 
 const MARKE_WERT = '1'
 
@@ -389,4 +523,118 @@ export async function kennstMarke(bereich: Markenbereich, kennung: string): Prom
 /** Hält die Marke fest. Erst rufen, wenn das Erledigen geglückt ist. */
 export async function merkeMarke(bereich: Markenbereich, kennung: string): Promise<void> {
   await ablage.schreibe(`${bereich}:${kennung}`, MARKE_WERT)
+}
+
+// ==========================================
+// Versandabsichten
+// ==========================================
+
+/** Prüft, was aus einer Zeile gelesen wurde, bevor es weiterverwendet wird. */
+function alsZustellung(roh: string | null): AusstehendeZustellung | null {
+  if (!roh) return null
+  try {
+    const wert = JSON.parse(roh) as Partial<AusstehendeZustellung> | null
+    if (!wert || typeof wert !== 'object') return null
+    if (typeof wert.clientUuid !== 'string' || !wert.clientUuid) return null
+    if (typeof wert.mailbox !== 'string' || !wert.mailbox) return null
+    if (typeof wert.ciphertext !== 'string' || !wert.ciphertext) return null
+    if (!Number.isInteger(wert.eigeneId) || !Number.isInteger(wert.peerId)) return null
+    const zustellung =
+      wert.zustellung &&
+      typeof wert.zustellung.payloadId === 'string' &&
+      typeof wert.zustellung.deliveryId === 'string'
+        ? { payloadId: wert.zustellung.payloadId, deliveryId: wert.zustellung.deliveryId }
+        : undefined
+    return {
+      clientUuid: wert.clientUuid,
+      eigeneId: Number(wert.eigeneId),
+      peerId: Number(wert.peerId),
+      mailbox: wert.mailbox,
+      ciphertext: wert.ciphertext,
+      ...(wert.isControl ? { isControl: true } : {}),
+      ...(typeof wert.controlType === 'string' ? { controlType: wert.controlType } : {}),
+      ...(typeof wert.zielInbox === 'string' && wert.zielInbox
+        ? { zielInbox: wert.zielInbox }
+        : {}),
+      ...(zustellung ? { zustellung } : {}),
+      ...(wert.nurMailbox ? { nurMailbox: true } : {}),
+      ...(typeof wert.angelegtAm === 'string' ? { angelegtAm: wert.angelegtAm } : {}),
+      ...(Number.isInteger(wert.reihenfolge) ? { reihenfolge: Number(wert.reihenfolge) } : {}),
+    }
+  } catch {
+    // Eine Zeile, die nicht aufgeht, ist keine Absicht. Sie bleibt liegen und
+    // wird beim nächsten Durchlauf übersprungen — sie kostet nie eine Nachricht,
+    // die woanders noch liegt.
+    return null
+  }
+}
+
+/**
+ * Alle offenen Versandabsichten — für den Wiederaufnehmer.
+ *
+ * `eigeneId` grenzt auf das angemeldete Konto ein: auf diesem Rechner können
+ * nacheinander mehrere Konten liegen, und eine Absicht gehört genau einem.
+ * Sortiert nach Anlage, innerhalb eines Schritts Aufbau vor Nachricht.
+ */
+export async function ausstehendeZustellungen(
+  eigeneId?: number,
+): Promise<AusstehendeZustellung[]> {
+  const ids = (await ablage.alleIds()).filter((id) => id.startsWith('versand:'))
+  const gefunden: AusstehendeZustellung[] = []
+  for (const id of ids) {
+    const absicht = alsZustellung(await ablage.lies(id))
+    if (!absicht) continue
+    if (eigeneId !== undefined && absicht.eigeneId !== eigeneId) continue
+    gefunden.push(absicht)
+  }
+  return gefunden.sort(
+    (a, b) =>
+      String(a.angelegtAm ?? '').localeCompare(String(b.angelegtAm ?? '')) ||
+      (a.reihenfolge ?? 0) - (b.reihenfolge ?? 0),
+  )
+}
+
+/** Meldet, ob zu dieser Kennung noch eine Absicht liegt. */
+export async function hatZustellung(clientUuid: string): Promise<boolean> {
+  return (await ablage.lies(versandSchluessel(clientUuid))) !== null
+}
+
+/**
+ * Schreibt den Zustand einer Absicht fort — Kennungen der Geräte-Inbox oder
+ * die Umstellung auf den Mailbox-Weg.
+ *
+ * Unter demselben Schloss wie der Versand dieser einen Kennung: zwei Tabs
+ * dürfen nicht die eine Hälfte der Kennungen des anderen überschreiben.
+ * Fehlt die Absicht (schon gesendet), ist das kein Fehler.
+ */
+export async function merkeZustellstand(
+  clientUuid: string,
+  aenderung: { zustellung?: { payloadId: string; deliveryId: string } | null; nurMailbox?: boolean },
+): Promise<void> {
+  await imSchloss(versandSchluessel(clientUuid), async () => {
+    const absicht = alsZustellung(await ablage.lies(versandSchluessel(clientUuid)))
+    if (!absicht) return
+    if (aenderung.zustellung !== undefined) {
+      if (aenderung.zustellung) absicht.zustellung = aenderung.zustellung
+      else delete absicht.zustellung
+    }
+    if (aenderung.nurMailbox !== undefined) {
+      if (aenderung.nurMailbox) absicht.nurMailbox = true
+      else delete absicht.nurMailbox
+    }
+    await ablage.schreibe(versandSchluessel(clientUuid), JSON.stringify(absicht))
+  })
+}
+
+/**
+ * Nimmt die Absicht weg — erst, wenn der Umschlag nachweislich angenommen ist.
+ *
+ * Scheitert das Löschen, bleibt die Absicht liegen und wird noch einmal
+ * gesendet. Das ist der harmlose Ausgang: dieselben Bytes unter derselben
+ * Kennung sind beim Server eine Wiederholung, keine zweite Nachricht.
+ */
+export async function entferneZustellung(clientUuid: string): Promise<void> {
+  await imSchloss(versandSchluessel(clientUuid), () =>
+    ablage.loesche(versandSchluessel(clientUuid)),
+  )
 }

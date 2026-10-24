@@ -198,6 +198,37 @@ describe('Die örtliche Gesprächsliste', () => {
     expect(await modul.gespraechsListe()).toEqual([])
   })
 
+  it('nimmt ein Gespräch aus der Liste, ohne es zu vergessen', async () => {
+    // „Chat aus Liste entfernen“ darf nur die Anzeige treffen. Ein Freund
+    // stünde sonst beim nächsten Laden wieder da, und eine ankommende
+    // Nachricht fände keinen Namen und keine Mailbox mehr vor.
+    const modul = await mitSiegel()
+    await modul.merkeGespraech(42, { username: 'Nachbarin', blindMailboxId: MAILBOX })
+
+    await modul.versteckeGespraech(42)
+
+    expect(await modul.gespraechsListe()).toEqual([])
+    expect([...(await modul.versteckteGespraeche())]).toEqual([42])
+    // Name und Mailbox bleiben: sie tragen Abo und Zuordnung.
+    expect((await modul.gespraechsPartner())).toContain(42)
+    expect((await modul.ladeGespraeche()).get(42)?.blindMailboxId).toBe(MAILBOX)
+
+    // Eine ankommende Nachricht holt die Zeile zurück.
+    await modul.zeigeGespraech(42)
+    expect((await modul.gespraechsListe()).map((g) => g.other_user_id)).toEqual([42])
+    expect([...(await modul.versteckteGespraeche())]).toEqual([])
+  })
+
+  it('holt ein verstecktes Gespräch zurück, sobald es wieder benutzt wird', async () => {
+    const modul = await mitSiegel()
+    await modul.merkeGespraech(42, { username: 'Nachbarin' })
+    await modul.versteckeGespraech(42)
+
+    await modul.merkeGespraech(42, { username: 'Nachbarin' })
+
+    expect((await modul.gespraechsListe()).map((g) => g.other_user_id)).toEqual([42])
+  })
+
   it('wirft die ältesten weg, wenn der Deckel erreicht ist', async () => {
     // Eine Ablage, die nie kleiner wird, sprengt irgendwann `localStorage` —
     // und dann fällt sie ganz aus statt nur zu schrumpfen.

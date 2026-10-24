@@ -94,6 +94,14 @@ services:
       - ./backend/.env
     environment:
       MSM_DEBUG: "true"
+      # Protokolle der Anwendung in der Standardausgabe (siehe
+      # `_protokoll_einrichten` in main.py). Ohne diese Zeile bleibt die Wurzel
+      # auf WARNING, und ein Nachrichtenweg ist im Log nicht nachvollziehbar.
+      MSM_LOG_LEVEL: "INFO"
+      # Der Dev-Stack laeuft ueber http://localhost. Ein `__Secure-`-Cookie
+      # verwirft Chromium dort, die Anmeldung waere unmoeglich (Login 200,
+      # /me 401). Nur hier: Sitzungscookies ohne Praefix und ohne `Secure`.
+      MSM_DEV_HTTP_COOKIES: "true"
     depends_on:
       panel-db:
         condition: service_healthy

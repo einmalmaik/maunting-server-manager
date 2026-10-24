@@ -65,6 +65,11 @@ export function Privacy({ zurueck, zurueckAktion }: { zurueck?: string; zurueckA
         body: t('privacyPolicy.sections.messenger.body'),
         items: [
           t('privacyPolicy.sections.messenger.items.envelopes'),
+          // Der gerätebezogene Weg: je Gerät eine eigene Zustelladresse, eine
+          // Quittung nach dem lokalen Speichern und ein Idempotenzrest ohne
+          // Inhalt. Das steht getrennt vom geteilten Postfach, weil dort andere
+          // Metadaten anfallen.
+          t('privacyPolicy.sections.messenger.items.deviceDelivery'),
           t('privacyPolicy.sections.messenger.items.deviceKey'),
           t('privacyPolicy.sections.messenger.items.deviceFanout'),
           t('privacyPolicy.sections.messenger.items.deviceHistory'),

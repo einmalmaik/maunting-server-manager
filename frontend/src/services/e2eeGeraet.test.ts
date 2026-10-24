@@ -28,8 +28,28 @@ function installiereLocalStorage() {
   }
 }
 
-const { hochgeladen, fremdeGeraete, uebernommen, umbenennen } = vi.hoisted(() => ({
-  hochgeladen: [] as { deviceId: string; publicKey: string; label: string }[],
+const {
+  hochgeladen,
+  fremdeGeraete,
+  uebernommen,
+  umbenennen,
+  gespeicherterName,
+  gespeicherteSignatur,
+  wiederFreigegeben,
+} =
+  vi.hoisted(() => ({
+  hochgeladen: [] as {
+    deviceId: string
+    publicKey: string
+    label: string
+    approvalSignature?: string
+  }[],
+  /** Was `self/reapprove` bekommen hat — Kennung und Nachweis. */
+  wiederFreigegeben: [] as { deviceId: string; nachweis: unknown }[],
+  /** Was serverseitig schon als Label steht — der Name überlebt einen Neustart. */
+  gespeicherterName: { wert: '' },
+  /** Die Selbst-Signatur des Erstgeräts, wie sie der Server führt. */
+  gespeicherteSignatur: { wert: '' },
   fremdeGeraete: {
     liste: [] as { device_id: string; public_key: string }[],
     rufe: 0,
@@ -48,14 +68,35 @@ vi.mock('./ratchetSpeicher', () => ({
 }))
 
 vi.mock('@/api/social', () => ({
-  putEigenesGeraet: vi.fn(async (req: { deviceId: string; publicKey: string; label: string }) => {
-    hochgeladen.push(req)
-    return { device_id: req.deviceId, public_key: req.publicKey, label: req.label }
-  }),
+  putEigenesGeraet: vi.fn(
+    async (req: {
+      deviceId: string
+      publicKey: string
+      label: string
+      approvalSignature?: string
+    }) => {
+      hochgeladen.push(req)
+      // Der Server überschreibt ein Label nur mit einem nicht-leeren Wert
+      // (`_auffrischen`); ein leerer Aufruf lässt den gespeicherten stehen.
+      if (!gespeicherterName.wert && req.label) gespeicherterName.wert = req.label
+      // Und eine nachgereichte Selbst-Signatur bleibt am Eintrag stehen.
+      if (req.approvalSignature) gespeicherteSignatur.wert = req.approvalSignature
+      return {
+        device_id: req.deviceId,
+        public_key: req.publicKey,
+        label: gespeicherterName.wert || req.label,
+        approval_signature: gespeicherteSignatur.wert,
+      }
+    },
+  ),
   getE2eeGeraete: vi.fn(async () => {
     fremdeGeraete.rufe += 1
     if (fremdeGeraete.fehler) throw fremdeGeraete.fehler
     return fremdeGeraete.liste
+  }),
+  reapproveEigenesGeraet: vi.fn(async (deviceId: string, nachweis: unknown) => {
+    wiederFreigegeben.push({ deviceId, nachweis })
+    return { ok: true, is_approved: true }
   }),
 }))
 
@@ -131,6 +172,8 @@ const {
   verlangeGeraeteVon,
   E2eeKeinGeraetError,
   freigabeDaten,
+  eigenesGeraetFreigegeben,
+  gibMichSelbstFrei,
   onSchluesselWarnung,
   vertrauteGeraete,
   pruefeGeraeteBeleg,
@@ -139,12 +182,16 @@ const {
   signaturSchluesselVon,
 } = await import('./e2eeGeraet')
 const { erzeugeSignaturPaar, signiere } = await import('./absenderSignatur')
+const { leereVertraute } = await import('./geraet/geraeteVertrauen')
 
 describe('e2eeGeraet', () => {
   beforeEach(() => {
     installiereIdb(platte)
     clearGeraeteMemory()
     hochgeladen.length = 0
+    wiederFreigegeben.length = 0
+    gespeicherterName.wert = ''
+    gespeicherteSignatur.wert = ''
     fremdeGeraete.liste = []
     fremdeGeraete.rufe = 0
     setzeAngemeldetesKonto(10)
@@ -228,7 +275,9 @@ describe('e2eeGeraet', () => {
     platte.clear()
     const geraet = await geraetVeroeffentlichen('Arbeitsrechner')
 
-    expect(hochgeladen).toHaveLength(1)
+    // Zwei Meldungen: der Name und, weil der Eintrag noch keine Unterschrift
+    // trug, die Selbst-Signatur. Beide Male nur der öffentliche Teil.
+    expect(hochgeladen).toHaveLength(2)
     expect(hochgeladen[0].publicKey).toBe(geraet.paar.publicKeyJwk)
 
     // Gesucht wird nach dem **Wert** des privaten Exponenten, nicht nach dem
@@ -245,11 +294,92 @@ describe('e2eeGeraet', () => {
   }, 60_000)
 
   it('meldet sich nicht zweimal in derselben Sitzung', async () => {
+    // Der zweite Aufruf darf nichts mehr senden — auch nicht den Namen, der
+    // beim ersten Mal nachgetragen wurde. Gemessen wird deshalb der Zuwachs
+    // des zweiten Aufrufs, nicht die Gesamtzahl: der erste besteht seit
+    // 10/2026 aus Melden und Nachreichen der Bezeichnung.
     platte.clear()
     await geraetVeroeffentlichen()
+    const nachErstemAufruf = hochgeladen.length
     await geraetVeroeffentlichen()
-    expect(hochgeladen).toHaveLength(1)
+    expect(hochgeladen).toHaveLength(nachErstemAufruf)
   }, 60_000)
+
+  describe('Der Name in der Geräteliste', () => {
+    it('füllt ein leeres Label mit einer erkennbaren Bezeichnung', async () => {
+      // Bis 10/2026 meldete der Web-Client ohne Label, und der Server
+      // überschreibt ein leeres Feld nie — das Gerät stand dauerhaft als
+      // „Unbenanntes Gerät“ in der Liste, direkt neben „Dieses Gerät“.
+      platte.clear()
+      await geraetVeroeffentlichen()
+
+      expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toMatch(/^(Web-Frontend|MSS-App|Pondys Browser)/)
+      expect(hochgeladen[1].label.length).toBeLessThanOrEqual(64)
+      // Und danach die Selbst-Signatur des Erstgeräts, ohne die die Liste
+      // „freigegeben“ neben „ohne gültige Freigabe“ zeigte.
+      expect(hochgeladen).toHaveLength(3)
+      expect(hochgeladen[2].label).toBe('')
+      expect(hochgeladen[2].approvalSignature).toBeTruthy()
+      expect(gespeicherteSignatur.wert).toBe(hochgeladen[2].approvalSignature)
+    }, 60_000)
+
+    it('ersetzt einen generischen Namen durch die genauere Bezeichnung', async () => {
+      // Der Server setzt für Bestandsgeräte `Web-Frontend` ein. Das ist besser
+      // als „unbenannt“, aber dieser Browser weiß, wer er ist.
+      platte.clear()
+      gespeicherterName.wert = 'Web-Frontend'
+      await geraetVeroeffentlichen()
+
+      // Die Nachreichung passiert, obwohl der Server schon einen Namen führt:
+      // früher löste nur ein leeres Feld sie aus.
+      expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toMatch(/^(Web-Frontend|MSS-App|Pondys Browser)/)
+    }, 60_000)
+
+    it('überschreibt einen vorhandenen Namen nicht', async () => {
+      // Ein gekoppeltes Gerät heißt wie seine Einladung („Arbeitsrechner“).
+      // Beim nächsten Start ruft die App ohne Argument — der Name muss stehen
+      // bleiben, sonst heißt das Gerät plötzlich „MSS-App · Windows“.
+      platte.clear()
+      gespeicherterName.wert = 'Arbeitsrechner'
+      await geraetVeroeffentlichen()
+
+      // Melden und (ohne Unterschrift) die Selbst-Signatur nachreichen — der
+      // Name selbst bleibt dabei unangetastet.
+      expect(hochgeladen).toHaveLength(2)
+      expect(hochgeladen[0].label).toBe('')
+      expect(hochgeladen[1].label).toBe('')
+      expect(gespeicherterName.wert).toBe('Arbeitsrechner')
+    }, 60_000)
+
+    it('nimmt einen ausdrücklich genannten Namen unverändert', async () => {
+      platte.clear()
+      await geraetVeroeffentlichen('Telefon')
+
+      expect(hochgeladen[0].label).toBe('Telefon')
+      expect(gespeicherterName.wert).toBe('Telefon')
+      expect(hochgeladen[1].approvalSignature).toBeTruthy()
+    }, 60_000)
+  })
+
+  describe('Ein wartendes Gerät wieder zulassen', () => {
+    it('schickt den Nachweis für die eigene Kennung, nicht für eine genannte', async () => {
+      // Die Kennung kommt aus der lokalen Identität: ein Aufrufer darf nicht
+      // bestimmen, welches Gerät freigegeben wird.
+      platte.clear()
+      const meins = await eigenesGeraet()
+      await gibMichSelbstFrei({ password: 'geheim' })
+
+      expect(wiederFreigegeben).toHaveLength(1)
+      expect(wiederFreigegeben[0].deviceId).toBe(meins.kennung)
+      // Der Nachweis reist mit, und die eigene Unterschrift dazu: sonst bleibt
+      // der Eintrag „freigegeben“ ohne Freigabe.
+      expect(wiederFreigegeben[0].nachweis).toMatchObject({ password: 'geheim' })
+      expect((wiederFreigegeben[0].nachweis as { signature?: string }).signature).toBeTruthy()
+      expect(eigenesGeraetFreigegeben()).toBe(true)
+    }, 60_000)
+  })
 
   describe('Ein Schlüssel je Konto', () => {
     it('gibt zwei Konten in einem Browser verschiedene Schlüssel', async () => {
@@ -454,6 +584,60 @@ describe('e2eeGeraet', () => {
       })
     })
 
+    it('nimmt für das eigene Konto das eigene wartende Gerät an, fremde wartende nicht', async () => {
+      // Der Server führt ein Gerät nach einem Schlüsselwechsel als wartend. Für
+      // das eigene Gerät ist das kein Grund, sich selbst auszusperren: seine
+      // Schlüssel liegen hier, und ohne es gäbe es keine eigene Kopie. Ein
+      // **anderes** wartendes Gerät des Kontos bekommt weiterhin nichts, weil
+      // es die Freigabe nicht unterschrieben hat.
+      const eigenes = await eigenesGeraet()
+      fremdeGeraete.liste = [
+        { device_id: eigenes.kennung, public_key: eigenes.paar.publicKeyJwk, is_approved: false },
+        { device_id: 'zweit', public_key: 'pk-zweit', is_approved: true },
+        { device_id: 'fremd', public_key: 'pk-fremd', is_approved: false },
+      ] as any
+
+      const liste = await verzeichnisVon(10)
+
+      expect(liste.map((g) => g.device_id)).toEqual([eigenes.kennung, 'zweit'])
+    })
+
+    it('nimmt auf dem eigenen Konto kein Gerät an, das nur der Server freigibt', async () => {
+      // Der Fall aus der Durchsicht: der Server trägt auf dem **eigenen** Konto
+      // ein Gerät ein und meldet es als freigegeben. Ohne Unterschrift eines
+      // vertrauten Geräts wäre jede ausgehende Nachricht zusätzlich für diesen
+      // Schlüssel verschlüsselt — mitgelesen, ohne Warnung.
+      await mitWarnungen(async (warnungen) => {
+        const eigene = await eigenesGeraet()
+        fremdeGeraete.liste = [
+          { device_id: eigene.kennung, public_key: eigene.paar.publicKeyJwk, is_approved: true },
+        ] as any
+        await verzeichnisVon(10)
+
+        const untergeschoben = {
+          device_id: 'fremd-00001',
+          public_key: 'pk-fremd',
+          is_approved: true,
+        }
+        fremdeGeraete.liste = [
+          { device_id: eigene.kennung, public_key: eigene.paar.publicKeyJwk, is_approved: true },
+          untergeschoben,
+        ] as any
+        // Die Liste wird zehn Minuten gehalten; ohne das Verwerfen käme die
+        // Prüfung gar nicht erst an den neuen Eintrag heran.
+        vergessenGeraete(10)
+
+        const liste = await verzeichnisVon(10)
+
+        expect(liste.map((g) => g.device_id)).toEqual([eigene.kennung])
+        expect(warnungen).toContainEqual({
+          userId: 10,
+          typ: 'unbestaetigt',
+          geraete: ['fremd-00001'],
+        })
+      })
+    })
+
     it('gibt einem Gerät, das der Server einträgt, nichts', async () => {
       // Genau der Fall, gegen den `is_approved` nicht hilft: der Server trägt
       // selbst ein Gerät ein und meldet es als freigegeben.
@@ -514,6 +698,140 @@ describe('e2eeGeraet', () => {
         geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'alt', approval_signature: sig }),
       ])
       expect(ergebnis.map((g) => g.device_id)).toEqual(['pc', 'neu'])
+    })
+
+    it('überbrückt eine signierte Freigabe eines serverseitig freigegebenen Geräts und warnt', async () => {
+      // Der gemeldete Fall: Pontis (B2) wurde auf dem Zweitgerät B1 freigegeben,
+      // nicht selbst. Client A kannte B1 nicht — die Kette riss, und A sendete
+      // still gar nichts an B2, während B2 den A wegen seines frischen
+      // Vertrauensstands erreichte. Die Unterschrift von B1 deckt Kennung und
+      // beide Schlüssel; fehlt nur die lokale Verankerung, wird B2 als Ziel
+      // aufgenommen **und sichtbar gewarnt**.
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4007, [geraet('alt', 'pk-alt')])
+      const sig = await signiere(
+        await freigabeDaten(4007, 'neu', 'pk-neu', neu.publicKeyJwk),
+        freigeber.privateKeyJwk,
+      )
+      const liste = [
+        geraet('alt', 'pk-alt'),
+        geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+          is_approved: true,
+          approved_by: 'freigeber',
+        }),
+        geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+          approved_by: 'freigeber',
+          approval_signature: sig,
+        }),
+      ]
+
+      await mitWarnungen(async (warnungen) => {
+        const ergebnis = await vertrauteGeraete(4007, liste)
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt', 'neu'])
+        expect(warnungen).toContainEqual({
+          userId: 4007,
+          typ: 'freigabe_unbestaetigt',
+          geraete: ['neu'],
+        })
+      })
+
+      // Nicht in die Vertrauensliste geschrieben: beim nächsten Abruf wird erneut
+      // geprüft und erneut gewarnt, bis ein verankertes Gerät die Kette
+      // fortsetzt oder der Mensch die Sicherheitsnummer verglichen hat.
+      await mitWarnungen(async (warnungen) => {
+        expect((await vertrauteGeraete(4007, liste)).map((g) => g.device_id)).toEqual([
+          'alt',
+          'neu',
+        ])
+        expect(warnungen).toContainEqual({
+          userId: 4007,
+          typ: 'freigabe_unbestaetigt',
+          geraete: ['neu'],
+        })
+      })
+    })
+
+    it('gibt einem selbst freigegebenen Gerät weiterhin nichts', async () => {
+      const selbst = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4008, [geraet('alt', 'pk-alt')])
+      const sig = await signiere(
+        await freigabeDaten(4008, 'selbst', 'pk-selbst', selbst.publicKeyJwk),
+        selbst.privateKeyJwk,
+      )
+      await mitWarnungen(async (warnungen) => {
+        const ergebnis = await vertrauteGeraete(4008, [
+          geraet('alt', 'pk-alt'),
+          geraet('selbst', 'pk-selbst', selbst.publicKeyJwk, {
+            is_approved: true,
+            approved_by: 'selbst',
+            approval_signature: sig,
+          }),
+        ])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt'])
+        expect(warnungen).toContainEqual({ userId: 4008, typ: 'unbestaetigt', geraete: ['selbst'] })
+      })
+    })
+
+    it('überbrückt keine Freigabe ohne oder mit falscher Unterschrift', async () => {
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      await leereVertraute()
+      await vertrauteGeraete(4011, [geraet('alt', 'pk-alt')])
+      const freigabe = geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+        is_approved: true,
+        approved_by: 'freigeber',
+      })
+      const ohneSig = geraet('neu', 'pk-neu', neu.publicKeyJwk, { approved_by: 'freigeber' })
+      const falscheSig = geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+        approved_by: 'freigeber',
+        approval_signature: await signiere('etwas anderes', freigeber.privateKeyJwk),
+      })
+
+      expect(
+        (await vertrauteGeraete(4011, [geraet('alt', 'pk-alt'), freigabe, ohneSig])).map(
+          (g) => g.device_id,
+        ),
+      ).toEqual(['alt'])
+      expect(
+        (await vertrauteGeraete(4011, [geraet('alt', 'pk-alt'), freigabe, falscheSig])).map(
+          (g) => g.device_id,
+        ),
+      ).toEqual(['alt'])
+    })
+
+    it('überbrückt auf dem eigenen Konto nicht', async () => {
+      // Dort bleibt die Kette strikt: der eigene Sendepfad verschlüsselt für
+      // jedes angenommene Zielgerät mit, und ein Brücken-Gerät hätte damit den
+      // ganzen Eigenanteil mitgelesen.
+      const EIGEN = 4012
+      const freigeber = await erzeugeSignaturPaar()
+      const neu = await erzeugeSignaturPaar()
+      setzeAngemeldetesKonto(EIGEN)
+      try {
+        await leereVertraute()
+        await vertrauteGeraete(EIGEN, [geraet('alt', 'pk-alt')])
+        const sig = await signiere(
+          await freigabeDaten(EIGEN, 'neu', 'pk-neu', neu.publicKeyJwk),
+          freigeber.privateKeyJwk,
+        )
+        const ergebnis = await vertrauteGeraete(EIGEN, [
+          geraet('alt', 'pk-alt'),
+          geraet('freigeber', 'pk-freigeber', freigeber.publicKeyJwk, {
+            is_approved: true,
+            approved_by: 'freigeber',
+          }),
+          geraet('neu', 'pk-neu', neu.publicKeyJwk, {
+            approved_by: 'freigeber',
+            approval_signature: sig,
+          }),
+        ])
+        expect(ergebnis.map((g) => g.device_id)).toEqual(['alt'])
+      } finally {
+        setzeAngemeldetesKonto(10)
+      }
     })
 
     it('beginnt mit Warnung neu, wenn keines der bekannten Geräte mehr da ist', async () => {

@@ -24,46 +24,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import i18n from '@/i18n'
 
-import { fetchE2eeEnvelopes, type BlindEnvelopeItem } from '@/api/social'
+import type { BlindEnvelopeItem } from '@/api/social'
 import {
-  decryptE2eeHybridWithKeyring,
   deriveBlindMailboxId,
   deriveGroupBlindMailboxId,
-  encryptE2eeHybrid,
-  envelopePlaintextCache,
   getCachedBlindMailboxId,
   getCachedGroupBlindMailboxId,
 } from '@/services/e2eeCrypto'
-import { QUITTUNG_PRAEFIX } from '@/services/deliveryReceiptService'
-import { verlangeGeraeteVon } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
-  entschluesseleGruppenUmschlag,
-  fordereGruppenSchluessel,
   dmZiele,
   gruppenZiele,
-  holeGeraeteSteuerung,
-  verarbeiteGruppenSteuerung,
   verschluesseleFuerGruppe,
   type GruppenKontext,
 } from '@/services/gruppenSchluessel'
 import { abonniereMailbox } from '@/services/mailboxAbo'
 import { mailboxNachweis } from '@/services/mailboxNachweis'
+import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
+import { frischeMitglieder } from '@/services/gruppen/gruppenVerteilung'
+import { baueZustellungen, type DrKontext } from '@/services/ratchetSitzung'
+import { verarbeiteGespraech } from '@/services/gespraech/verarbeitung'
 import {
-  ladeUmschlagKlartexte,
-  leseUmschlagKlartext,
-  speichereUmschlagKlartext,
-} from '@/services/messengerLocalStore'
+  baueSteuerVersand,
+  sendeSteuerpaket as sendeSteuerpaketDienst,
+  type SteuerKontext,
+} from '@/services/gespraech/steuerung'
 import {
-  baueZustellungen,
-  drUrheber,
-  liesDrUmschlag,
-  verarbeiteBootstrap,
-  verwirfDrSitzung,
-  type DrKontext,
-} from '@/services/ratchetSitzung'
-
-const HYBRID_PREFIX = 'sv-e2ee-hybrid-v1:'
+  sendeWirkung as sendeWirkungDienst,
+  type SteuerAusgang,
+} from '@/services/steuerOutbox'
+import { stosseSteuerOutboxAn } from '@/services/steuerOutboxLauf'
+import type { SteuerEintrag } from '@/services/steuerOutboxTypen'
 
 /** Mit wem oder was gesprochen wird. */
 export type GespraechsZiel =
@@ -91,32 +82,6 @@ export type Lesung =
   | { art: 'still'; env: BlindEnvelopeItem }
   | { art: 'unlesbar'; env: BlindEnvelopeItem }
 
-/**
- * Ist dieser Umschlag eine Nebenkopie, also nichts, was je im Verlauf stehen soll?
- *
- * Die Unterscheidung muss an der `client_uuid` hängen, weil ein
- * `sv-e2ee-hybrid-v1:` im Gegensatz zum Ratchet-Umschlag **keinen Kopf mit dem
- * Zielgerät** trägt: von aussen sieht eine Quittung für ein fremdes Gerät
- * genauso aus wie eine Nachricht, die für mich bestimmt war und die ich nicht
- * öffnen kann. Beides still zu verwerfen verstecke echte Brüche; beides
- * anzuzeigen füllt den Verlauf mit Rauschen, je Gerät und je Quittung eine
- * Zeile.
- *
- * Die Marken gibt es schon, sie waren nur nicht durchgezogen: `#` trennt bei
- * jeder Auffächerung die Gerätekennung ab (`…#<geraet>`, `…#i<geraet>` beim
- * Sitzungsaufbau, `…#<n>` bei der Gruppenschlüsselzustellung), und eine
- * Quittung trägt seit 09/2026 `deliv-`. Die drei Wortmarken darunter stammen
- * aus älteren Fassungen und bleiben, damit gespeicherte Umschläge von damals
- * weiter still bleiben.
- */
-export function istNebenkopie(clientUuid: string | null | undefined): boolean {
-  if (!clientUuid) return false
-  if (clientUuid.startsWith(QUITTUNG_PRAEFIX)) return true
-  if (clientUuid.includes('#')) return true
-  const klein = clientUuid.toLowerCase()
-  return klein.startsWith('ctrl-') || klein.includes('control') || klein.includes('receipt')
-}
-
 /** Ein fertiger Auftrag ans blinde Relais. */
 export interface Versandauftrag {
   blind_mailbox_id: string
@@ -124,6 +89,18 @@ export interface Versandauftrag {
   client_uuid: string
   is_control?: boolean
   control_type?: string
+  /**
+   * Die Zustelladresse des Zielgeraets, wenn es den neuen Weg kennt.
+   *
+   * Leer heisst: ueber die geteilte Mailbox (der alte Weg). Gesetzt heisst:
+   * genau dorthin, und nur dorthin — eine Doppelspur gibt es nicht.
+   */
+  ziel_inbox?: string | null
+  target_user_id?: number
+  target_device_id?: string
+  target_device_db_id?: number
+  chat_type?: 'direct' | 'group'
+  chat_id?: string
 }
 
 export interface KonversationOptionen {
@@ -149,6 +126,13 @@ export interface KonversationOptionen {
 export interface Konversation {
   /** Leer, solange keine Mailbox feststeht. */
   blindMailboxId: string
+  /**
+   * Alle Mailboxen, aus denen dieses Gespräch liest — die Kennung aus dem
+   * Chatgeheimnis und die alte, abgeleitete. Die Liste steht hier, weil der
+   * Echtzeitstrom sie braucht: ein Umschlag in der neuen Mailbox ist kein
+   * fremder Chat, auch wenn er nicht die Kennung des Gesprächs trägt.
+   */
+  leseMailboxen: string[]
   /** Der Gruppenkontext, oder `null` im Direktchat und bei unvollständiger Mitgliederliste. */
   gruppenKontext: GruppenKontext | null
   /**
@@ -158,6 +142,20 @@ export interface Konversation {
    * gehört dann nicht mehr auf den Bildschirm.
    */
   liesUmschlaege: () => Promise<Lesung[] | null>
+  /**
+   * Den Lesestand einer Lesung übernehmen — und zwar **erst**, wenn der
+   * Aufrufer sie wirklich angezeigt und abgelegt hat.
+   *
+   * Warum das nicht der Leselauf selbst tut: der Lauf endet, bevor jemand
+   * weiss, ob sein Ergebnis noch gebraucht wird. `loadMessages` verwirft eine
+   * Lesung, wenn inzwischen ein neuer Durchlauf gestartet ist
+   * (`currentLoadSeqRef`) — richtig so, sonst überschreibt ein alter Stand den
+   * neuen. Mit dem Cursor im Lauf wanderte der Stand trotzdem vor, und die
+   * verworfenen Umschläge kamen nie wieder: am 22.10.2026 fehlten dadurch
+   * Nachrichten der Gegenseite im Verlauf, obwohl sie entschlüsselt in der
+   * Klartextablage lagen.
+   */
+  uebernimmLesestand: (lesung: Lesung[]) => void
   /** Die Umschläge für eine Nachricht, in Zustellreihenfolge. */
   baueVersand: (payload: string, clientUuid: string) => Promise<Versandauftrag[]>
   /** Dasselbe für ein Steuerpaket (Quittung, Bearbeiten, Löschen). */
@@ -167,6 +165,27 @@ export interface Konversation {
     clientUuid: string,
     typ: string,
   ) => Promise<Versandauftrag[]>
+  /**
+   * Ein Steuerpaket signieren und abschicken.
+   *
+   * Derselbe Weg wie `baueSteuerversand`, nur vollständig: der Aufrufer
+   * liefert den Inhalt, die Kennung entsteht hier. Der Hintergrundlauf des
+   * Gerätepostfachs nimmt ihn für Zustellquittungen ohne offenen Chat.
+   *
+   * **Quittungen bleiben hier draußen.** Sie sind kumulativ, klein und häufig;
+   * ein Stau in einer Warteschlange würde genau das kaputt machen, was sie
+   * belegen. Eine verlorene Quittung kostet ein Häkchen.
+   */
+  sendeSteuerpaket: (payloadObj: Record<string, unknown>) => Promise<string | null>
+  /**
+   * Eine Wirkung auf eine bestehende Nachricht (Bearbeiten, Löschen, Reaktion,
+   * Anheften, Verfall) — mit dauerhafter Outbox.
+   *
+   * Scheitert der Sofortversuch am Netz, liegt die Wirkung in der Ablage und
+   * geht später hinaus; der Aufrufer behält seine lokale Wirkung. Eine
+   * endgültige Ablehnung wirft, und der Aufrufer nimmt zurück.
+   */
+  sendeWirkung: (eintrag: SteuerEintrag) => Promise<SteuerAusgang>
 }
 
 /**
@@ -256,8 +275,45 @@ export async function baueVersandFuer(
     // Mailbox — die eine, die niemand sonst mehr liest.
     const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
     const ziele = await gruppenZiele(gruppenKontext.groupId, mid)
+    const mitglieder = await frischeMitglieder(gruppenKontext).catch(() => gruppenKontext.mitglieder)
+    const meins = await eigenesGeraet().catch(() => null)
+    const listen = await Promise.all(
+      mitglieder.map(async (konto) => ({
+        konto,
+        geraete: await verlangeGeraeteVon(konto, { frisch: true }),
+      })),
+    ).catch(() => null)
+
+    if (listen && listen.length > 0) {
+      const auftraege: Versandauftrag[] = []
+      for (const { konto, geraete } of listen) {
+        for (const geraet of geraete) {
+          if (konto === gruppenKontext.eigeneId && meins && geraet.device_id === meins.kennung) {
+            continue
+          }
+          auftraege.push({
+            blind_mailbox_id: ziele.senden,
+            ciphertext_envelope: umschlag,
+            client_uuid: clientUuid,
+            chat_type: 'group',
+            chat_id: String(gruppenKontext.groupId),
+            target_user_id: konto,
+            target_device_id: geraet.device_id,
+            target_device_db_id: geraet.id,
+          })
+        }
+      }
+      if (auftraege.length > 0) return auftraege
+    }
+
     return [
-      { blind_mailbox_id: ziele.senden, ciphertext_envelope: umschlag, client_uuid: clientUuid },
+      {
+        blind_mailbox_id: ziele.senden,
+        ciphertext_envelope: umschlag,
+        client_uuid: clientUuid,
+        chat_type: 'group',
+        chat_id: String(gruppenKontext.groupId),
+      },
     ]
   }
 
@@ -266,7 +322,7 @@ export async function baueVersandFuer(
     // Umschlag. Schlägt das fehl, geht die Nachricht nicht raus — früher fiel
     // sie hier auf einen Schlüssel zurück, den das Backend aus den beiden
     // Benutzerkennungen selbst bilden kann.
-    const zustellungen = await baueZustellungen(drKontext, payload, clientUuid)
+    const zustellungen = await baueZustellungen(drKontext, payload, clientUuid, mid)
     // Wie bei der Gruppe: adressiert wird die Kennung aus dem Chatgeheimnis,
     // `mid` bleibt die Kennung des Gesprächs. `erzeuge` steht nur hier — der
     // Versand ist der Augenblick, in dem ein Gespräch wirklich beginnt, und
@@ -284,12 +340,22 @@ export async function baueVersandFuer(
           client_uuid: z.bootstrapClientUuid,
           is_control: true,
           control_type: 'dr-init',
+          ziel_inbox: z.zielInbox,
+          chat_type: 'direct',
+          chat_id: String(drKontext.peerId),
+          target_user_id: z.empfaengerId,
+          target_device_id: z.zielGeraet,
         })
       }
       auftraege.push({
         blind_mailbox_id: ziel.senden,
         ciphertext_envelope: z.nachricht,
         client_uuid: z.clientUuid,
+        ziel_inbox: z.zielInbox,
+        chat_type: 'direct',
+        chat_id: String(drKontext.peerId),
+        target_user_id: z.empfaengerId,
+        target_device_id: z.zielGeraet,
       })
     }
     return auftraege
@@ -307,9 +373,50 @@ export function useKonversation({
 }: KonversationOptionen): Konversation {
   const blindMailboxId = useMailboxId(ziel, eigeneId)
 
+  /**
+   * Was dieser Durchlauf liest, für den Echtzeitstrom.
+   *
+   * Vergleich über die zusammengesetzte Zeichenkette, nicht über die Liste:
+   * `lesen` ensteht bei jedem Durchlauf neu, und eine neue Referenz mit
+   * gleichem Inhalt würde den `useEffect` des Stroms bei jedem Takt neu binden.
+   */
+  const [leseMailboxen, setLeseMailboxen] = useState<string[]>([])
+  const leseStand = useRef('')
+
   /** Woran ein laufender Abruf merkt, dass er zu spät kommt. */
   const aktuelleMailbox = useRef('')
   aktuelleMailbox.current = blindMailboxId
+
+  /**
+   * Bis wohin dieses Gerät jede Mailbox gelesen hat, je Kennung.
+   *
+   * Der offene Chat ruft hier alle fünf Sekunden herein. Ohne diesen Stand holte
+   * jeder Abruf den ganzen Verlauf erneut: am laufenden System waren das 510
+   * Abrufe und rund 66 MB Chiffrat in 23 Minuten für **ein** offenes Gespräch,
+   * und der Browser entschlüsselte dieselben Pakete immer wieder. `since_id`
+   * kann der Server längst (`fetchAlleE2eeEnvelopes`); jetzt nennt der Client
+   * ihn auch.
+   *
+   * Je Mailbox und nicht je Gespräch: ein Direktchat liest während des Umzugs
+   * zwei Kennungen, und ein Gespräch, das man wieder öffnet, soll dort
+   * weiterlesen, wo es aufgehört hat.
+   *
+   * Der Stand lebt nur im Speicher. Ein frischer Tab beginnt bei 0 und holt
+   * einmal alles — genau das, was er braucht, um den Verlauf aufzubauen.
+   */
+  const lesestand = useRef(new Map<string, number>())
+
+  /**
+   * Die Stände abgeschlossener Läufe, die noch nicht übernommen wurden.
+   *
+   * Nach der Lesung selbst geschlüsselt: derselbe Lauf kann mehrfach bestellt
+   * werden (`liesUmschlaege` gibt bei gleichzeitigen Aufrufen dieselbe Antwort
+   * zurück), und nur wer sie behält, darf den Stand fortschreiben. Was niemand
+   * übernimmt, fällt mit der Lesung aus der `WeakMap` — und genau das ist
+   * gewollt: dann bleibt der Stand stehen und der nächste Abruf holt die
+   * Umschläge noch einmal.
+   */
+  const standsOffen = useRef(new WeakMap<Lesung[], Map<string, number>>())
 
   // Dem Echtzeitstrom sagen, dass diese Mailbox uns angeht. Ein offenes
   // Gespräch ist der Fall, in dem eine verspätete Nachricht am meisten
@@ -348,8 +455,6 @@ export function useKonversation({
   )
 
   const einDurchlauf = useCallback(async (): Promise<Lesung[] | null> => {
-    const mid = blindMailboxId
-    if (!mid || !eigeneId) return null
     // Erst entschlüsseln, wenn feststeht, welchen Schlüssel dieses Gerät hat.
     // Ein Durchlauf davor hätte keinen, fiele auf den Altpfad und schriebe
     // dessen Ergebnis in den Zwischenspeicher — der richtige Klartext käme
@@ -357,276 +462,34 @@ export function useKonversation({
     const identitaet = identitaetRef.current
     if (identitaet.state === 'loading') return null
 
-    const schluessel = identitaet.decryptionKeys
-
-    // Zuerst die eigene Geräte-Mailbox: dort liegen die Gruppenschlüssel und
-    // die Chatgeheimnisse. Ein Gerät, das sie noch nicht hat, bekäme sie sonst
-    // nie — und stünde vor einer Mailbox voller „Verschlüsselte Nachricht"
-    // oder, beim Direktchat, vor einer leeren. Vor dem Lesen, nicht danach:
-    // sonst wäre der erste Durchlauf immer der blinde.
-    await holeGeraeteSteuerung(eigeneId, (umschlag) =>
-      decryptE2eeHybridWithKeyring(umschlag, schluessel),
-    ).catch(() => 0)
-    if (aktuelleMailbox.current !== mid) return null
-
-    /**
-     * Aus welchen Mailboxen dieser Durchlauf liest.
-     *
-     * Zwei, solange der Umzug läuft: die Kennung aus dem Geheimnis und die
-     * alte, abgeleitete. Die Gegenseite bekommt das Geheimnis nicht im selben
-     * Augenblick — es reist als Steuerumschlag in ihre Geräte-Mailbox —, und
-     * wer es noch nicht hat, sendet weiter in die alte. Läse jeder nur seine
-     * eigene, verlöre das Gespräch lautlos die Hälfte seiner Nachrichten.
-     *
-     * Nach `holeGeraeteSteuerung`, nicht davor: genau dort kommt das
-     * Geheimnis an, und ein Durchlauf, der vorher fragt, liest die neue
-     * Mailbox erst beim nächsten Mal.
-     */
-    const lesen = gruppenKontext
-      ? (await gruppenZiele(gruppenKontext.groupId, mid)).lesen
-      : drKontext
-        ? (await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)).lesen
-        : [mid]
-    if (aktuelleMailbox.current !== mid) return null
-
-    const umschlaege = (
-      await Promise.all(
-        lesen.map((kennung) =>
-          fetchE2eeEnvelopes(kennung).catch(() => [] as Awaited<ReturnType<typeof fetchE2eeEnvelopes>>),
-        ),
-      )
+    const ergebnis = await verarbeiteGespraech(
+      {
+        mailbox: blindMailboxId,
+        eigeneId,
+        drKontext,
+        gruppenKontext,
+        decryptionKeys: identitaet.decryptionKeys,
+      },
+      {
+        lesestand: lesestand.current,
+        istAktuell: () => aktuelleMailbox.current === blindMailboxId,
+        meldeMailboxen: (kennungen) => {
+          const kennung = kennungen.join('|')
+          if (leseStand.current !== kennung) {
+            leseStand.current = kennung
+            setLeseMailboxen(kennungen)
+          }
+        },
+        meldeSitzungsbruch,
+        meldeAufbauAbgelehnt,
+      },
     )
-      .flat()
-      // Beide Mailboxen zählen für sich, ihre Nummern laufen also durcheinander.
-      // Sortiert wird nach Zeit, und bei Gleichstand nach Nummer — sonst
-      // sprängen die Nachrichten zweier Mailboxen im Verlauf hin und her.
-      .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)
-    if (aktuelleMailbox.current !== mid) return null
-    // Was hier steht, ist schon einmal geöffnet worden. Unverzichtbar, nicht
-    // bloß schnell: ein Ratchet-Nachrichtenschlüssel ist nach dem ersten Öffnen
-    // verbraucht, ein zweiter Versuch am selben Umschlag muss scheitern.
-    const bekannt = drKontext ? await ladeUmschlagKlartexte(mid) : new Map<number, string>()
-
-    const gebrochene: { vonKonto: number; vonGeraet: string }[] = []
-    /**
-     * Geräte, deren Sitzungsaufbau in diesem Durchlauf offen blieb, als
-     * `konto:gerät`.
-     *
-     * Ihre Nachrichten werden in diesem Durchlauf nicht geöffnet. Liefen sie
-     * gegen eine Sitzung, die es noch nicht gibt, wären sie als Bruch gewertet
-     * und verloren; so kommen sie mit dem Aufbau im nächsten Durchlauf.
-     */
-    const aufbauOffen = new Set<string>()
-    /**
-     * Geräte, von denen ein abgewiesener Sitzungsaufbau im Fenster liegt, als
-     * `konto:gerät`.
-     *
-     * Was von ihnen kommt und sich gegen die bestehende Sitzung nicht öffnen
-     * lässt, gehört zu diesem Aufbau: still, und keine Sitzung verworfen.
-     * Sonst kippte die Nachricht hinter einer Fälschung die echte Sitzung
-     * doch noch.
-     */
-    const aufbauAbgewiesen = new Set<string>()
-    /**
-     * Die jüngste Nachricht, für die der Gruppenschlüssel fehlt.
-     *
-     * Nur sie löst eine Nachforderung aus. Ältere unlesbare Nachrichten stammen
-     * aus der Zeit vor dem Beitritt oder aus einer Generation, die niemand mehr
-     * herausgibt — danach zu fragen brächte nichts und erzeugte bei jedem
-     * Ladevorgang neue Umschläge.
-     */
-    const fehlenderSchluessel = { envId: 0, keyId: '' }
-
-    const einUmschlag = async (env: BlindEnvelopeItem): Promise<Lesung> => {
-      const gespeichert = bekannt.get(env.id)
-      if (gespeichert !== undefined) {
-        // Abgelegt wird nur, was sich über den Ratchet öffnen liess, und dessen
-        // Kopf nennt den Absender. Der Zwischenspeicher weiss es nach einem
-        // Neuladen nicht mehr — ohne Absender griffe die Downgrade-Schranke
-        // im Messenger nicht.
-        const kopf = drUrheber(env.ciphertext_envelope)
-        const zwischen = envelopePlaintextCache.get(env.id)
-        return {
-          art: 'klartext',
-          env,
-          text: gespeichert,
-          vonKonto: kopf?.vonKonto ?? zwischen?.vonKonto,
-          vonGeraet: kopf?.vonGeraet ?? zwischen?.vonGeraet,
-        }
-      }
-      const zwischen = envelopePlaintextCache.get(env.id)
-      if (zwischen?.ok) {
-        return {
-          art: 'klartext',
-          env,
-          text: zwischen.plain,
-          vonKonto: zwischen.vonKonto,
-          vonGeraet: zwischen.vonGeraet,
-        }
-      }
-
-      try {
-        if (gruppenKontext) {
-          if (env.ciphertext_envelope.startsWith(HYBRID_PREFIX)) {
-            // In einer Gruppenmailbox ist ein Hybridumschlag immer ein
-            // Steuerumschlag: eine Schlüsselzustellung oder eine Nachforderung.
-            // Die Kopien für andere Geräte lassen sich nicht öffnen — beides
-            // darf nie als Nachricht im Verlauf landen.
-            try {
-              const klartext = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, schluessel)
-              await verarbeiteGruppenSteuerung(gruppenKontext, klartext)
-            } catch {
-              // Nicht für dieses Gerät bestimmt.
-            }
-            return { art: 'still', env }
-          }
-
-          const lesung = await entschluesseleGruppenUmschlag(
-            gruppenKontext.groupId,
-            env.ciphertext_envelope,
-          )
-          if (lesung.art === 'klartext') {
-            envelopePlaintextCache.set(env.id, { plain: lesung.text, ok: true })
-            return { art: 'klartext', env, text: lesung.text }
-          }
-          if (lesung.art === 'kein-schluessel' && env.id > fehlenderSchluessel.envId) {
-            fehlenderSchluessel.envId = env.id
-            fehlenderSchluessel.keyId = lesung.keyId
-          }
-          // 'unbekannt' — Altbestand aus der Zeit, als sich der Gruppenschlüssel
-          // aus der Gruppenkennung ableiten ließ. Der Weg dorthin ist
-          // geschlossen, auch lesend.
-          // 'bruch' — der Schlüssel liegt vor, der Tag stimmt nicht.
-          return { art: 'unlesbar', env }
-        }
-
-        if (drKontext) {
-          if (env.ciphertext_envelope.startsWith(HYBRID_PREFIX)) {
-            // In einer DM-Mailbox liegen die Kopien aller Zielgeräte
-            // nebeneinander: je Nachricht eine, dazu Sitzungsaufbauten und
-            // Quittungen. Die meisten kann dieses Gerät nicht öffnen, und das
-            // ist der Normalfall, kein Fehler. Bis 09/2026 fiel jede davon in
-            // den äusseren `catch` und wurde zu einer Zeile „Verschlüsselte
-            // Nachricht" — am laufenden System standen nach einer Stunde 99
-            // unechte Nachrichten im Verlauf.
-            //
-            // Still wird aber nur, was sich als Nebenkopie ausweist. Ein
-            // Umschlag mit gewöhnlicher Kennung war für dieses Gerät gedacht;
-            // dass er sich nicht öffnen lässt, gehört dann angezeigt und nicht
-            // verschwiegen.
-            let klartext: string
-            try {
-              klartext = await decryptE2eeHybridWithKeyring(env.ciphertext_envelope, schluessel)
-            } catch (fehler) {
-              if (istNebenkopie(env.client_uuid)) return { art: 'still', env }
-              throw fehler
-            }
-            const aufbau = await verarbeiteBootstrap(drKontext, klartext)
-            if (aufbau.istAufbau) {
-              if (aufbau.offen && aufbau.vonKonto && aufbau.vonGeraet) {
-                aufbauOffen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
-              }
-              if (aufbau.abgewiesen && aufbau.vonKonto && aufbau.vonGeraet) {
-                aufbauAbgewiesen.add(`${aufbau.vonKonto}:${aufbau.vonGeraet}`)
-              }
-              if (aufbau.abgelehnt && aufbau.vonGeraet) meldeAufbauAbgelehnt(aufbau.vonGeraet)
-              if (aufbau.ersetzt && aufbau.vonGeraet) meldeSitzungsbruch(aufbau.vonGeraet)
-              return { art: 'still', env }
-            }
-            envelopePlaintextCache.set(env.id, { plain: klartext, ok: true })
-            return { art: 'klartext', env, text: klartext }
-          }
-
-          const lesung = await liesDrUmschlag(drKontext, env.ciphertext_envelope, {
-            // `bekannt` oben ist eine Momentaufnahme vom Beginn dieses
-            // Durchlaufs. Diese Abfrage läuft im Sitzungsschloss und sieht
-            // deshalb auch, was ein überlappender Durchlauf oder ein zweiter
-            // Tab inzwischen geöffnet hat.
-            lies: () => leseUmschlagKlartext(mid, env.id),
-            // Erst der Klartext auf die Platte, dann der fortgeschriebene
-            // Zustand. Schlägt das fehl, scheitert der ganze Schritt und der
-            // Umschlag bleibt beim nächsten Mal lesbar.
-            lege: (text) => speichereUmschlagKlartext(mid, env.id, text),
-          }, {
-            zurueckstellen: (vonKonto, vonGeraet) => aufbauOffen.has(`${vonKonto}:${vonGeraet}`),
-            schonen: (vonKonto, vonGeraet) => aufbauAbgewiesen.has(`${vonKonto}:${vonGeraet}`),
-          })
-          if (lesung.art === 'klartext') {
-            envelopePlaintextCache.set(env.id, {
-              plain: lesung.text,
-              ok: true,
-              vonKonto: lesung.vonKonto,
-              vonGeraet: lesung.vonGeraet,
-            })
-            return {
-              art: 'klartext',
-              env,
-              text: lesung.text,
-              vonKonto: lesung.vonKonto,
-              vonGeraet: lesung.vonGeraet,
-            }
-          }
-          if (lesung.art === 'bruch') {
-            gebrochene.push({ vonKonto: lesung.vonKonto, vonGeraet: lesung.vonGeraet })
-            return { art: 'still', env }
-          }
-          if (
-            lesung.art === 'unbekannt' ||
-            lesung.art === 'fehler' ||
-            lesung.art === 'beurteilt'
-          ) {
-            // 'unbekannt' — Altbestand aus der Zeit der ableitbaren
-            // Kanalschlüssel. 'fehler' — die lokale Ablage streikte; die Sitzung
-            // bleibt unangetastet, der nächste Durchlauf versucht es erneut.
-            // 'beurteilt' — schon einmal als Bruch gewertet; sichtbar bleibt er,
-            // aber ein zweites Mal kostet er keine Sitzung mehr.
-            return { art: 'unlesbar', env }
-          }
-          // 'eigen' — der Absender kann seine eigene Ratchet-Nachricht nicht
-          // öffnen, das ist der Sinn der Sache; sein Gesprächsanteil kommt aus
-          // dem lokalen Speicher. 'fremd' — eine der aufgefächerten Kopien für
-          // ein anderes Gerät. 'zurueckgestellt' — der Aufbau davor ist noch
-          // offen; ungeöffnet und nicht zwischengespeichert, kommt der Umschlag
-          // im nächsten Durchlauf wieder. 'abgewiesen' — die Nachricht hinter
-          // einem gefälschten Aufbau; gemeldet ist der Aufbau schon.
-          return { art: 'still', env }
-        }
-
-        return { art: 'unlesbar', env }
-      } catch {
-        return { art: 'unlesbar', env }
-      }
-    }
-
-    /**
-     * Der Reihe nach, nicht nebenläufig.
-     *
-     * Nicht aus Vorsicht, sondern weil die Reihenfolge trägt: im Direktchat muss
-     * ein Sitzungsaufbau verarbeitet sein, bevor die Nachricht ankommt, für die
-     * er gilt; in der Gruppe muss die Schlüsselzustellung vor der ersten
-     * Nachricht dieser Generation liegen. Nebenläufig gelesen käme die Nachricht
-     * mit einer Chance von fünfzig Prozent zuerst.
-     */
-    const gelesen: Lesung[] = []
-    for (const env of umschlaege) gelesen.push(await einUmschlag(env))
-
-    if (aktuelleMailbox.current !== mid) return null
-
-    if (gruppenKontext && fehlenderSchluessel.keyId) {
-      // Gedrosselt und ohne Warten: die Antwort kommt als Umschlag im nächsten
-      // Durchlauf, nicht als Rückgabewert.
-      void fordereGruppenSchluessel(gruppenKontext, fehlenderSchluessel.keyId).catch(() => {})
-    }
-
-    // Gebrochene Sitzungen wegwerfen und sichtbar melden. Der nächste
-    // Sendevorgang baut von selbst eine frische auf. Eine still neu aufgebaute
-    // Sicherheitssitzung ist genau das, was ein Angreifer sich wünscht.
-    for (const bruch of gebrochene) {
-      await verwirfDrSitzung(bruch.vonKonto, bruch.vonGeraet).catch(() => {})
-      meldeSitzungsbruch(bruch.vonGeraet)
-    }
-
-    return gelesen
+    if (!ergebnis) return null
+    // **Nicht** schreiben. Erst wer diese Lesung übernimmt, rückt den Stand
+    // vor (`uebernimmLesestand`) — ein verworfener Durchlauf darf keine
+    // Umschläge mitnehmen.
+    standsOffen.current.set(ergebnis.lesungen, ergebnis.stand)
+    return ergebnis.lesungen
   }, [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef, meldeSitzungsbruch, meldeAufbauAbgelehnt])
 
   /** Der laufende Durchlauf, und der eine, der hinter ihm warten darf. */
@@ -668,67 +531,80 @@ export function useKonversation({
     return naechster
   }, [einDurchlauf])
 
+  /**
+   * Den Stand einer Lesung übernehmen — nur nach oben.
+   *
+   * Gleichzeitige Läufe können in beliebiger Reihenfolge zurückkommen; jeder
+   * Stand liegt über dem, was beim Start galt, ein kleinerer kann einen schon
+   * übernommenen also nur wiederholen, nie zurückdrehen.
+   */
+  const uebernimmLesestand = useCallback((lesung: Lesung[]) => {
+    const stand = standsOffen.current.get(lesung)
+    if (!stand) return
+    standsOffen.current.delete(lesung)
+    for (const [kennung, bis] of stand) {
+      if (bis > (lesestand.current.get(kennung) ?? 0)) {
+        lesestand.current.set(kennung, bis)
+      }
+    }
+  }, [])
+
   const baueVersand = useCallback(
     (payload: string, clientUuid: string): Promise<Versandauftrag[]> =>
       baueVersandFuer(gruppenKontext, drKontext, blindMailboxId, payload, clientUuid),
     [blindMailboxId, gruppenKontext, drKontext],
   )
 
-  const baueSteuerversand = useCallback(
-    async (payload: string, clientUuid: string, typ: string): Promise<Versandauftrag[]> => {
-      const mid = blindMailboxId
-      if (!mid) return []
-
-      if (gruppenKontext) {
-        // Quittungen laufen in der Gruppe über denselben Schlüssel wie die
-        // Nachrichten. Anders als beim Ratchet kostet das nichts: ein
-        // Gruppenschlüssel verbraucht sich nicht.
-        const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
-        return [
-          {
-            blind_mailbox_id: mid,
-            ciphertext_envelope: umschlag,
-            client_uuid: clientUuid,
-            is_control: true,
-            control_type: typ,
-          },
-        ]
-      }
-
-      if (!drKontext) return []
-      const sendPair = identitaetRef.current.sendPair
-      if (!sendPair) return []
-
-      // Quittungen bleiben auf dem Hybridumschlag und laufen bewusst **nicht**
-      // durch den Ratchet. Sie sind häufig, sie sind klein, und sie dürfen den
-      // Nachrichtenfaden unter keinen Umständen stören: eine verlorene Quittung
-      // kostet ein Häkchen, eine verbrauchte Kettenposition kostet eine
-      // Nachricht. Versiegelt wird trotzdem je Gerät einzeln — ein Konto hat
-      // keinen gemeinsamen privaten Schlüssel mehr.
-      // **Nur an die Gegenseite, und das ist eine Serverregel, keine Auslassung.**
-      // Ein Umschlag an das eigene Konto ist in einer Chat-Mailbox verboten
-      // (`relay_blind_envelope` antwortet 400, selbstadressiert gehört in die
-      // Geräte-Sync-Mailbox). Die eigenen übrigen Geräte erfahren von einer
-      // Wirkung also erst über den Gerätekanal — das gilt für Quittungen,
-      // Reaktionen und die Verfallsfrist gleichermaßen und wäre eine eigene
-      // Runde wert.
-      const geraete = await verlangeGeraeteVon(drKontext.peerId)
-      const ziel = await dmZiele(drKontext.eigeneId, drKontext.peerId, mid)
-      return Promise.all(
-        geraete.map(async (geraet, i) => ({
-          blind_mailbox_id: ziel.senden,
-          ciphertext_envelope: await encryptE2eeHybrid(payload, geraet.public_key, sendPair.publicKeyJwk),
-          // Je Gerät eine eigene Kennung, sonst gibt das Relais beim zweiten
-          // Aufruf still den ersten Umschlag zurück und nur ein Gerät erfährt
-          // von der Quittung.
-          client_uuid: `${clientUuid}#${i}`,
-          is_control: true,
-          control_type: typ,
-        })),
-      )
-    },
-    [blindMailboxId, gruppenKontext, drKontext, identitaetRef],
+  /*
+   * Die Identität wird **beim Aufruf** gelesen, nicht beim Rendern: sie
+   * wechselt mit dem Entsperren, und ein festgehaltenes Objekt schickte nach
+   * dem Sperren weiter mit dem alten Schlüssel.
+   */
+  const steuerKontext = useCallback(
+    (): SteuerKontext => ({
+      eigeneId,
+      mailbox: blindMailboxId,
+      drKontext,
+      gruppenKontext,
+      identitaet: identitaetRef.current,
+    }),
+    [blindMailboxId, eigeneId, gruppenKontext, drKontext, identitaetRef],
   )
 
-  return { blindMailboxId, gruppenKontext, liesUmschlaege, baueVersand, baueSteuerversand }
+  const baueSteuerversand = useCallback(
+    (payload: string, clientUuid: string, typ: string): Promise<Versandauftrag[]> =>
+      baueSteuerVersand(steuerKontext(), payload, clientUuid, typ),
+    [steuerKontext],
+  )
+
+  const sendeSteuerpaket = useCallback(
+    (payloadObj: Record<string, unknown>) =>
+      sendeSteuerpaketDienst(steuerKontext(), payloadObj, crypto.randomUUID()),
+    [steuerKontext],
+  )
+
+  /**
+   * Wirkungen gehen über die Outbox; nach einem erfolgreichen Senden wird
+   * angestoßen, was ältere Aufträge noch offen hat.
+   */
+  const sendeWirkung = useCallback(
+    async (eintrag: SteuerEintrag): Promise<SteuerAusgang> => {
+      const ausgang = await sendeWirkungDienst(steuerKontext(), eintrag)
+      if (ausgang === 'gesendet') void stosseSteuerOutboxAn().catch(() => {})
+      return ausgang
+    },
+    [steuerKontext],
+  )
+
+  return {
+    blindMailboxId,
+    leseMailboxen,
+    gruppenKontext,
+    liesUmschlaege,
+    uebernimmLesestand,
+    baueVersand,
+    baueSteuerversand,
+    sendeSteuerpaket,
+    sendeWirkung,
+  }
 }

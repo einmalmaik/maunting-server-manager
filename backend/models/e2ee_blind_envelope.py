@@ -12,13 +12,22 @@ def _now() -> datetime:
 
 
 class E2eeBlindEnvelope(Base):
-    """Zero-Metadata blinde Relais-Mailbox für E2EE Direkt- und Team-Chats.
+    """Blinde Relais-Mailbox für E2EE Direkt- und Team-Chats.
 
     CRITICAL PRIVACY & SECURITY INVARIANTS:
     - NO USER LINKAGE: Enthält NIEMALS user_id, recipient_id, team_id, IP-Adressen oder Absenderdaten.
     - BLINDE ADRESSIERUNG: Adressierung erfolgt ausschließlich über den blind_mailbox_id Hash.
     - DIS ENVELOPE: Der Server speichert und leitet reine DIS-Ciphertext-Umschläge weiter.
-      Kein Klartext und keine Metadaten existieren in der Datenbank.
+      Kein **Inhalt** liegt hier — weder Nachrichtentext noch Dateiname noch Anhang.
+
+    **Was hier trotzdem steht, ist Zustellmetadaten**, und wer das leugnet, rechnet
+    falsch: `blind_mailbox_id` (der Hash der Mailbox), `ciphertext_sha256`,
+    `client_uuid`, `created_at` und die Größe des Chiffretexts. Daraus lässt sich
+    ablesen, wann ein Umschlag eintrat, wie oft in dieselbe Mailbox geschrieben
+    wurde und wie groß die Nachrichten waren. Für den Direktchat ist die
+    Mailboxkennung zudem aus den beiden Kontonummern nachrechenbar (siehe
+    unten). "Zero Metadata" wäre eine falsche Zusage; zutreffend ist: **kein
+    Inhalt, keine Teilnehmerkennung, keine Absenderzuordnung.**
 
     Was die Kennung **nicht** ist, und das ist wichtig: kein Geheimnis. Bis
     09/2026 stand hier, nur die beteiligten Parteien könnten sie

@@ -179,6 +179,8 @@ export type PasskeyZweck =
   | '2fa_disable'
   | 'device_pairing'
   | 'e2ee_reset'
+  | 'e2ee_reapprove'
+  | 'e2ee_remove'
   | 'password_change'
   | 'email_change'
   | 'account_delete'
@@ -187,6 +189,7 @@ export type PasskeyZweck =
   | '2fa_change'
   | 'vault_reset'
   | 'kamera_sicherung'
+  | 'notification_channel'
 
 function nachB64url(puffer: ArrayBuffer): string {
   const bytes = new Uint8Array(puffer)

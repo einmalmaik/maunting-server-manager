@@ -21,6 +21,11 @@ vi.mock('@/api/social', () => api)
 const ablage = {
   updateMessageInLocalStore: vi.fn(async () => {}),
   leereUmschlagKlartext: vi.fn(async () => {}),
+  loescheMedium: vi.fn(async () => {}),
+  // Seit 10/2026 hängt an jedem lokalen Löschen das Aufräumen der Outbox:
+  // eine ausstehende Bearbeitung darf die Nachricht nicht wieder aufleben
+  // lassen. Was das tut, prüft `steuerOutbox.test.ts`.
+  loescheSteuerAuftraegeFuerZiel: vi.fn(async () => 0),
 }
 vi.mock('./messengerLocalStore', () => ablage)
 
@@ -28,7 +33,6 @@ const {
   grabsteinFelder,
   medienKennungen,
   tilgeInhalt,
-  tilgeNachrichtBeimServer,
   tilgeNachrichtLokal,
 } = await import('./nachrichtLoeschen')
 
@@ -114,48 +118,23 @@ describe('nachrichtLoeschen', () => {
     expect(ablage.leereUmschlagKlartext).toHaveBeenCalledWith(MAILBOX, 42)
   })
 
+  it('nimmt auch den dauerhaft abgelegten Anhang mit', async () => {
+    // Seit 10/2026 liegt ein geholter Anhang dauerhaft in der Ablage. Bliebe
+    // er dort, wäre die Nachricht nur im Text verschwunden, ihr Bild aber
+    // weiterhin auf diesem Gerät.
+    await tilgeNachrichtLokal(
+      MAILBOX,
+      nachricht({ imageAttachment: { mediaId: 'bild-1' } }),
+      '2026-09-20T01:00:00.000Z',
+    )
+
+    expect(ablage.loescheMedium).toHaveBeenCalledWith('bild-1')
+  })
+
   it('rührt den Klartextspeicher bei einer noch nicht bestätigten Nachricht nicht an', async () => {
     // Eine optimistische Zeile trägt die Uhr als Kennung, keine Umschlagkennung.
     await tilgeNachrichtLokal(MAILBOX, nachricht({ id: -1 }), '2026-09-20T01:00:00.000Z')
 
     expect(ablage.leereUmschlagKlartext).not.toHaveBeenCalled()
-  })
-
-  it('nimmt jeden Anhang einzeln und dann die Umschläge vom Server', async () => {
-    await tilgeNachrichtBeimServer(
-      MAILBOX,
-      nachricht({
-        imageAttachment: { mediaId: 'bild-1' },
-        audioAttachment: { mediaId: 'ton-1' },
-      })
-    )
-
-    expect(api.loescheChatMedium.mock.calls.map(([id]) => id).sort()).toEqual([
-      'bild-1',
-      'ton-1',
-    ])
-    // Adressiert über die logische Kennung: der Server räumt damit auch die
-    // Kopien für die übrigen Geräte weg.
-    expect(api.loescheBlindeUmschlaege).toHaveBeenCalledWith(MAILBOX, 'kennung-1')
-  })
-
-  it('meldet einen Fehlschlag, statt gelöscht zu melden', async () => {
-    api.loescheBlindeUmschlaege.mockRejectedValueOnce(new Error('403'))
-
-    await expect(
-      tilgeNachrichtBeimServer(MAILBOX, nachricht())
-    ).rejects.toThrow()
-  })
-
-  it('löscht den Anhang auch dann, wenn die Nachricht keine logische Kennung hat', async () => {
-    await tilgeNachrichtBeimServer(
-      MAILBOX,
-      nachricht({ clientUuid: undefined, imageAttachment: { mediaId: 'bild-1' } })
-    )
-
-    expect(api.loescheChatMedium).toHaveBeenCalledWith('bild-1')
-    // Ohne Kennung gibt es keinen Umschlag anzusprechen — und ein Aufruf ohne
-    // sie dürfte niemals die ganze Mailbox treffen.
-    expect(api.loescheBlindeUmschlaege).not.toHaveBeenCalled()
   })
 })

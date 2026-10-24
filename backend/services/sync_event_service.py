@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import logging
+import time
 from typing import Any
 import uuid
 
@@ -33,7 +34,7 @@ MAX_MAILBOXES = 200
 class _Subscriber:
     __slots__ = (
         "conn_id", "user_id", "team_ids", "is_admin", "queue", "loop", "created_at",
-        "mailboxes", "familie",
+        "mailboxes", "familie", "zustand", "zuletzt_gesehen",
     )
 
     def __init__(
@@ -68,6 +69,21 @@ class _Subscriber:
         #: Kennung nur herein, wenn das Konto zur Mailbox gehört **oder** ein
         #: gültiger Besitznachweis vorlag. Diese Klasse prüft nicht nach.
         self.mailboxes: set[str] = set()
+        #: `vordergrund`, `hintergrund` oder `unbekannt`.
+        #:
+        #: Eine Meldung des Betriebssystems soll **einmal** kommen. Welcher
+        #: Client sie zeigt, entscheidet deshalb der Server und nicht die Zahl
+        #: der offenen Fenster: wer im Vordergrund steht, zeigt selbst; ein
+        #: Hintergrunddienst zeigt selbst; erst wenn keiner das kann, geht ein
+        #: Push hinaus (`webpush_service`).
+        #:
+        #: `unbekannt` heisst: dieser Client hat noch nichts gemeldet — ältere
+        #: Fassungen tun das nie. Für sie gilt das alte Verhalten (jede offene
+        #: Verbindung unterdrückt den Push), damit ein Update niemanden stumm
+        #: macht.
+        self.zustand: str = "unbekannt"
+        #: Nur zum Vergleichen: welcher Vordergrund-Client war zuletzt wach.
+        self.zuletzt_gesehen: float = 0.0
 
 
 class SyncEventService:
@@ -144,6 +160,102 @@ class SyncEventService:
             sauber = set(sorted(sauber)[:MAX_MAILBOXES])
         sub.mailboxes = sauber
         return len(sauber)
+
+    @classmethod
+    def set_praesenz(cls, conn_id: str, zustand: str, *, user_id: int) -> bool:
+        """Meldet, ob dieser Client gerade vorne oder hinten steht.
+
+        Dieselbe Absicherung wie `set_mailboxes`: die `conn_id` reist durch den
+        Client, also darf sie nur der ändern, dem die Verbindung gehört.
+
+        Was hier ankommt, ist eine Angabe des Clients über sich selbst — kein
+        Nachweis. Sie entscheidet nur, **wer** eine Meldung zeigt, nicht ob
+        jemand sie zeigen darf; das prüft der Aufrufer vorher.
+        """
+        sub = cls._subscribers.get(conn_id)
+        if sub is None or sub.user_id != user_id:
+            return False
+        sauber = (zustand or "").strip().lower()
+        if sauber not in ("vordergrund", "hintergrund"):
+            return False
+        sub.zustand = sauber
+        # Nanosekunden: zwei Fenster melden sich im selben Millisekundentakt,
+        # und bei Gleichstand entschiede sonst die Reihenfolge im Dictionary
+        # statt „wer zuletzt wach war".
+        sub.zuletzt_gesehen = time.monotonic_ns()
+        return True
+
+    @classmethod
+    def zusteller_je_mailbox(cls, mailbox_id: str) -> tuple[set[str], bool]:
+        """Dasselbe fuer eine Mailbox — **ein** Zusteller je Konto, nicht je Mailbox.
+
+        Der Unterschied ist wichtig: an einer Gruppenmailbox haengen mehrere
+        Menschen. Wuerde hier einer fuer alle gewaehlt, schwiege der Rest der
+        Gruppe. Gewaehlt wird deshalb je Konto einer, und die anderen Clients
+        desselben Kontos bleiben still.
+
+        Gibt ``(Menge der conn_ids, praesenz_bekannt)`` zurueck.
+        """
+        kennung = (mailbox_id or "").strip().lower()
+        if not kennung:
+            return set(), False
+        nach_konto: dict[int, list[_Subscriber]] = {}
+        for sub in cls._subscribers.values():
+            if kennung in sub.mailboxes:
+                nach_konto.setdefault(sub.user_id, []).append(sub)
+        if not nach_konto:
+            return set(), False
+
+        bekannt = any(
+            sub.zustand != "unbekannt"
+            for gruppe in nach_konto.values()
+            for sub in gruppe
+        )
+        gewaehlt: set[str] = set()
+        for gruppe in nach_konto.values():
+            for stufe in ("vordergrund", "hintergrund"):
+                passend = [sub for sub in gruppe if sub.zustand == stufe]
+                if passend:
+                    gewaehlt.add(max(passend, key=lambda sub: sub.zuletzt_gesehen).conn_id)
+                    break
+        return gewaehlt, bekannt
+
+    @classmethod
+    def zustelllage(
+        cls,
+        *,
+        user_id: int | None = None,
+        mailbox_id: str | None = None,
+    ) -> tuple[str | None, bool]:
+        """Wer zeigt die Meldung — und weiß überhaupt jemand, wo er steht?
+
+        Gibt ``(conn_id des Zustellers, praesenz_bekannt)`` zurück.
+
+        Der Zusteller ist **einer**: erst der zuletzt aktive Vordergrund-Client,
+        sonst der zuletzt aktive Hintergrund-Client, sonst niemand. Zwei offene
+        Fenster oder zwei Apps auf demselben Gerät melden dieselbe Nachricht
+        damit nicht doppelt.
+
+        `praesenz_bekannt` ist der Schalter für das Altverhalten: solange kein
+        Client etwas gemeldet hat (ältere Fassung), gilt weiter „jede offene
+        Verbindung unterdrückt den Push". Ohne das verstummte nach einem
+        Update jeder, der eine alte App offen hat.
+        """
+        kennung = (mailbox_id or "").strip().lower() or None
+        kandidaten = [
+            sub for sub in cls._subscribers.values()
+            if (user_id is not None and sub.user_id == int(user_id))
+            or (kennung is not None and kennung in sub.mailboxes)
+        ]
+        if not kandidaten:
+            return None, False
+
+        bekannt = any(sub.zustand != "unbekannt" for sub in kandidaten)
+        for stufe in ("vordergrund", "hintergrund"):
+            passend = [sub for sub in kandidaten if sub.zustand == stufe]
+            if passend:
+                return max(passend, key=lambda sub: sub.zuletzt_gesehen).conn_id, True
+        return None, bekannt
 
     @classmethod
     def trenne(cls, user_id: int, familie: str | None = None) -> int:
@@ -246,6 +358,8 @@ class SyncEventService:
         team_id: int | None = None,
         mailbox_id: str | None = None,
         exclude_conn_id: str | None = None,
+        zusteller: str | set[str] | None = None,
+        melden_markieren: bool = False,
     ) -> int:
         """Verteilt ein Ereignis an alle berechtigten aktiven Abonnenten.
 
@@ -258,6 +372,11 @@ class SyncEventService:
         systemweites Signal; das war schon so und bleibt so.
 
         Gibt die Anzahl der erreichten Empfänger zurück.
+
+        `melden_markieren` setzt an **genau einem** Empfänger `melden: true` —
+        dem, den `zustelllage` gewählt hat. Alle anderen bekommen `melden:
+        false` und zeigen nichts von sich aus; der Server weiß dann, dass der
+        Push draußen bleiben darf, weil die Meldung schon jemand zeigt.
         """
         ziel_mailbox = mailbox_id.strip().lower() if mailbox_id else None
         payload = dict(event_data)
@@ -283,6 +402,16 @@ class SyncEventService:
                 is_recipient = True
 
             if is_recipient:
+                # Eine Kopie je Empfänger nur, wenn die Marke gesetzt wird —
+                # sonst teilen sich alle dasselbe Wörterbuch wie bisher.
+                eigene = payload
+                if melden_markieren:
+                    eigene = dict(payload)
+                    gewaehlt = (
+                        {zusteller} if isinstance(zusteller, str)
+                        else set(zusteller or ())
+                    )
+                    eigene["melden"] = conn_id in gewaehlt
                 try:
                     def _enqueue(s: _Subscriber, p: dict[str, Any]):
                         if s.queue.full():
@@ -301,9 +430,9 @@ class SyncEventService:
                         current_loop = None
 
                     if sub.loop and sub.loop.is_running() and current_loop is not sub.loop:
-                        sub.loop.call_soon_threadsafe(_enqueue, sub, payload)
+                        sub.loop.call_soon_threadsafe(_enqueue, sub, eigene)
                     else:
-                        _enqueue(sub, payload)
+                        _enqueue(sub, eigene)
                     delivered += 1
                 except Exception as e:
                     _log.warning("Fehler beim Senden des SSE-Signals an %s: %s", conn_id, e)

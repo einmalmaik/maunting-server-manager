@@ -47,6 +47,34 @@ export interface MailboxAbo {
  */
 const DECKEL = 200
 
+/**
+ * Wer erfahren will, wenn sich die Liste ändert — der Hintergrunddienst.
+ *
+ * Er hält eine eigene Verbindung und muss seine Mailboxen selbst anmelden.
+ * Ein Aufruf von dort wäre ein Ringimport (er liest diese Datei), deshalb
+ * meldet er sich hier an, statt hier aufgerufen zu werden.
+ */
+type MailboxZuhoerer = (eintraege: { mailbox_id: string; mailbox_token?: string }[]) => void
+const zuhoerer = new Set<MailboxZuhoerer>()
+
+function rufeZuhoerer(): void {
+  const eintraege = alsListe()
+  for (const f of zuhoerer) {
+    try {
+      f(eintraege)
+    } catch {
+      // Ein Zuhoerer darf die Meldung an den Strom nicht mitnehmen.
+    }
+  }
+}
+
+export function beiMailboxAenderung(f: MailboxZuhoerer): () => void {
+  zuhoerer.add(f)
+  return () => {
+    zuhoerer.delete(f)
+  }
+}
+
 let stromKennung: string | null = null
 let gewuenscht = new Map<string, string | null>()
 /** Was zuletzt erfolgreich gemeldet wurde — verhindert dieselbe Meldung zweimal. */
@@ -163,6 +191,7 @@ export function abonniereMailbox(mailboxId: string, token?: string | null): void
   }
   void melde()
   meldePush()
+  rufeZuhoerer()
 }
 
 /** Nimmt eine Mailbox aus der Liste. Beim Verlassen einer Gruppe fällig. */
@@ -170,6 +199,7 @@ export function kuendigeMailbox(mailboxId: string): void {
   const id = (mailboxId || '').trim().toLowerCase()
   if (!gewuenscht.delete(id)) return
   void melde()
+  rufeZuhoerer()
   // Auch hier, und hier besonders: was nicht mehr gemeldet wird, räumt das
   // Backend ab. Ohne diesen Aufruf bliebe die verlassene Gruppe als
   // Zustellziel stehen, und das Gerät bekäme weiter Meldungen über
@@ -187,4 +217,15 @@ export function leereMailboxAbos(): void {
 /** Nur für Tests und Diagnose: was gerade gemeldet werden soll. */
 export function offeneMailboxAbos(): string[] {
   return [...gewuenscht.keys()].sort()
+}
+
+/**
+ * Dieselbe Liste samt Nachweisen — für den Hintergrunddienst.
+ *
+ * Er hält eine eigene Verbindung und muss seine Mailboxen selbst anmelden.
+ * Kennungen allein reichen dort nicht: eine blinde Mailbox öffnet sich nur mit
+ * dem Token, den diese Sitzung kennt.
+ */
+export function offeneMailboxEintraege(): { mailbox_id: string; mailbox_token?: string }[] {
+  return alsListe()
 }

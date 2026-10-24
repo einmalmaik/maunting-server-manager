@@ -14,12 +14,33 @@
 import { renderHook, waitFor, act } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { lesungen, geraete, gruppenLesungen, gerufen, klartextCache, abgelegt } = vi.hoisted(() => ({
+import { leereOfflineAblage } from '@/lib/offlineAblage'
+import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
+import {
+  eigeneWirkungenFuer,
+  leereEigeneWirkungen,
+  merkeEigeneWirkung,
+} from '@/services/eigeneWirkungen'
+
+const { lesungen, geraete, eigeneGeraete, eigeneSteuerung, gruppenLesungen, gerufen, klartextCache, abgelegt, transport } = vi.hoisted(() => ({
   lesungen: new Map<string, any>(),
-  geraete: [] as { device_id: string; public_key: string }[],
+  geraete: [] as { device_id: string; public_key: string; inbox_hash?: string }[],
+  eigeneGeraete: [] as { device_id: string; public_key: string; inbox_hash?: string }[],
+  /** Was die eigene Geräte-Mailbox in diesem Test an Wirkungen liefert. */
+  eigeneSteuerung: [] as { klartext: string; env: { id: number; created_at: string } }[],
   gruppenLesungen: new Map<string, any>(),
   /** Der dauerhafte Klartextspeicher, nach Umschlagkennung. */
   abgelegt: new Map<number, string>(),
+  /**
+   * Die Entscheidung „Postfach oder geteilte Mailbox". Sie gehoert
+   * `gruppenTransport` und wird dort geprüft (`gruppenTransport.test.ts`);
+   * hier zaehlt, was `baueVersandFuer` daraus macht.
+   */
+  transport: {
+    art: 'mailbox' as 'mailbox' | 'inbox',
+    inboxen: [] as string[],
+    aufrufe: 0,
+  },
   /**
    * Der Zwischenspeicher schon geöffneter Umschläge, nach Umschlagkennung.
    * Die ist in der Datenbank der Primärschlüssel und damit über alle Mailboxen
@@ -51,11 +72,16 @@ vi.mock('@/api/social', () => ({
     gerufen.gelesen.push(kennung)
     return proMailbox.get(kennung) ?? umschlaege
   }),
+  fetchAlleE2eeEnvelopes: vi.fn(async (kennung: string) => {
+    gerufen.gelesen.push(kennung)
+    return proMailbox.get(kennung) ?? umschlaege
+  }),
 }))
 
 vi.mock('@/services/e2eeCrypto', () => ({
   deriveBlindMailboxId: vi.fn(async (a: number, b: number) => `dm-${Math.min(a, b)}-${Math.max(a, b)}`),
   deriveGroupBlindMailboxId: vi.fn(async (g: number) => `gruppe-${g}`),
+  deriveUserDeviceMailboxId: vi.fn(async (uid: number) => `dev-${uid}`),
   getCachedBlindMailboxId: vi.fn(() => undefined),
   getCachedGroupBlindMailboxId: vi.fn(() => undefined),
   decryptE2eeHybridWithKeyring: vi.fn(async (umschlag: string) => {
@@ -68,9 +94,11 @@ vi.mock('@/services/e2eeCrypto', () => ({
 }))
 
 vi.mock('@/services/e2eeGeraet', () => ({
-  verlangeGeraeteVon: vi.fn(async () => {
-    if (geraete.length === 0) throw new Error('kein Gerät')
-    return geraete
+  eigenesGeraet: vi.fn(async () => ({ kennung: 'eigen-a', public_key: 'eigen-pub' })),
+  verlangeGeraeteVon: vi.fn(async (uid: number) => {
+    const liste = uid === 1 ? eigeneGeraete : geraete
+    if (liste.length === 0) throw new Error('kein Gerät')
+    return liste
   }),
 }))
 
@@ -81,6 +109,15 @@ vi.mock('@/services/messengerLocalStore', () => ({
   speichereUmschlagKlartext: vi.fn(async (_mid: string, envId: number, text: string) => {
     abgelegt.set(envId, text)
   }),
+  // Der Sendepfad der Wirkungen (`services/steuerOutbox.ts`) hängt an derselben
+  // Ablage. Hier ist er nicht der Gegenstand; die Outbox hat ihren eigenen Test.
+  loadLocalMessages: vi.fn(async () => []),
+  updateMessageInLocalStore: vi.fn(async () => {}),
+  legeSteuerAuftragAn: vi.fn(async () => true),
+  schreibeSteuerAuftrag: vi.fn(async () => {}),
+  ladeSteuerAuftraege: vi.fn(async () => []),
+  loescheSteuerAuftrag: vi.fn(async () => {}),
+  loescheSteuerAuftraegeFuerZiel: vi.fn(async () => 0),
 }))
 
 vi.mock('@/services/gruppenSchluessel', () => ({
@@ -90,14 +127,21 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   fordereGruppenSchluessel: vi.fn(async (_k: any, keyId: string) => {
     gerufen.fordereGruppenSchluessel.push(keyId)
   }),
+  // Das Nachfordern eines Chatgeheimnisses prüft `gruppenSchluessel.test.ts`.
+  fordereDmGeheimnis: vi.fn(async () => false),
   verarbeiteGruppenSteuerung: vi.fn(async (_k: any, klartext: string) => {
     gerufen.verarbeiteGruppenSteuerung.push(klartext)
   }),
   // Die eigene Geräte-Mailbox. Sie steht vor dem Lesen der Gruppenmailbox und
   // bringt den Schlüssel mit; was sie im einzelnen tut, prüft
   // `gruppenSchluessel.test.ts`.
-  holeGeraeteSteuerung: vi.fn(async (eigeneId: number) => {
+  holeGeraeteSteuerung: vi.fn(async (
+    eigeneId: number,
+    _entsiegle: (umschlag: string) => Promise<string>,
+    empfange?: (klartext: string, env: { id: number; created_at: string }) => void,
+  ) => {
     gerufen.holeGeraeteSteuerung.push(eigeneId)
+    for (const eintrag of eigeneSteuerung) empfange?.(eintrag.klartext, eintrag.env)
     return 0
   }),
   verschluesseleFuerGruppe: vi.fn(async (k: any, payload: string) => `sv-e2ee-group-v1:${k.groupId}:${payload}`),
@@ -234,10 +278,15 @@ async function baueHook(
 
 describe('useKonversation', () => {
   beforeEach(() => {
+    setzeAngemeldetesKonto(ICH)
+    leereOfflineAblage()
+    leereEigeneWirkungen()
     umschlaege = []
     lesungen.clear()
     gruppenLesungen.clear()
     geraete.length = 0
+    eigeneGeraete.length = 0
+    eigeneSteuerung.length = 0
     gerufen.fordereGruppenSchluessel.length = 0
     gerufen.verwirfDrSitzung.length = 0
     gerufen.verarbeiteGruppenSteuerung.length = 0
@@ -245,6 +294,9 @@ describe('useKonversation', () => {
     gerufen.dmZiele.length = 0
     gerufen.gelesen.length = 0
     umzug.clear()
+    transport.art = 'mailbox'
+    transport.inboxen.length = 0
+    transport.aufrufe = 0
     proMailbox.clear()
     klartextCache.clear()
     abgelegt.clear()
@@ -303,6 +355,22 @@ describe('useKonversation', () => {
   })
 
   describe('Lesen im Direktchat', () => {
+    it('nennt beide Mailboxen für den Echtzeitstrom', async () => {
+      // Ein Gespräch liest nach dem Umzug aus zwei Mailboxen. Der Strom muss
+      // beide kennen, sonst lädt ein Umschlag in der neuen nicht nach.
+      umzug.set('dm-1-2', 'neu-1-2')
+      proMailbox.set('dm-1-2', [])
+      proMailbox.set('neu-1-2', [])
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      await waitFor(() => expect(result.current.leseMailboxen).toHaveLength(2))
+      expect([...result.current.leseMailboxen].sort()).toEqual(['dm-1-2', 'neu-1-2'])
+    })
+
     it('gibt Klartext zurück und legt ihn vorher ab', async () => {
       umschlaege = [umschlag(1, 'dr-1')]
       lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
@@ -326,6 +394,177 @@ describe('useKonversation', () => {
       const gelesen = await result.current.liesUmschlaege()
 
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
+    })
+
+    it('holt beim nächsten Abruf nur, was nach dem letzten kam', async () => {
+      // Der offene Chat fragt alle fünf Sekunden. Bis 10/2026 holte jeder Abruf
+      // den ganzen Verlauf: am laufenden System 510 Abrufe und rund 66 MB
+      // Chiffrat in 23 Minuten für **ein** Gespräch, und derselbe Klartext wurde
+      // immer wieder entschlüsselt. `since_id` kann der Server längst.
+      umschlaege = [umschlag(5, 'dr-1'), umschlag(12, 'dr-2')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-2', { art: 'klartext', text: 'Hallo zurück', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      // Der erste Abruf eines Tabs holt den Verlauf von vorn.
+      let gelesen: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        gelesen = await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+      // Ohne Übernahme bleibt der Stand stehen — der Aufrufer hat die Lesung
+      // noch nicht angezeigt.
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+
+      await act(async () => {
+        result.current.uebernimmLesestand(gelesen!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      // Danach nur noch, was nach der höchsten gelesenen Kennung liegt.
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 12])
+    })
+
+    it('holt eine verworfene Lesung noch einmal, statt sie mitzunehmen', async () => {
+      // Der Fall vom 22.10.2026: während der eine Durchlauf las, startete ein
+      // zweiter (Takt, Sync-Ereignis). Der erste wurde verworfen
+      // (`currentLoadSeqRef`), hatte den Stand aber schon vorgeschoben — und
+      // der zweite fand nichts mehr. Nachrichten der Gegenseite fehlten
+      // dauerhaft, bis die Seite neu lud.
+      umschlaege = [umschlag(5, 'dr-1'), umschlag(12, 'dr-2')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-2', { art: 'klartext', text: 'Hallo zurück', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      // Erster Durchlauf — sein Ergebnis wird verworfen, also nicht übernommen.
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      // Zweiter Durchlauf desselben Gesprächs: er muss dieselben Umschläge
+      // wieder bekommen.
+      const zweite = await result.current.liesUmschlaege()
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 0])
+      expect(zweite!.map((l) => l.art)).toEqual(['klartext', 'klartext'])
+
+      // Und erst wenn dieser zweite wirklich ankommt, rückt der Stand vor.
+      await act(async () => {
+        result.current.uebernimmLesestand(zweite!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 12])
+    })
+
+    it('holt einen Umschlag wieder, dem nur die Sitzung fehlt', async () => {
+      // Ein Cursor über alles hinweg wäre bequem und falsch: dieser Umschlag
+      // ist nicht kaputt, ihm fehlt nur der Aufbau. Der Ratchet-Schlüssel ist
+      // nach dem ersten Versuch verbraucht — was der Cursor überspringt, ist
+      // endgültig weg.
+      umschlaege = [umschlag(20, 'dr-1'), umschlag(30, 'dr-ohne-sitzung')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+      lesungen.set('dr-ohne-sitzung', { art: 'keine-sitzung' })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      let erste: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        erste = await result.current.liesUmschlaege()
+      })
+      await act(async () => {
+        result.current.uebernimmLesestand(erste!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      // „Alles nach 29" heißt: der Umschlag 30 kommt wieder mit.
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['dm-1-2', 29])
+    })
+
+    it('holt eine Gruppennachricht wieder, deren Schlüssel noch unterwegs ist', async () => {
+      // Dieselbe Regel für die Gruppe: ohne Schlüssel ist die Nachricht nicht
+      // verloren, sie wartet nur. Die Nachforderung ist schon raus.
+      proMailbox.set('gruppe-7', [
+        { ...umschlag(40, 'sv-e2ee-group-v1:x'), blind_mailbox_id: 'gruppe-7' },
+      ])
+      gruppenLesungen.set('sv-e2ee-group-v1:x', { art: 'kein-schluessel', keyId: 'k1' })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+
+      let erste: Awaited<ReturnType<typeof result.current.liesUmschlaege>> = null
+      await act(async () => {
+        erste = await result.current.liesUmschlaege()
+      })
+      await act(async () => {
+        result.current.uebernimmLesestand(erste!)
+      })
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      // Nachgefordert wird in jedem Durchlauf; gedrosselt wird im Dienst.
+      expect(gerufen.fordereGruppenSchluessel).toContain('k1')
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.at(-1)).toEqual(['gruppe-7', 39])
+    })
+
+    it('rückt den Lesestand nicht vor, wenn das Gespräch mitten im Abruf wechselt', async () => {
+      // Dann wird `gelesen` verworfen (`return null`). Ein Stand, der trotzdem
+      // vorrückt, überspringt beim nächsten Öffnen genau diese Umschläge — sie
+      // sind nie auf dem Bildschirm angekommen.
+      umschlaege = [umschlag(50, 'dr-1')]
+      lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result, rerender } = renderHook(
+        (props: { peerId: number }) =>
+          useKonversation({
+            ziel: { art: 'direkt', peerId: props.peerId },
+            eigeneId: ICH,
+            identitaetRef,
+            meldeSitzungsbruch: vi.fn(),
+            meldeAufbauAbgelehnt: vi.fn(),
+          }),
+        { initialProps: { peerId: DU } },
+      )
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+      let loslassen!: () => void
+      const bremse = new Promise<void>((aufloesen) => {
+        loslassen = aufloesen
+      })
+      vi.mocked(fetchAlleE2eeEnvelopes).mockImplementationOnce(async () => {
+        await bremse
+        return umschlaege as any
+      })
+
+      const lauf = result.current.liesUmschlaege()
+      await new Promise((r) => setTimeout(r, 0))
+      rerender({ peerId: 3 })
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-3'))
+      loslassen()
+      expect(await lauf).toBeNull()
+
+      rerender({ peerId: DU })
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+      await act(async () => {
+        await result.current.liesUmschlaege()
+      })
+
+      const rufe = vi
+        .mocked(fetchAlleE2eeEnvelopes)
+        .mock.calls.filter((aufruf) => aufruf[0] === 'dm-1-2')
+      expect(rufe.at(-1)![1]).toBe(0)
     })
 
     it('zeigt Altbestand als unlesbar, statt ihn zu entschlüsseln', async () => {
@@ -353,6 +592,21 @@ describe('useKonversation', () => {
       expect(meldeSitzungsbruch).toHaveBeenCalledWith('fremd-a')
     })
 
+    it('behandelt eine fehlende Sitzung als „noch nicht aufgebaut", nicht als Bruch', async () => {
+      // Die Nachricht kam vor ihrem Aufbau an. Bis 10/2026 wurde daraus ein
+      // Bruch mit Marke: die Nachricht war dauerhaft verloren, und der Verlauf
+      // meldete einen Neuaufbau, den es nie gab.
+      umschlaege = [umschlag(1, 'dr-ohne-sitzung')]
+      lesungen.set('dr-ohne-sitzung', { art: 'keine-sitzung' })
+
+      const { result, meldeSitzungsbruch } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen!.map((l) => l.art)).toEqual(['still'])
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
+    })
+
     it('behält die Sitzung, wenn nur die lokale Ablage streikte', async () => {
       // Eine volle Platte darf nicht jeden Gesprächsfaden des Geräts abreißen.
       umschlaege = [umschlag(1, 'dr-fehler')]
@@ -376,6 +630,30 @@ describe('useKonversation', () => {
 
       expect(gelesen!.map((l) => l.art)).toEqual(['still', 'still'])
       expect(meldeSitzungsbruch).toHaveBeenCalledTimes(1)
+    })
+
+    it('verarbeitet den Sitzungsaufbau vor der Nachricht, auch bei umgekehrter Zeitfolge', async () => {
+      // Der Umschlag mit der kleineren Kennung und der früheren Zeit liegt
+      // zuerst. Ohne den Vorlauf liefe die Nachricht gegen eine Sitzung, die es
+      // noch nicht gibt.
+      umschlaege = [umschlag(1, 'dr-zuerst'), umschlag(2, 'sv-e2ee-hybrid-v1:aufbau')]
+      lesungen.set('dr-zuerst', {
+        art: 'klartext',
+        text: 'kommt zuerst',
+        vonKonto: DU,
+        vonGeraet: 'fremd-a',
+      })
+      lesungen.set('sv-e2ee-hybrid-v1:aufbau', 'AUFBAU OFFEN')
+      koepfe.set('dr-zuerst', { vonKonto: DU, vonGeraet: 'fremd-a' })
+
+      const { result, meldeSitzungsbruch } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      // Der offene Aufbau ist vorher gesehen: die Nachricht wird still
+      // zurückgestellt statt als Bruch verworfen.
+      expect(gelesen!.some((l) => l.art === 'klartext')).toBe(false)
+      expect(gerufen.verwirfDrSitzung).toEqual([])
+      expect(meldeSitzungsbruch).not.toHaveBeenCalled()
     })
 
     it('stellt die Nachrichten eines Geräts zurück, solange sein Aufbau offen ist', async () => {
@@ -522,8 +800,8 @@ describe('useKonversation', () => {
       lesungen.set('dr-1', { art: 'klartext', text: 'Hallo', vonKonto: DU, vonGeraet: 'fremd-a' })
 
       const { result } = await baueHook({ art: 'direkt', peerId: DU })
-      const { fetchE2eeEnvelopes } = await import('@/api/social')
-      const vorher = vi.mocked(fetchE2eeEnvelopes).mock.calls.length
+      const { fetchAlleE2eeEnvelopes } = await import('@/api/social')
+      const vorher = vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.length
 
       // Der erste Durchlauf hängt am Abruf fest. Genau das ist das Fenster, in
       // dem am laufenden System die weiteren Aufrufe hereinkommen.
@@ -531,7 +809,7 @@ describe('useKonversation', () => {
       const bremse = new Promise<void>((aufloesen) => {
         loslassen = aufloesen
       })
-      vi.mocked(fetchE2eeEnvelopes).mockImplementationOnce(async () => {
+      vi.mocked(fetchAlleE2eeEnvelopes).mockImplementationOnce(async () => {
         await bremse
         return umschlaege as any
       })
@@ -548,7 +826,7 @@ describe('useKonversation', () => {
       loslassen()
       const alle = await Promise.all([lauf1, lauf2, lauf3])
 
-      expect(vi.mocked(fetchE2eeEnvelopes).mock.calls.length - vorher).toBe(2)
+      expect(vi.mocked(fetchAlleE2eeEnvelopes).mock.calls.length - vorher).toBe(2)
       // Der Nachzügler liest denselben Umschlag ein zweites Mal — und bekommt
       // seinen Klartext aus der Ablage, statt einen verbrauchten
       // Nachrichtenschlüssel ein zweites Mal zu benutzen.
@@ -647,7 +925,7 @@ describe('useKonversation', () => {
       umzug.set('gruppe-7', 'geheime-mailbox')
       proMailbox.set('geheime-mailbox', [umschlag(2, 'g-neu')])
       gruppenLesungen.set('g-neu', { art: 'klartext', text: 'aus der neuen' })
-      const echt = (await import('@/api/social')).fetchE2eeEnvelopes as any
+      const echt = (await import('@/api/social')).fetchAlleE2eeEnvelopes as any
       echt.mockImplementationOnce(async (k: string) => {
         gerufen.gelesen.push(k)
         return proMailbox.get(k) ?? []
@@ -721,6 +999,40 @@ describe('useKonversation', () => {
       expect(auftraege[0].ciphertext_envelope).toBe('sv-e2ee-group-v1:7:Hallo Gruppe')
       // Kein Empfänger: die Gruppenmailbox gehört allen.
       expect('recipient_id' in auftraege[0]).toBe(false)
+    })
+
+    it('schickt eine Gruppennachricht je Zielgeraet, wenn alle den neuen Weg kennen', async () => {
+      // Ein Chiffrat fuer alle, ein Zustellauftrag je Geraet. Das eigene
+      // sendende Geraet fehlt in der Liste — es hat die Nachricht lokal.
+      geraete.length = 0
+      geraete.push({ device_id: 'g-du-1', public_key: 'pk1' }, { device_id: 'g-du-2', public_key: 'pk2' })
+      eigeneGeraete.length = 0
+      eigeneGeraete.push({ device_id: 'eigen-a', public_key: 'pka' }, { device_id: 'eigen-b', public_key: 'pkb' })
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-6')
+
+      // 2 für DU, 1 für Zweitgerät eigen-b (eigen-a ist der Sender und wird übersprungen)
+      expect(auftraege).toHaveLength(3)
+      expect(auftraege.map((a) => a.target_device_id)).toEqual(['eigen-b', 'g-du-1', 'g-du-2'])
+      // Ein Chiffrat, eine logische Kennung: nur der Ort unterscheidet sich.
+      expect(new Set(auftraege.map((a) => a.ciphertext_envelope)).size).toBe(1)
+      expect(new Set(auftraege.map((a) => a.client_uuid))).toEqual(new Set(['uuid-6']))
+      expect(auftraege.every((a) => a.blind_mailbox_id === 'gruppe-7')).toBe(true)
+    })
+
+    it('bleibt bei einem Umschlag, wenn die Faehigkeitspruefung den Altweg waehlt', async () => {
+      // Wenn Geräte nicht aufgelöst werden können (z.B. Offline-Fallback),
+      // bleibt es bei einem Umschlag für die Gruppe.
+      geraete.length = 0
+      eigeneGeraete.length = 0
+
+      const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
+      const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-7')
+
+      expect(auftraege).toHaveLength(1)
+      expect(auftraege[0].target_device_id).toBeUndefined()
+      expect(auftraege[0].blind_mailbox_id).toBe('gruppe-7')
     })
 
     it('sendet nicht, solange die Mitgliederliste der Gruppe fehlt', async () => {
@@ -805,6 +1117,131 @@ describe('useKonversation', () => {
       })
 
       expect(await result.current.baueSteuerversand('{}', 'ctrl-3', 'read_receipt')).toEqual([])
+    })
+
+    it('spiegelt eine Wirkung an die eigenen übrigen Geräte', async () => {
+      // Das Web liest, die App soll dasselbe Häkchen zeigen. Der Weg dorthin
+      // ist die Geräte-Mailbox: die Chat-Mailbox weist einen Umschlag an das
+      // eigene Konto mit 400 ab. Das sendende Gerät bekommt keine Kopie.
+      geraete.push({ device_id: 'fremd-a', public_key: 'pub-a' })
+      eigeneGeraete.push(
+        { device_id: 'eigen-a', public_key: 'eigen-pub' },
+        { device_id: 'eigen-b', public_key: 'eigen-b-pub' },
+      )
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const auftraege = await result.current.baueSteuerversand(
+        '{"type":"read_receipt"}',
+        'ctrl-9',
+        'read_receipt',
+      )
+
+      const eigene = auftraege.filter((a) => a.blind_mailbox_id === 'dev-1')
+      expect(eigene.map((a) => a.client_uuid)).toEqual(['ctrl-9#own0'])
+      expect(eigene[0].ciphertext_envelope).toBe('hybrid(eigen-b-pub):{"type":"read_receipt"}')
+      expect(eigene[0].is_control && eigene[0].control_type).toBe('read_receipt')
+      // Die Gegenseite bekommt ihre Kopie unverändert daneben.
+      expect(auftraege.filter((a) => a.blind_mailbox_id === 'dm-1-2')).toHaveLength(1)
+    })
+  })
+
+  describe('Wirkungen der eigenen Zweitgeräte', () => {
+    it('liest sie aus der Geräte-Mailbox und hängt sie an die Lesung', async () => {
+      // Ein Edit aus der App muss im Web ankommen; sonst zeigt jedes Gerät
+      // eine andere Fassung derselben Nachricht.
+      const payload = JSON.stringify({
+        type: 'edit_message',
+        mailbox: 'dm-1-2',
+        actor_id: ICH,
+        new_text: 'berichtigt',
+      })
+      eigeneSteuerung.push({ klartext: payload, env: { id: 4, created_at: '2026-10-21T10:00:00Z' } })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      const wirkung = gelesen?.find((l: any) => l.text === payload)
+      expect(wirkung?.art).toBe('klartext')
+      expect(wirkung?.vonKonto).toBe(ICH)
+      // Eigene Nummer im negativen Bereich: die Geräte-Mailbox und die
+      // Chat-Mailbox vergeben unabhängig, positive kollidierten.
+      expect(wirkung?.env.id).toBe(-4)
+    })
+
+    it('wendet keine Wirkung aus einem anderen Gespräch an', async () => {
+      // Eine Löschung aus dem Chat mit C landet sonst im offenen Chat mit B.
+      const payload = JSON.stringify({ type: 'delete_message', mailbox: 'dm-1-9', actor_id: ICH })
+      eigeneSteuerung.push({
+        klartext: payload,
+        env: { id: 5, created_at: '2026-10-21T10:00:00Z' },
+      })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen).toEqual([])
+      // Aber sie ist nicht verloren: der Chat mit C ist nur gerade zu.
+      expect((await eigeneWirkungenFuer('dm-1-9')).map((w) => w.payload)).toEqual([payload])
+    })
+
+    it('holt eine aufbewahrte Wirkung nach, sobald ihr Gespräch offen ist', async () => {
+      // Das Web war zu, als die App gelöscht hat. Der Geräte-Cursor ist längst
+      // darüber hinweg; ohne die Ablage bliebe die Nachricht hier stehen.
+      const payload = JSON.stringify({ type: 'delete_message', mailbox: 'dm-1-2', actor_id: ICH })
+      await merkeEigeneWirkung({
+        mailbox: 'dm-1-2',
+        payload,
+        zeitpunkt: '2026-10-21T09:00:00Z',
+      })
+
+      const { result } = await baueHook({ art: 'direkt', peerId: DU })
+      const gelesen = await result.current.liesUmschlaege()
+
+      expect(gelesen?.some((l: any) => l.text === payload)).toBe(true)
+    })
+
+    it('verliert beim Wechsel des Gesprächs keine schon eingesammelte Wirkung', async () => {
+      // `holeGeraeteSteuerung` schiebt seinen Cursor weiter, sobald es gelesen
+      // hat. Wechselt der Mensch während des anschließenden Abrufs, endet
+      // dieser Lauf mit `null` — die Wirkung wäre ohne die Ablage weg, obwohl
+      // ihre Quelle verbraucht ist.
+      const payload = JSON.stringify({
+        type: 'edit_message',
+        mailbox: 'dm-1-2',
+        actor_id: ICH,
+        new_text: 'berichtigt',
+      })
+      const { holeGeraeteSteuerung } = await import('@/services/gruppenSchluessel')
+      let freigeben!: () => void
+      const bremse = new Promise<void>((aufloesen) => {
+        freigeben = aufloesen
+      })
+      vi.mocked(holeGeraeteSteuerung).mockImplementationOnce(async (_id, _e, empfange) => {
+        empfange?.(payload, { id: 7, created_at: '2026-10-21T10:00:00Z' })
+        await bremse
+        return 0
+      })
+
+      const optionen = (peerId: number) => ({
+        ziel: { art: 'direkt' as const, peerId },
+        eigeneId: ICH,
+        identitaetRef,
+        meldeSitzungsbruch: vi.fn(),
+        meldeAufbauAbgelehnt: vi.fn(),
+      })
+      const { result, rerender } = renderHook(
+        (props: ReturnType<typeof optionen>) => useKonversation(props),
+        { initialProps: optionen(DU) },
+      )
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-2'))
+
+      const lauf = result.current.liesUmschlaege()
+      rerender(optionen(3))
+      await waitFor(() => expect(result.current.blindMailboxId).toBe('dm-1-3'))
+      freigeben()
+
+      expect(await lauf).toBeNull()
+      expect((await eigeneWirkungenFuer('dm-1-2')).map((w) => w.payload)).toEqual([payload])
     })
   })
 })

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dienst-akku-befreien"
+description = "Enables the dienst_akku_befreien command without any pre-configured scope."
+commands.allow = ["dienst_akku_befreien"]
+
+[[permission]]
+identifier = "deny-dienst-akku-befreien"
+description = "Denies the dienst_akku_befreien command without any pre-configured scope."
+commands.deny = ["dienst_akku_befreien"]

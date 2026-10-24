@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import i18n from '@/i18n'
 import {
@@ -128,6 +128,37 @@ describe('ChatMessageBubble Resilienz & Fehlerbehandlung', () => {
       // Die Uhr für „wartet noch“ bleibt auch in der Gruppe.
       zeige(gruppe, { ...eigene, isRead: false, status: 'queued' })
       expect(screen.getByRole('img', { name: i18n.t('messenger.stateQueued') })).toBeDefined()
+    })
+
+    it('macht aus einer gescheiterten Nachricht einen Knopf zum erneuten Senden', () => {
+      const onErneutSenden = vi.fn()
+      const msg: ChatMessage = {
+        id: 77,
+        senderId: 1,
+        text: 'Kam nie an',
+        createdAt: '2026-09-25T14:30:00.000Z',
+        isSelf: true,
+        status: 'failed',
+      }
+
+      render(
+        <ChatMessageBubble
+          msg={msg}
+          kontext={defaultKontext}
+          ton={defaultTon}
+          aktionen={{ ...defaultAktionen, onErneutSenden }}
+          auswahl={defaultAuswahl}
+          medienBindung={() => ({} as any)}
+        />
+      )
+
+      // Der Text bleibt stehen — das ist der Unterschied zwischen „nicht
+      // angekommen" und „verloren".
+      expect(screen.getByText('Kam nie an')).toBeInTheDocument()
+      fireEvent.click(
+        screen.getByRole('button', { name: i18n.t('messenger.stateFailedRetry') }),
+      )
+      expect(onErneutSenden).toHaveBeenCalledWith(msg)
     })
 
     it('setzt kein natives title, die Hinweise stehen als Kurzinfo da', () => {

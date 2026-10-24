@@ -15,7 +15,13 @@ from middleware.rate_limit import auth_rate_limit, limiter
 # Nur noch das Loeschen der Cookies passiert hier direkt. Das Setzen laeuft
 # ausnahmslos ueber `issue_session`, damit kein Ausstellungsort die dort
 # zugesicherte `jti` erneut vergessen kann.
-from cookies import _clear_auth_cookies, _set_auth_cookies
+from cookies import (
+    _clear_auth_cookies,
+    _set_auth_cookies,
+    csrf_cookienamen,
+    lies_refresh_token,
+    lies_zugangstoken,
+)
 from database import get_db
 from dependencies import (
     get_current_user,
@@ -790,7 +796,7 @@ def logout(
     optional im Body. Der Widerruf laeuft danach identisch — jti auf die
     Blacklist, alle Refresh-Tokens der Familie revozieren.
     """
-    refresh_value = (req.refresh_token if req else None) or request.cookies.get("__Secure-refresh_token")
+    refresh_value = (req.refresh_token if req else None) or lies_refresh_token(request.cookies)
     family_to_revoke: str | None = None
     user_id_to_revoke: int | None = None
     if refresh_value:
@@ -800,7 +806,7 @@ def logout(
             family_to_revoke = rt.family
             AuthService.revoke_refresh_token(db, rt)
 
-    access_value = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    access_value = _bearer_token(request) or lies_zugangstoken(request.cookies)
     if access_value:
         payload = AuthService.decode_token(access_value, verify_exp=False)
         if payload:
@@ -829,6 +835,14 @@ def logout(
             AuthService.revoke_refresh_family(db, user_id_to_revoke, family_to_revoke)
         else:
             AuthService.revoke_all_user_refresh_tokens(db, user_id_to_revoke)
+        # Ein dauerhafter Kanal-Ausweis überlebt kein Abmelden. Er trifft die
+        # Kanäle **dieser** Sitzung und schliesst ihre offene Verbindung
+        # (`SyncEventService.trenne`), nicht die der anderen Geräte.
+        from services import notification_channel_service
+
+        notification_channel_service.widerrufen_familie(
+            db, user_id_to_revoke, family_to_revoke
+        )
 
     _clear_auth_cookies(response)
     return {"message": "Abgemeldet"}
@@ -857,7 +871,7 @@ def refresh(
     Wiederverwendung das ganze gekoppelte Geraet.
     """
     body_token = req.refresh_token if req else None
-    refresh_value = body_token or request.cookies.get("__Secure-refresh_token")
+    refresh_value = body_token or lies_refresh_token(request.cookies)
     if not refresh_value:
         raise HTTPException(status_code=401, detail="Kein Refresh-Token")
 
@@ -924,7 +938,10 @@ def me(
 ) -> User:
     # Cross-Origin SPA: CSRF-Cookie ist nicht per document.cookie lesbar.
     # Echo des Cookie-Werts als Header (bereits vom Browser mitgeschickt).
-    csrf = request.cookies.get("__Secure-csrf_token")
+    csrf = next(
+        (wert for name in csrf_cookienamen() if (wert := request.cookies.get(name))),
+        None,
+    )
     if csrf:
         response.headers["X-CSRF-Token"] = csrf
     return user

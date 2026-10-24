@@ -36,6 +36,7 @@ function menue(teil: Partial<Parameters<typeof ChatActionsMenu>[0]> = {}) {
     onLoeschen: vi.fn(),
     onVerlassen: vi.fn(),
     onBlockieren: vi.fn(),
+    onChatEntfernen: vi.fn(),
   }
   render(
     <ChatActionsMenu
@@ -100,6 +101,15 @@ describe('ChatActionsMenu', () => {
     cleanup()
     menue({ gruppe: gruppe({}) })
     expect(zeigt('social.profile.show')).toBe(false)
+  })
+
+  it('bietet im Direktchat das Entfernen aus der Liste, in der Gruppe nicht', () => {
+    const aktionen = menue({ kontakt: { istFreund: true, blockiert: false } })
+    fireEvent.click(screen.getByText(i18n.t('messenger.removeChatFromList')))
+    expect(aktionen.onChatEntfernen).toHaveBeenCalledTimes(1)
+    cleanup()
+    menue({ gruppe: gruppe({}) })
+    expect(zeigt('messenger.removeChatFromList')).toBe(false)
   })
 
   it('zeigt bei einem Blockierten „Blockierung aufheben"', () => {

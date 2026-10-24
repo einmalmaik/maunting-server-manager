@@ -12,16 +12,19 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 vi.mock('@/api/social', () => ({
   ladeAnhangHoch: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
+  sendMessageQueue: vi.fn(async () => ({ status: 'ok', client_uuid: 'u-1', enqueued: 1 })),
 }))
 
 vi.mock('@/lib/offlineSync', () => ({
   enqueueMessageMutation: vi.fn(),
 }))
 
-import { ladeAnhangHoch, relayE2eeEnvelope } from '@/api/social'
+import { ladeAnhangHoch, relayE2eeEnvelope, sendMessageQueue } from '@/api/social'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu, type Nutzlastangaben } from './nachrichtVersand'
+
+const queueVersand = vi.mocked(sendMessageQueue)
 
 const hochladen = vi.mocked(ladeAnhangHoch)
 const relais = vi.mocked(relayE2eeEnvelope)
@@ -250,13 +253,13 @@ describe('stelleZu', () => {
     const ids: Record<string, number> = { 'u#iA': 1, 'u#A': 12, 'u#B': 10 }
     relais.mockImplementation(async (a) => ({ id: ids[a.client_uuid as string] }) as never)
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), nachricht('B')])
-    expect(ergebnis).toEqual({ niedrigsteId: 10, verbindungsfehler: false })
+    expect(ergebnis).toEqual({ niedrigsteId: 10, verbindungsfehler: false, ueberInbox: false })
     expect(einreihen).not.toHaveBeenCalled()
   })
 
   it('zählt eine Antwort ohne Kennung nicht mit', async () => {
     relais.mockResolvedValue({} as never)
-    expect(await stelleZu([nachricht('A')])).toEqual({ niedrigsteId: 0, verbindungsfehler: false })
+    expect(await stelleZu([nachricht('A')])).toEqual({ niedrigsteId: 0, verbindungsfehler: false, ueberInbox: false })
   })
 
   it('schickt die Nachricht nicht ohne ihren Sitzungsaufbau, sondern reiht beide ein', async () => {
@@ -269,7 +272,7 @@ describe('stelleZu', () => {
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), aufbau('B'), nachricht('B')])
     expect(gesendet()).toEqual(['u#iA', 'u#iB', 'u#B'])
     expect(eingereiht()).toEqual(['u#iA', 'u#A'])
-    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: true })
+    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: true, ueberInbox: false })
   })
 
   it('hält die Nachricht auch zurück, wenn ihr Aufbau keine Gerätemarke trägt', async () => {
@@ -303,7 +306,7 @@ describe('stelleZu', () => {
     relais.mockRejectedValue(new Error('offline'))
     const ergebnis = await stelleZu([aufbau('A'), nachricht('A'), aufbau('B'), nachricht('B')])
     expect(eingereiht()).toEqual(['u#iA', 'u#A', 'u#iB', 'u#B'])
-    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true })
+    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true, ueberInbox: false })
   })
 
   it('lässt einen Steuerumschlag nach einem gescheiterten Aufbau durch', async () => {
@@ -316,5 +319,52 @@ describe('stelleZu', () => {
     await stelleZu([aufbau('A'), auftrag('g#1', { is_control: true, control_type: 'gruppenschluessel' })])
     expect(gesendet()).toEqual(['u#iA', 'g#1'])
     expect(eingereiht()).toEqual(['u#iA'])
+  })
+})
+
+describe('stelleZu über die FIFO-Queue', () => {
+  function auftrag(extra: Partial<Versandauftrag> = {}): Versandauftrag {
+    return {
+      blind_mailbox_id: 'mb',
+      ciphertext_envelope: 'inhalt',
+      client_uuid: 'u-1#A',
+      chat_type: 'direct',
+      chat_id: '5',
+      ...extra,
+    }
+  }
+
+  beforeEach(() => {
+    queueVersand.mockReset()
+    queueVersand.mockResolvedValue({ status: 'ok', client_uuid: 'u-1', enqueued: 1 })
+  })
+
+  it('sendet alle Umschläge über die neue Queue, wenn chat_type und chat_id vorhanden sind', async () => {
+    const ergebnis = await stelleZu([
+      auftrag({ client_uuid: 'u-1#A' }),
+      auftrag({ client_uuid: 'u-1#B' }),
+    ])
+
+    expect(relais).not.toHaveBeenCalled()
+    expect(queueVersand).toHaveBeenCalledTimes(1)
+    expect(queueVersand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_uuid: 'u-1',
+        chat_type: 'direct',
+        chat_id: '5',
+        envelopes: expect.arrayContaining([
+          expect.objectContaining({ encrypted_payload: 'inhalt' }),
+        ]),
+      }),
+    )
+    expect(ergebnis).toEqual({ niedrigsteId: 1, verbindungsfehler: false, ueberInbox: true })
+  })
+
+  it('reiht bei Netzwerkfehlern in die Offline-Queue ein', async () => {
+    queueVersand.mockRejectedValue(new Error('offline'))
+    const ergebnis = await stelleZu([auftrag({ client_uuid: 'u-1#A' })])
+
+    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true, ueberInbox: true })
+    expect(einreihen).toHaveBeenCalled()
   })
 })

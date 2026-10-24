@@ -61,21 +61,29 @@ def _ist_blockiert(db: Session, user_a_id: int, user_b_id: int) -> bool:
 
 # Wie lange ein hochgeladener Blob serverseitig liegen bleibt.
 #
-# Die Zahl haengt an der laengsten Verfallsfrist, die ein Nutzer im Chat waehlen
-# kann (`VERFALL_STUFEN` in `frontend/src/services/nachrichtVerfall.ts`, derzeit
-# 90 Tage). Sie stand bis 09/2026 auf 30 und war damit kuerzer als die Frist,
-# die im Chat einstellbar ist: eine 40 Tage alte Nachricht war noch da, ihr Bild
-# aber nicht mehr abrufbar, und die Anlage brach mit einem 410 weg. Der
-# Empfaenger sah eine kaputte Nachricht, ohne dass jemand etwas geloescht haette.
+# Seit 23.10.2026 gilt die verbindliche Nutzerentscheidung: neue Uploads
+# bleiben 30 Tage, danach loescht der stuendliche Lauf den Chiffratblock. Die
+# Serverkopie ist nur der Erstdownload fuer die Geraete. Die lokale
+# Verfallsfrist im Chat (bis 90 Tage, `VERFALL_STUFEN` in
+# `frontend/src/services/nachrichtVerfall.ts`) ist eine eigene Regel und wird
+# von dieser Zahl nicht ersetzt: ein Anhang, der vor der Serverfrist gesichert
+# wurde, bleibt auf dem Geraet lesbar; ein spaeterer Abruf vom Server ist nach
+# 30 Tagen nicht mehr moeglich.
 #
-# Wer eine laengere Stufe in `VERFALL_STUFEN` ergaenzt, muss diese Zahl
-# mitziehen. `test_medien_aufbewahrung_deckt_laengste_verfallsfrist` haelt das
+# Die Verkuerzung wirkt nicht rueckwirkend. `expires_at` steht beim Upload in
+# der Zeile; bestehende Zeilen behalten ihren gespeicherten Wert (bis zu 90
+# Tage) und laufen damit ohne Migration aus, spaetestens 90 Tage nach ihrem
+# Upload. `cleanup_expired_media` loescht nur, was seine gespeicherte Frist
+# ueberschritten hat. Kein Bestand wird vor seiner beworbenen Frist entfernt.
+#
+# Wer eine laengere lokale Verfallsfrist ergaenzt, zieht diese Zahl nicht mit.
+# `test_medien_aufbewahrung_ist_30_tage_fuer_neue_uploads` haelt beide Regeln
 # fest.
-MEDIEN_AUFBEWAHRUNG_TAGE = 90
+MEDIEN_AUFBEWAHRUNG_TAGE = 30
 
 # Wie viel ein Konto gleichzeitig an Anhaengen liegen haben darf. Ohne Grenze
 # fuellte ein einzelnes Konto mit 60-MB-Uploads die Platte. 2 GiB sind bei
-# 90 Tagen Aufbewahrung weit mehr, als Fotos, Sprachnachrichten und Dateien im
+# 30 Tagen Aufbewahrung weit mehr, als Fotos, Sprachnachrichten und Dateien im
 # Alltag brauchen; abgelaufene Anhaenge raeumt der Stundenjob ab.
 MEDIEN_KONTINGENT_BYTES = 2 * 1024 * 1024 * 1024
 
@@ -243,6 +251,7 @@ class ChatMediaService:
             )
         blob_sha256 = hashlib.sha256(blob_bytes).hexdigest()
         media_id = str(uuid.uuid4())
+        jetzt = _now()
 
         media = ChatMedia(
             id=media_id,
@@ -255,8 +264,8 @@ class ChatMediaService:
             file_name=clean_name,
             size_bytes=len(blob_bytes),
             sha256=blob_sha256,
-            created_at=_now(),
-            expires_at=_now() + timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE),
+            created_at=jetzt,
+            expires_at=jetzt + timedelta(days=MEDIEN_AUFBEWAHRUNG_TAGE),
         )
         db.add(media)
         db.commit()
@@ -323,7 +332,13 @@ class ChatMediaService:
 
     @classmethod
     def cleanup_expired_media(cls, db: Session) -> int:
-        """Loescht Anhaenge, deren Aufbewahrung abgelaufen ist.
+        """Loescht Anhaenge, deren gespeicherte Aufbewahrung abgelaufen ist.
+
+        Massgeblich ist allein `expires_at` in der Zeile, nicht die heutige
+        Konstante. Damit laufen Zeilen aus der Zeit vor der Verkuerzung auf
+        30 Tage mit ihrer damaligen Frist aus (bis zu 90 Tage nach dem Upload),
+        und der Lauf fasst sie nicht vorher an. Eine Migration braucht es
+        dafuer nicht.
 
         Bis 09/2026 galt `expires_at` nur beim Abruf (410) — der verschluesselte
         Blob lag danach unbegrenzt weiter in der Datenbank. Die Frist steht in

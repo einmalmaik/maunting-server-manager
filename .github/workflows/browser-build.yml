@@ -100,16 +100,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          previous_feed="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[].name] | any(. == "releases.pontis.json") | select(.)')"
-          previous_version=""
-          if [[ -n "$previous_feed" ]]; then
-            previous_version="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.pontis.json"))] | last | .tag_name // empty' | sed 's/^v//')"
-          fi
-          # Ein zweiter Lauf fuer denselben Tag findet das eigene Paket als
-          # "vorheriges"; vpk pack bricht dann mit "exists" ab (20.10.2026).
+          # Die **neueste** Veroeffentlichung mit Pontis-Feed, ueber alle Seiten.
+          #
+          # `--paginate` wendet `--jq` je Seite an, und `last` liefert dort den
+          # aeltesten Eintrag der Seite, nicht den neuesten des Repos. Sobald
+          # zwei Releases einen Feed haben (Vorgaenger und aktueller Tag),
+          # verglich der Rerun-Schutz deshalb mit dem Vorgaenger, hielt den Lauf
+          # fuer einen neuen und rief `vpk download` — der Lauf lud das eigene
+          # Paket und `vpk pack` brach mit "exists" ab (20.10.2026).
+          feed_releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.draft == false) | select(any(.assets[]; .name == "releases.pontis.json")) | [.published_at, .tag_name] | @tsv')"
+          previous_version="$(printf '%s\n' "$feed_releases" | sort | tail -1 | cut -f2 | sed 's/^v//')"
+          # Ein zweiter Lauf fuer denselben Tag (oder ein aelterer Stand im
+          # Feed) findet das eigene Paket als "vorheriges"; `vpk pack` bricht
+          # dann mit "exists" ab. Dann wird ohne Delta gebaut (20.10.2026).
           if [[ -n "$previous_version" && "$previous_version" != "${{ steps.version.outputs.clean_version }}" ]]; then
-            vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "browser-velopack" --channel "pontis"
+            # Derselbe Release, mit dem verglichen wurde — nicht der gerade
+            # neueste des Feeds.
+            vpk download github --repoUrl "https://github.com/mauntingstudios/maunting-service-manager" --outputDir "browser-velopack" --channel "pontis" --release "$previous_version"
           else
+            # Entweder gibt es noch keinen Feed oder der neueste ist dieser
+            # Tag (zweiter Lauf). Beides baut ein Vollpaket, ohne Download.
             echo "Kein aelterer Pontis-Feed; das Paket wird als Vollpaket gebaut."
           fi
 

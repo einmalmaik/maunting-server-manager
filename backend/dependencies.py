@@ -1,9 +1,11 @@
 import logging
+from dataclasses import dataclass
 from typing import Callable
 
 from fastapi import Depends, HTTPException, Request, WebSocket
 from sqlalchemy.orm import Session
 
+from cookies import csrf_cookienamen, lies_refresh_token, lies_zugangstoken
 from database import get_db
 from models import User
 from services.auth_service import AuthService
@@ -84,13 +86,61 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     # immer demselben Token. Für das Panel ändert sich nichts: Browser senden
     # den Header nie von selbst. Beide Wege laufen durch `_user_from_token`,
     # damit jti-Pflicht und Blacklist (Logout-Widerruf) auch für Bearer gelten.
-    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    token = _bearer_token(request) or lies_zugangstoken(request.cookies)
     return _user_from_token(token, db)
+
+
+@dataclass(frozen=True)
+class SyncTeilnehmer:
+    """Wer an einem Ereignisstrom hängt — und mit welcher Familie.
+
+    `kanal_id` ist gesetzt, wenn der Zugang über einen dauerhaften
+    Kanal-Ausweis läuft. Dann gehört die Verbindung dieser Kennung und nicht
+    der Sitzung: `SyncEventService.trenne(user_id, "kanal:<id>")` findet sie
+    beim Widerruf, und ein Abmelden eines anderen Geräts lässt sie stehen.
+    """
+
+    user: User
+    familie: str | None
+    kanal_id: int | None = None
+
+
+def sync_teilnehmer(request: Request, db: Session = Depends(get_db)) -> SyncTeilnehmer:
+    """Zugang zum Ereignisstrom: Sitzung **oder** dauerhafter Kanal-Ausweis.
+
+    Der zweite Weg ist für den Hintergrunddienst eines Geräts. Er darf nur
+    zuhören: Präsenz melden, Mailboxen abonnieren, den Strom lesen. Deshalb
+    hängt diese Abhängigkeit an genau diesen Routen und an keiner anderen —
+    ein Ausweis fürs Zuhören öffnet kein Konto.
+
+    Erst der normale Weg (Bearer-JWT oder Cookie), dann der Ausweis. Schlägt
+    beides fehl, kommt die ursprüngliche 401 des normalen Wegs zurück; ein
+    widerrufener Ausweis verrät nicht, dass er einmal galt.
+    """
+    from fastapi import HTTPException
+
+    from services import notification_channel_service
+
+    try:
+        konto = get_current_user(request=request, db=db)
+        return SyncTeilnehmer(user=konto, familie=session_familie(request))
+    except HTTPException as fehler:
+        if fehler.status_code not in (401, 403):
+            raise
+        treffer = notification_channel_service.aus_bearer(
+            db, request.headers.get("authorization")
+        )
+        if treffer is None:
+            raise fehler
+        kanal, konto = treffer
+        return SyncTeilnehmer(
+            user=konto, familie=f"kanal:{kanal.id}", kanal_id=kanal.id
+        )
 
 
 def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
     """Liefert den authentifizierten Benutzer oder None, wenn keine gültige Sitzung vorliegt."""
-    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    token = _bearer_token(request) or lies_zugangstoken(request.cookies)
     if not token:
         return None
     try:
@@ -173,7 +223,7 @@ def get_current_user_for_ws(ws: WebSocket, db: Session) -> User:
     if token is None:
         if not ws_origin_erlaubt(ws.headers.get("origin")):
             raise HTTPException(status_code=403, detail="Herkunft nicht erlaubt.")
-        token = ws.cookies.get("__Secure-access_token")
+        token = lies_zugangstoken(ws.cookies)
     return _user_from_token(token, db)
 
 
@@ -204,7 +254,7 @@ def ws_session_herkunft(ws: WebSocket) -> str:
     Token gehoeren. Alles, was nicht ausdruecklich ``"desktop"`` sagt, ist
     ``"panel"`` — die engere Seite.
     """
-    token = _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+    token = _ws_bearer_token(ws) or lies_zugangstoken(ws.cookies)
     if not token:
         return "panel"
     payload = AuthService.decode_token(token) or {}
@@ -224,7 +274,7 @@ def ws_session_familie(ws: WebSocket) -> str | None:
     Geraet abholbar — obwohl feststeht, in welches Mikrofon gesprochen wurde.
     """
     return _familie_aus_token(
-        _ws_bearer_token(ws) or ws.cookies.get("__Secure-access_token")
+        _ws_bearer_token(ws) or lies_zugangstoken(ws.cookies)
     )
 
 
@@ -247,7 +297,7 @@ def session_herkunft(request: Request) -> str:
     Alles, was nicht ausdruecklich ``"desktop"`` sagt, ist ``"panel"`` — die
     engere Seite.
     """
-    token = _bearer_token(request) or request.cookies.get("__Secure-access_token")
+    token = _bearer_token(request) or lies_zugangstoken(request.cookies)
     if not token:
         return "panel"
     payload = AuthService.decode_token(token) or {}
@@ -271,7 +321,7 @@ def session_familie(request: Request) -> str | None:
     Fall ausdruecklich behandeln (`desktop_job_service.naechster`).
     """
     return _familie_aus_token(
-        _bearer_token(request) or request.cookies.get("__Secure-access_token")
+        _bearer_token(request) or lies_zugangstoken(request.cookies)
     )
 
 
@@ -301,7 +351,7 @@ def _all_cookie_values(request: Request, name: str) -> list[str]:
     return values
 
 
-def verify_csrf(request: Request) -> None:
+def verify_csrf(request: Request, db: Session = Depends(get_db)) -> None:
     """Double-Submit-Cookie CSRF-Schutz. Nur fuer state-changing Requests.
 
     Akzeptiert den Header-Wert, wenn er zu einem der vom Browser gesendeten
@@ -328,12 +378,29 @@ def verify_csrf(request: Request) -> None:
         payload = AuthService.decode_token(bearer, verify_exp=False)
         if payload and payload.get("type") == "access" and payload.get("jti"):
             return
+        # Ein **gueltiger** Kanal-Ausweis ist ebenfalls ein ausdruecklicher
+        # Header, kein Ambient-Cookie — ein fremder Ursprung kann ihn nicht
+        # setzen. Ein blosser 64-stelliger Wert befreit ausdruecklich nicht:
+        # sonst umginge ein Cookie-Request mit erfundenem Header die Pruefung.
+        # Ein JWT hat Punkte, dieser Wert nicht.
+        if len(bearer) == 64 and "." not in bearer:
+            from services.notification_channel_service import ist_gueltig
+
+            if ist_gueltig(db, bearer):
+                return
     csrf_header = request.headers.get("x-csrf-token")
-    cookie_values = _all_cookie_values(request, "__Secure-csrf_token")
+    # Alle Namen: im Entwicklungsbetrieb heisst das Cookie anders (ohne
+    # `__Secure-`), ein Browser kann aber noch eines aus einer frueheren
+    # Sitzung mitschicken.
+    cookie_values = [
+        wert
+        for name in csrf_cookienamen()
+        for wert in _all_cookie_values(request, name)
+    ]
     path = request.url.path
     if not csrf_header and not cookie_values:
         # Reiner nativer Client ohne jegliche Cookies: kein CSRF-Angriffsvektor moeglich
-        auth_cookies = request.cookies.get("__Secure-access_token") or request.cookies.get("__Secure-refresh_token")
+        auth_cookies = lies_zugangstoken(request.cookies) or lies_refresh_token(request.cookies)
         if not auth_cookies and path == "/api/auth/logout":
             return
         _log.warning("CSRF check failed on %s: header and cookie both missing", path)

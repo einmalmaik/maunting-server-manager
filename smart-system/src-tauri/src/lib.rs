@@ -31,6 +31,7 @@ mod bildschirm;
 mod biometrie;
 mod datei_speichern;
 mod deinstallation;
+mod dienst;
 pub mod discord;
 mod durchklick;
 #[cfg(windows)]
@@ -918,7 +919,10 @@ pub fn run() {
             // Kameraaufnahmen für die Kamera-Sicherung des Tresors.
             .plugin(medien::init_android_medien())
             // Terminerinnerungen, die Android auch bei geschlossener App zeigt.
-            .plugin(erinnerung::init_android_erinnerung());
+            .plugin(erinnerung::init_android_erinnerung())
+            // Der Dauerdienst: hält die Verbindung für Benachrichtigungen,
+            // auch wenn die App geschlossen ist.
+            .plugin(dienst::init_android_dienst());
     }
 
     builder
@@ -989,6 +993,11 @@ pub fn run() {
             medien::medien_papierkorb,
             medien::medien_einstellungen,
             erinnerung::erinnerungen_planen,
+            dienst::dienst_starten,
+            dienst::dienst_stoppen,
+            dienst::dienst_mailboxen,
+            dienst::dienst_stand,
+            dienst::dienst_akku_befreien,
             updater::update_pruefen,
             updater::update_herunterladen,
             updater::update_installieren,

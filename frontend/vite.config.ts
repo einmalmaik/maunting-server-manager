@@ -14,6 +14,26 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    /*
+     * Keine eigenen CORS-Köpfe des Dev-Servers.
+     *
+     * Vite beantwortet Vorabanfragen (OPTIONS) selbst und setzt dabei nur
+     * `Access-Control-Allow-Origin`, aber nie
+     * `Access-Control-Allow-Credentials`. Der eigene Client schickt bei einer
+     * absoluten API-Adresse `credentials: "include"` (gerätegekoppelte Apps:
+     * MSS, Pontis, Handy). Der Browser verlangt für so eine Anfrage auch in
+     * der Vorabanfrage `Allow-Credentials: true` — fehlt der Kopf, bricht er
+     * mit „Failed to fetch“ ab, ohne dass die Anfrage je beim Backend
+     * ankommt. Pontis auf `http://localhost:1450` scheiterte bis 22.10.2026
+     * genau daran: Adresse eintragen ging (schlichtes GET), das Einlösen des
+     * Kopplungscodes nicht (POST mit JSON).
+     *
+     * Mit `cors: false` reicht der Proxy die Vorabanfrage an FastAPI weiter,
+     * und dort steht der vollständige Satz (Herkunft, Methoden, Köpfe,
+     * Credentials). Im Betrieb liefert das Backend die Oberfläche selbst aus,
+     * dort gilt dieser Block ohnehin nicht.
+     */
+    cors: false,
     // Same-origin proxy when VITE_API_URL is unset. For true split hosting
     // set VITE_API_URL=http://127.0.0.1:8000 and skip the proxy.
     proxy: {

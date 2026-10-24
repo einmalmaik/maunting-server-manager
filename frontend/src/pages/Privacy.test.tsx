@@ -149,11 +149,11 @@ describe('Privacy page', () => {
    * ist praktisch eine stille Aenderung — deshalb haengt die Zusage hier an den
    * konkreten Werten und nicht an "irgendeiner" Version.
    */
-  it('weist die Fassung 3.42 vom 2026-10-15 aus (Maunting Search)', () => {
+  it('weist die Fassung 3.44 vom 2026-10-24 aus (Anhänge 30 Tage)', () => {
     const { container } = renderPrivacy();
 
     expect(
-      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.42`)),
+      screen.getByText(new RegExp(`${i18n.t('privacyPolicy.versionLabel')}\\s+v?3\\.44`)),
     ).toBeInTheDocument();
     expect(
       i18n.t('privacyPolicy.sections.browser.items.mauntingSearch'),
@@ -304,6 +304,23 @@ describe('Privacy page', () => {
     expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/kontrolliert der Browser\s+nicht/);
     expect(i18n.t('privacyPolicy.sections.browser.items.erweiterungen')).toMatch(/nicht in privaten Tabs und nicht, solange der Jugend- und Suchtschutz an ist/);
     expect(i18n.t('privacyPolicy.sections.browser.items.verbindungen')).toMatch(/Erweiterungen lädt er nur auf Ihren Wunsch von Google/);
+    // 3.43: die gerätebezogene Zustellung. Sie speichert eine Zustellkennung,
+    // Prüfsumme und Größe des Chiffretexts und einen Idempotenzrest ohne
+    // Inhalt; das geteilte Postfach bleibt daneben bestehen.
+    expect(screen.getByText(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery'))).toBeInTheDocument();
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery')).toMatch(/Zustellkennung/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceDelivery')).toMatch(/Idempotenzrest/);
+    // 3.44: neue Anhänge liegen serverseitig 30 Tage. Der Altbestand behält
+    // seinen gespeicherten Ablauf (bis zu 90 Tage), und die lokale
+    // Verfallsfrist ist eine eigene Regel. Beides steht getrennt im Text.
+    expect(i18n.t('privacyPolicy.sections.messenger.items.attachments')).toMatch(/30 Tage nach dem Hochladen/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.attachments')).toMatch(/bis zu 90 Tagen/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.attachments')).toMatch(/verlängert die Serverkopie nicht/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.retention')).toMatch(/Serverkopie liegt 30 Tage/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.retention')).toMatch(/lokale Frist von bis zu 90 Tagen/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.attachments')).not.toMatch(/restlos/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.envelopes')).not.toMatch(/unwiderruflich bereinigt/);
+    expect(i18n.t('privacyPolicy.sections.messenger.items.deviceFanout')).not.toMatch(/und sonst nichts/);
 
     const stand = container.querySelector('time');
     expect(stand).not.toBeNull();

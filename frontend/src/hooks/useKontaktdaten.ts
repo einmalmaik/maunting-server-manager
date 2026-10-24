@@ -23,7 +23,7 @@ import {
 } from '@/api/social'
 import { teamsApi, type TeamMember } from '@/api/teams'
 import { KONTAKTE_CACHE_KEY } from '@/lib/offlineAblage'
-import { gespraechsListe } from '@/services/gespraechsListe'
+import { gespraechsListe, versteckteGespraeche } from '@/services/gespraechsListe'
 import { benenneGruppen } from '@/services/gruppenName'
 
 // Der Abzug gehört dem Konto: bei einem Kontowechsel leert ihn `offlineAblage`.
@@ -84,21 +84,35 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
   const [teamMembers, setTeamMembers] = useState<TeamKontakt[]>(initialCache.teamMembers)
   const [publicUsers, setPublicUsers] = useState<PublicProfileResponse[]>(initialCache.publicUsers)
   const [directChats, setDirectChats] = useState<DirectChatItem[]>(initialCache.directChats)
+  /** Gespräche, die aus der Liste genommen wurden — aber weiter bestehen. */
+  const [versteckte, setVersteckte] = useState<number[]>([])
   const [stories, setStories] = useState<ChatStoryItem[]>(initialCache.stories)
+  /**
+   * Ob die erste Runde durch ist.
+   *
+   * Die Messenger-Seite darf einen `?userId=`-Aufruf erst prüfen, wenn diese
+   * Liste geladen ist. Sonst verwürfe sie einen Freund, der beim ersten Rendern
+   * nur noch nicht angekommen ist.
+   */
+  const [geladen, setGeladen] = useState(false)
   const teamStand = useRef<{ abdruck: string; geholt: number; mitglieder: TeamKontakt[] } | null>(null)
 
   const laden = async () => {
     try {
-      const [friendsData, groupsData, teamsData, storiesData, publicData, directChatsData] = await Promise.all([
-        getFriends().catch(() => []),
-        getGroups().catch(() => []),
-        teamsApi.list().catch(() => []),
-        getStories().catch(() => []),
-        getPublicProfiles().catch(() => []),
-        // Kein Netzaufruf mehr: seit Stufe 6b weiss der Server nicht, mit wem
-        // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
-        gespraechsListe().catch(() => []),
-      ])
+      const [friendsData, groupsData, teamsData, storiesData, publicData, directChatsData, versteckteData] =
+        await Promise.all([
+          getFriends().catch(() => []),
+          getGroups().catch(() => []),
+          teamsApi.list().catch(() => []),
+          getStories().catch(() => []),
+          getPublicProfiles().catch(() => []),
+          // Kein Netzaufruf mehr: seit Stufe 6b weiss der Server nicht, mit wem
+          // dieses Konto schreibt. Die Liste liegt versiegelt auf diesem Gerät.
+          gespraechsListe().catch(() => []),
+          // Aus der Liste genommen ist nicht gelöscht: Freunde, Teammitglieder
+          // und öffentliche Profile stünden sonst sofort wieder da.
+          versteckteGespraeche().catch(() => new Set<number>()),
+        ])
       setFriends(behalteGleiches(friendsData))
       // Der Server liefert für Gruppen seit Stufe 6 keinen Namen mehr. Diese
       // eine Zeile setzt ihn aus dem versiegelten örtlichen Speicher wieder
@@ -107,6 +121,7 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
       setStories(behalteGleiches(storiesData))
       setPublicUsers(behalteGleiches(publicData))
       setDirectChats(behalteGleiches(directChatsData))
+      setVersteckte([...versteckteData].sort((a, b) => a - b))
 
       // Die Mitglieder je Team nur jede Minute oder wenn sich die Teams ändern.
       const teamAbdruck = JSON.stringify(teamsData.map((t) => [t.id, t.name]))
@@ -166,6 +181,10 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
       } catch {}
     } catch {
       // Offline fallback
+    } finally {
+      // Auch ein misslungener Abruf beendet das Warten: die Prüfung eines
+      // `?userId=`-Aufrufs soll nicht ewig auf ein Netz warten, das nicht da ist.
+      setGeladen(true)
     }
   }
 
@@ -197,9 +216,13 @@ export function useKontaktdaten(currentUserId: number, messengerGesperrt: boolea
     teamMembers,
     publicUsers,
     directChats,
+    /** Kennungen der Gespräche, die aus der Liste genommen sind. */
+    versteckte,
     stories,
     /** Für eine eben erstellte oder gelöschte Story. */
     setStories,
     laden,
+    /** Die erste Runde ist durch; erst jetzt lässt sich ein Kontakt prüfen. */
+    geladen,
   }
 }
