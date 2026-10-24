@@ -20,17 +20,12 @@
  * und der Mensch kann sie erneut senden — kein stilles Verschlucken.
  */
 
-import { utf8ToBytes } from '@msdis/shield/core'
-import { sha256Hex } from '@msdis/shield/integrity'
-
 import { relayE2eeEnvelope } from '@/api/social'
 import { logischeUuid } from './format'
-import { sendeZustellungen } from '../e2eeZustellung'
 import { updateMessageInLocalStore } from '../messengerLocalStore'
 import {
   ausstehendeZustellungen,
   entferneZustellung,
-  merkeZustellstand,
   type AusstehendeZustellung,
 } from '../ratchetSpeicher'
 
@@ -122,68 +117,9 @@ async function bestaetigeLokal(absicht: AusstehendeZustellung, umschlagId?: numb
   }
 }
 
-/**
- * Schickt einen Umschlag über den Geräteweg — mit den Kennungen, die schon
- * festgehalten sind, sonst mit frischen, die **vor** dem Aufruf feststehen.
- *
- * `'weiter'` heisst: die Inbox hat den Auftrag abgelehnt, der Mailbox-Weg ist
- * dran. Ein Netzfehler ist dagegen `'offen'` — er sagt nichts über den Auftrag,
- * und ein Wechsel auf den anderen Weg erzeugte beim Empfänger eine zweite
- * Kopie derselben Bytes.
- */
-async function ueberInbox(
-  absicht: AusstehendeZustellung,
-): Promise<'gesendet' | 'weiter' | 'offen' | 'aufgegeben'> {
-  const ids =
-    absicht.zustellung ??
-    ({ payloadId: crypto.randomUUID(), deliveryId: crypto.randomUUID() } as const)
-  if (!absicht.zustellung) {
-    await merkeZustellstand(absicht.clientUuid, { zustellung: ids })
-  }
-  try {
-    const antwort = await sendeZustellungen(
-      absicht.mailbox,
-      [
-        {
-          id: ids.payloadId,
-          ciphertext: absicht.ciphertext,
-          ciphertext_sha256: await sha256Hex(utf8ToBytes(absicht.ciphertext)),
-        },
-      ],
-      [
-        {
-          delivery_id: ids.deliveryId,
-          payload_id: ids.payloadId,
-          inbox_hash: String(absicht.zielInbox),
-        },
-      ],
-    )
-    const angenommen = antwort.angenommen.find((a) => a.delivery_id === ids.deliveryId)
-    if (angenommen) {
-      await bestaetigeLokal(absicht, angenommen.seq)
-      await entferneZustellung(absicht.clientUuid)
-      return 'gesendet'
-    }
-    // Abgelehnt: das Gerät nimmt den neuen Weg nicht (mehr). Der Umschlag
-    // selbst bleibt gültig und geht über die geteilte Mailbox.
-    await merkeZustellstand(absicht.clientUuid, { zustellung: null, nurMailbox: true })
-    return 'weiter'
-  } catch (fehler) {
-    if (istEndgueltig(fehler)) {
-      await aufgeben(absicht, `http-${statusVon(fehler)}`)
-      return 'aufgegeben'
-    }
-    return 'offen'
-  }
-}
-
 async function sendeEinen(
   absicht: AusstehendeZustellung,
 ): Promise<'gesendet' | 'offen' | 'aufgegeben'> {
-  if (absicht.zielInbox && !absicht.nurMailbox) {
-    const ausgang = await ueberInbox(absicht)
-    if (ausgang !== 'weiter') return ausgang
-  }
   try {
     const r = await relayE2eeEnvelope({
       blind_mailbox_id: absicht.mailbox,

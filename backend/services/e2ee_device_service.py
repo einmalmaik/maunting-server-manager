@@ -423,6 +423,7 @@ def eintrag_als_dict(e: UserE2eeDevice, db: Session | None = None) -> dict:
             inbox_hash = inbox.inbox_hash
             transport = "geraet-v1"
     return {
+        "id": e.id,
         "device_id": e.device_id,
         "public_key": e.public_key_jwk,
         "signing_public_key": e.signing_public_key_jwk or "",

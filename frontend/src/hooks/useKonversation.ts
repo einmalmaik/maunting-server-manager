@@ -34,13 +34,14 @@ import {
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
 import {
   dmZiele,
-  gruppenTransportZiele,
   gruppenZiele,
   verschluesseleFuerGruppe,
   type GruppenKontext,
 } from '@/services/gruppenSchluessel'
 import { abonniereMailbox } from '@/services/mailboxAbo'
 import { mailboxNachweis } from '@/services/mailboxNachweis'
+import { eigenesGeraet, verlangeGeraeteVon } from '@/services/e2eeGeraet'
+import { frischeMitglieder } from '@/services/gruppen/gruppenVerteilung'
 import { baueZustellungen, type DrKontext } from '@/services/ratchetSitzung'
 import { verarbeiteGespraech } from '@/services/gespraech/verarbeitung'
 import {
@@ -95,6 +96,11 @@ export interface Versandauftrag {
    * genau dorthin, und nur dorthin — eine Doppelspur gibt es nicht.
    */
   ziel_inbox?: string | null
+  target_user_id?: number
+  target_device_id?: string
+  target_device_db_id?: number
+  chat_type?: 'direct' | 'group'
+  chat_id?: string
 }
 
 export interface KonversationOptionen {
@@ -269,29 +275,45 @@ export async function baueVersandFuer(
     // Mailbox — die eine, die niemand sonst mehr liest.
     const umschlag = await verschluesseleFuerGruppe(gruppenKontext, payload)
     const ziele = await gruppenZiele(gruppenKontext.groupId, mid)
+    const mitglieder = await frischeMitglieder(gruppenKontext).catch(() => gruppenKontext.mitglieder)
+    const meins = await eigenesGeraet().catch(() => null)
+    const listen = await Promise.all(
+      mitglieder.map(async (konto) => ({
+        konto,
+        geraete: await verlangeGeraeteVon(konto, { frisch: true }),
+      })),
+    ).catch(() => null)
 
-    /*
-     * Ein Schlüssel für alle, und trotzdem je Gerät ein eigener Ort — oder
-     * eben gar keiner.
-     *
-     * Das Chiffrat ist für jedes Gerät dasselbe; verschieden ist nur der
-     * Zustellauftrag. Die Entscheidung trifft `gruppenTransportZiele` an einer
-     * Stelle: kennen **alle** Zielgeräte den neuen Weg, geht je Gerät ein
-     * Auftrag dorthin. Fehlt auch nur einem die Fähigkeit (oder ist das
-     * Verzeichnis nicht erreichbar), geht die Nachricht für die ganze Gruppe
-     * als **ein** Umschlag in die geteilte Mailbox. Keine Doppelspur.
-     */
-    const transport = await gruppenTransportZiele(gruppenKontext)
-    if (transport.art === 'inbox') {
-      return transport.inboxen.map((inbox) => ({
+    if (listen && listen.length > 0) {
+      const auftraege: Versandauftrag[] = []
+      for (const { konto, geraete } of listen) {
+        for (const geraet of geraete) {
+          if (konto === gruppenKontext.eigeneId && meins && geraet.device_id === meins.kennung) {
+            continue
+          }
+          auftraege.push({
+            blind_mailbox_id: ziele.senden,
+            ciphertext_envelope: umschlag,
+            client_uuid: clientUuid,
+            chat_type: 'group',
+            chat_id: String(gruppenKontext.groupId),
+            target_user_id: konto,
+            target_device_id: geraet.device_id,
+            target_device_db_id: geraet.id,
+          })
+        }
+      }
+      if (auftraege.length > 0) return auftraege
+    }
+
+    return [
+      {
         blind_mailbox_id: ziele.senden,
         ciphertext_envelope: umschlag,
         client_uuid: clientUuid,
-        ziel_inbox: inbox,
-      }))
-    }
-    return [
-      { blind_mailbox_id: ziele.senden, ciphertext_envelope: umschlag, client_uuid: clientUuid },
+        chat_type: 'group',
+        chat_id: String(gruppenKontext.groupId),
+      },
     ]
   }
 
@@ -319,6 +341,10 @@ export async function baueVersandFuer(
           is_control: true,
           control_type: 'dr-init',
           ziel_inbox: z.zielInbox,
+          chat_type: 'direct',
+          chat_id: String(drKontext.peerId),
+          target_user_id: z.empfaengerId,
+          target_device_id: z.zielGeraet,
         })
       }
       auftraege.push({
@@ -326,6 +352,10 @@ export async function baueVersandFuer(
         ciphertext_envelope: z.nachricht,
         client_uuid: z.clientUuid,
         ziel_inbox: z.zielInbox,
+        chat_type: 'direct',
+        chat_id: String(drKontext.peerId),
+        target_user_id: z.empfaengerId,
+        target_device_id: z.zielGeraet,
       })
     }
     return auftraege

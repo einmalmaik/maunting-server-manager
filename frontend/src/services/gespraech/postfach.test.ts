@@ -13,17 +13,21 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const zustellung = vi.hoisted(() => ({
-  eigeneInboxAdresse: vi.fn(async () => 'a'.repeat(64)),
-  holeZustellungen: vi.fn(),
-  quittiereZustellungen: vi.fn(),
+const apiSocial = vi.hoisted(() => ({
+  fetchPendingQueue: vi.fn(),
+  ackQueueMessages: vi.fn(),
 }))
+const e2eeGeraetMock = vi.hoisted(() => ({
+  eigenesGeraet: vi.fn(async () => ({ kennung: 'dev-1', device_id: 'dev-1' })),
+}))
+
+vi.mock('@/api/social', () => apiSocial)
+vi.mock('@/services/e2eeGeraet', () => e2eeGeraetMock)
 const verarbeitung = vi.hoisted(() => ({ verarbeiteGespraech: vi.fn() }))
 const uebernahme = vi.hoisted(() => ({ uebernimmLesungen: vi.fn() }))
 const steuerung = vi.hoisted(() => ({ sendeSteuerpaket: vi.fn() }))
 const reihenfolge: string[] = []
 
-vi.mock('@/services/e2eeZustellung', () => zustellung)
 vi.mock('./verarbeitung', () => verarbeitung)
 vi.mock('./uebernahme', () => uebernahme)
 vi.mock('./steuerung', () => steuerung)
@@ -57,15 +61,19 @@ vi.mock('@/services/quittungsstand', () => ({
 
 import { verarbeitePostfach, type PostfachGespraech } from './postfach'
 
-function eintrag(seq: number, ciphertext: string) {
+function eintrag(
+  seq: number,
+  ciphertext: string,
+  opts: { chat_type?: string; chat_id?: string; sender_user_id?: number } = {},
+) {
   return {
-    delivery_id: `d-${seq}`,
-    payload_id: `p-${seq}`,
-    ciphertext,
-    ciphertext_sha256: 'h',
-    seq,
-    angenommen_am: '2026-10-23T10:00:00.000Z',
-    ablauf_am: '2026-11-22T10:00:00.000Z',
+    queue_id: seq,
+    chat_type: opts.chat_type,
+    chat_id: opts.chat_id,
+    sender_user_id: opts.sender_user_id,
+    client_uuid: `u-${seq}`,
+    encrypted_payload: ciphertext,
+    created_at: '2026-10-23T10:00:00.000Z',
   }
 }
 
@@ -105,9 +113,9 @@ describe('verarbeitePostfach', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     reihenfolge.length = 0
-    zustellung.quittiereZustellungen.mockImplementation(async (_inbox: string, ids: string[]) => {
+    apiSocial.ackQueueMessages.mockImplementation(async (_dev: string, ids: number[]) => {
       reihenfolge.push(`quittung:${ids.join(',')}`)
-      return { quittiert: ids.length }
+      return { acknowledged: ids.length }
     })
     verarbeitung.verarbeiteGespraech.mockImplementation(async () => {
       reihenfolge.push('verarbeitet')
@@ -128,12 +136,11 @@ describe('verarbeitePostfach', () => {
   })
 
   it('ordnet jeden Eintrag seinem Gespraech zu und quittiert erst nach dem Commit', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [
         eintrag(1, 'sv-e2ee-dr-v1:2:rumpf'),
         eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
-      ],
-      naechste_seq: 2,
+      ]
     })
 
     const ergebnis = await verarbeitePostfach(lauf)
@@ -144,10 +151,10 @@ describe('verarbeitePostfach', () => {
     expect(reihenfolge).toEqual([
       'verarbeitet',
       'commit',
-      'quittung:d-1',
+      'quittung:1',
       'verarbeitet',
       'commit',
-      'quittung:d-2',
+      'quittung:2',
     ])
     const mailboxen = verarbeitung.verarbeiteGespraech.mock.calls.map(
       (c) => (c[0] as { mailbox: string }).mailbox,
@@ -156,9 +163,8 @@ describe('verarbeitePostfach', () => {
   })
 
   it('schickt die Zustellquittung an den Absender, vor dem Transport-ACK', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockImplementation(async () => {
       reihenfolge.push('commit')
@@ -194,13 +200,12 @@ describe('verarbeitePostfach', () => {
       receiver_id: 1,
     })
     // Der Absender erfaehrt „zugestellt", der Auftrag ist danach weg.
-    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'an-sender:u-neu', 'quittung:d-1'])
+    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'an-sender:u-neu', 'quittung:1'])
   })
 
   it('meldet nur neue eingehende Zeilen nach dem Commit', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockResolvedValue({
       processedList: [
@@ -232,9 +237,8 @@ describe('verarbeitePostfach', () => {
   })
 
   it('schweigt und quittiert nicht bei einem blockierten Kontakt', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockResolvedValue({
       processedList: [{ id: -1, clientUuid: 'u-blockiert', senderId: 2, isSelf: false }],
@@ -258,15 +262,14 @@ describe('verarbeitePostfach', () => {
     // wird trotzdem quittiert, sonst käme er zehn Sekunden lang wieder.
     expect(melden).not.toHaveBeenCalled()
     expect(steuerung.sendeSteuerpaket).not.toHaveBeenCalled()
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalled()
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalled()
   })
 
   it('quittiert nicht alle zehn Sekunden erneut, wenn das ACK liegen bleibt', async () => {
     // Derselbe Auftrag kommt wieder, die Nachricht liegt aber schon im
     // Verlauf. Eine erneute Zustellquittung waere Laerm im Hundert-Fenster.
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockResolvedValue({
       processedList: [{ id: -1, clientUuid: 'u-schon-da', isSelf: false }],
@@ -284,9 +287,8 @@ describe('verarbeitePostfach', () => {
   })
 
   it('schickt in der Gruppe keine Quittung an den Absender', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockResolvedValue({
       processedList: [{ id: -1, clientUuid: 'u-gruppe', isSelf: false }],
@@ -301,27 +303,25 @@ describe('verarbeitePostfach', () => {
     await verarbeitePostfach({ ...lauf, identitaet: { state: 'ready' } as never })
 
     expect(steuerung.sendeSteuerpaket).not.toHaveBeenCalled()
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalled()
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalled()
   })
 
   it('laesst liegen, was keinem Gespraech gehoert', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
+    apiSocial.fetchPendingQueue.mockResolvedValue({
       // Absenderkonto 9 ist kein Kontakt; Gruppe 99 gibt es nicht.
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:9:rumpf'), eintrag(2, 'sv-e2ee-group-v1:k99:rumpf')],
-      naechste_seq: 2,
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:9:rumpf'), eintrag(2, 'sv-e2ee-group-v1:k99:rumpf')]
     })
 
     const ergebnis = await verarbeitePostfach(lauf)
 
     expect(ergebnis).toEqual({ verarbeitet: 0, quittiert: 0 })
     expect(verarbeitung.verarbeiteGespraech).not.toHaveBeenCalled()
-    expect(zustellung.quittiereZustellungen).not.toHaveBeenCalled()
+    expect(apiSocial.ackQueueMessages).not.toHaveBeenCalled()
   })
 
   it('ordnet einen Sitzungsaufbau der Gegenstelle zu', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, '{"typ":"dr-init","vonKonto":2}')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, '{"typ":"dr-init","vonKonto":2}')]
     })
     // Der Hybrid-Stellvertreter gibt den Umschlag selbst zurueck; hier ist das
     // der JSON-Text.
@@ -342,27 +342,25 @@ describe('verarbeitePostfach', () => {
   })
 
   it('quittiert nichts, wenn das Schreiben scheitert', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-dr-v1:2:rumpf')]
     })
     uebernahme.uebernimmLesungen.mockResolvedValue(null)
 
     const ergebnis = await verarbeitePostfach(lauf)
 
     expect(ergebnis.quittiert).toBe(0)
-    expect(zustellung.quittiereZustellungen).not.toHaveBeenCalled()
+    expect(apiSocial.ackQueueMessages).not.toHaveBeenCalled()
   })
 
   it('quittiert einen offenen Umschlag nicht und laesst ihn fuer den naechsten Lauf liegen', async () => {
     // Zwei Eintraege im selben Gespraech: der erste ist offen (keine Sitzung),
     // der zweite verarbeitet. Nur der zweite darf den Server verlassen.
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [
         eintrag(1, 'sv-e2ee-dr-v1:2:offen'),
         eintrag(2, 'sv-e2ee-dr-v1:2:fertig'),
-      ],
-      naechste_seq: 2,
+      ]
     })
     verarbeitung.verarbeiteGespraech.mockImplementation(async () => ({
       lesungen: [],
@@ -373,16 +371,15 @@ describe('verarbeitePostfach', () => {
     const ergebnis = await verarbeitePostfach(lauf)
 
     expect(ergebnis.quittiert).toBe(1)
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalledWith('dev-1', [2])
   })
 
   it('quittiert nichts, wenn der lokale Schreibweg wirft, und macht mit dem naechsten Gespraech weiter', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [
         eintrag(1, 'sv-e2ee-dr-v1:2:rumpf'),
         eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
-      ],
-      naechste_seq: 2,
+      ]
     })
     uebernahme.uebernimmLesungen
       .mockRejectedValueOnce(new Error('Ablage voll'))
@@ -400,33 +397,32 @@ describe('verarbeitePostfach', () => {
 
     // Der erste Umschlag bleibt beim Server (kein ACK fuer d-1); der zweite
     // laeuft unbeeindruckt weiter.
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalledTimes(1)
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalledTimes(1)
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalledWith('dev-1', [2])
   })
 
   it('holt nichts, solange die Schluessel fehlen', async () => {
     const ergebnis = await verarbeitePostfach({ ...lauf, decryptionKeys: [] })
     expect(ergebnis).toEqual({ verarbeitet: 0, quittiert: 0 })
-    expect(zustellung.holeZustellungen).not.toHaveBeenCalled()
+    expect(apiSocial.fetchPendingQueue).not.toHaveBeenCalled()
   })
   it('quittiert mehrere Eintraege desselben Gespraechs erst nach dem Commit', async () => {
     // Eine Gruppennachricht an mehrere Geraete kommt je Geraet als eigener
     // Auftrag. Dieses Geraet sieht seine eigene Kopie einmal; kommen zwei
     // Eintraege desselben Gespraechs an, werden sie zusammen verarbeitet und
     // zusammen quittiert — aber erst nach dem lokalen Schreiben.
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [
         eintrag(1, 'sv-e2ee-group-v1:k7:rumpf'),
         eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
-      ],
-      naechste_seq: 2,
+      ]
     })
 
     const ergebnis = await verarbeitePostfach(lauf)
 
     expect(verarbeitung.verarbeiteGespraech).toHaveBeenCalledTimes(1)
     expect(uebernahme.uebernimmLesungen).toHaveBeenCalledTimes(1)
-    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'quittung:d-1,d-2'])
+    expect(reihenfolge).toEqual(['verarbeitet', 'commit', 'quittung:1,2'])
     expect(ergebnis.quittiert).toBe(2)
   })
 
@@ -434,12 +430,11 @@ describe('verarbeitePostfach', () => {
     // Ein neues Geraet hat den Gruppenschluessel noch nicht. Wird der Auftrag
     // trotzdem quittiert, ist die Nachricht beim Server weg, bevor sie je
     // lesbar war. Der zweite Eintrag ist fertig und darf gehen.
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [
         eintrag(1, 'sv-e2ee-group-v1:k7:rumpf'),
         eintrag(2, 'sv-e2ee-group-v1:k7:rumpf'),
-      ],
-      naechste_seq: 2,
+      ]
     })
     verarbeitung.verarbeiteGespraech.mockResolvedValue({
       lesungen: [],
@@ -450,14 +445,13 @@ describe('verarbeitePostfach', () => {
     const ergebnis = await verarbeitePostfach(lauf)
 
     expect(ergebnis.quittiert).toBe(1)
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalledTimes(1)
-    expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalledTimes(1)
+    expect(apiSocial.ackQueueMessages).toHaveBeenCalledWith('dev-1', [2])
   })
 
   it('nutzt fuer den Hintergrund die Rechte der verarbeiteten Gruppe', async () => {
-    zustellung.holeZustellungen.mockResolvedValue({
-      eintraege: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')],
-      naechste_seq: 1,
+    apiSocial.fetchPendingQueue.mockResolvedValue({
+      messages: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')]
     })
     const rechteFuerGruppe = vi.fn(
       async () => (konto: number) => new Set(konto === 2 ? ['send_messages'] : []),

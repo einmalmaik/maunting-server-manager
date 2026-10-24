@@ -181,7 +181,7 @@ export async function baueZustellungen(
       )
 
       zustellungen.push({
-        empfaengerId: kontext.peerId,
+        empfaengerId: ziel.konto,
         zielGeraet,
         bootstrap: gebaut.bootstrap,
         nachricht: gebaut.nachricht,

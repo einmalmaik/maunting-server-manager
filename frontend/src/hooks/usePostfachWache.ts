@@ -203,7 +203,14 @@ export function usePostfachWache({
     }
     const beiSync = (ereignis: Event) => {
       const detail = (ereignis as CustomEvent<{ type?: string }>).detail
-      if (detail?.type === 'e2ee_blind_message') anstossen()
+      if (
+        detail?.type === 'new_message' ||
+        detail?.type === 'e2ee_blind_message' ||
+        detail?.type === 'delivery_receipt' ||
+        detail?.type === 'read_receipt'
+      ) {
+        anstossen()
+      }
     }
 
     void lauf()

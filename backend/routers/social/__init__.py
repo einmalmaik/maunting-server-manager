@@ -9,17 +9,17 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from . import devices, friends, groups, mailbox, media, profiles, stories, ws, zustellung
+from . import devices, friends, groups, mailbox, media, messages, profiles, stories, ws
 from .basis import mailbox_token
 from .mailbox import subscribe_mailbox_push
 
 router = APIRouter(prefix="/api/social", tags=["social"])
 
+router.include_router(messages.router)
 router.include_router(friends.router)
 router.include_router(profiles.router)
 router.include_router(devices.router)
 router.include_router(mailbox.router)
-router.include_router(zustellung.router)
 router.include_router(media.router)
 router.include_router(groups.router)
 router.include_router(stories.router)

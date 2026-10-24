@@ -616,6 +616,7 @@ class E2eeDeviceUpdate(BaseModel):
 
 
 class E2eeDeviceItem(BaseModel):
+    id: int | None = None
     device_id: str
     public_key: str
     signing_public_key: str = ""

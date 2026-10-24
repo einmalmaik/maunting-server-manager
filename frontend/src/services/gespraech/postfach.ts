@@ -26,10 +26,15 @@
  * quittiert ist, ist erledigt, und was liegt, kommt wieder.
  */
 
-import type { BlindEnvelopeItem, ChatGroupItem } from '@/api/social'
+import {
+  ackQueueMessages,
+  fetchPendingQueue,
+  type BlindEnvelopeItem,
+  type ChatGroupItem,
+} from '@/api/social'
 import { decryptE2eeHybridWithKeyring } from '@/services/e2eeCrypto'
+import { eigenesGeraet } from '@/services/e2eeGeraet'
 import type { E2eeIdentity } from '@/services/e2eeIdentity'
-import { eigeneInboxAdresse, holeZustellungen, quittiereZustellungen } from '@/services/e2eeZustellung'
 import { sendeSteuerpaket } from '@/services/gespraech/steuerung'
 import { ablage } from '@/services/gruppen/gruppenAblage'
 import { GRUPPE_PREFIX, type GruppenKontext } from '@/services/gruppenSchluessel'
@@ -85,9 +90,6 @@ export interface PostfachLauf {
   istBlockiert?: (userId: number) => boolean
 }
 
-/** Hoechstens so viele Eintraege holt ein Lauf (die Grenze des Servers). */
-const SEITE = 50
-
 /**
  * Ordnet einen Eintrag seinem Gespraech zu.
  *
@@ -95,10 +97,29 @@ const SEITE = 50
  * gehoert dem Geraet und traegt alle Gespraeche.
  */
 async function ordneZu(
-  eintrag: { ciphertext: string },
+  eintrag: {
+    ciphertext: string
+    chat_type?: string
+    chat_id?: string
+    sender_user_id?: number
+  },
   gespraeche: readonly PostfachGespraech[],
   decryptionKeys: string[],
 ): Promise<PostfachGespraech | null> {
+  // Wenn chat_type und chat_id explizit vorliegen (aus der FIFO-Queue),
+  // ordnen wir die Nachricht direkt dem Ziel-Gespräch zu — das löst auch den
+  // Multi-Device-Self-Sync, bei dem der Absender das eigene Konto ist.
+  if (eintrag.chat_type === 'direct' && eintrag.chat_id) {
+    const peerId = Number(eintrag.chat_id)
+    const treffer = gespraeche.find((g) => g.drKontext?.peerId === peerId)
+    if (treffer) return treffer
+  }
+  if (eintrag.chat_type === 'group' && eintrag.chat_id) {
+    const groupId = Number(eintrag.chat_id)
+    const treffer = gespraeche.find((g) => g.gruppenKontext?.groupId === groupId)
+    if (treffer) return treffer
+  }
+
   const umschlag = eintrag.ciphertext
   if (umschlag.startsWith(DR_PREFIX)) {
     const kopf = drUrheber(umschlag)
@@ -184,15 +205,49 @@ async function verarbeitePostfachInnen(
 ): Promise<PostfachErgebnis> {
   if (!lauf.eigeneId || lauf.decryptionKeys.length === 0) return { verarbeitet: 0, quittiert: 0 }
 
-  const inbox = await eigeneInboxAdresse()
-  if (!inbox) return { verarbeitet: 0, quittiert: 0 }
-  const abruf = await holeZustellungen(inbox, 0, SEITE).catch(() => null)
-  if (!abruf || abruf.eintraege.length === 0) return { verarbeitet: 0, quittiert: 0 }
+  const geraet = await eigenesGeraet().catch(() => null)
+  let queueEintraege: {
+    delivery_id: string
+    payload_id: string
+    ciphertext: string
+    ciphertext_sha256: string
+    seq: number
+    angenommen_am: string
+    ablauf_am: string
+    queue_id: number
+    is_from_queue: boolean
+    chat_type?: string
+    chat_id?: string
+    sender_user_id?: number
+  }[] = []
+
+  if (geraet?.kennung) {
+    const queueAbruf = await fetchPendingQueue(geraet.kennung).catch(() => null)
+    if (queueAbruf?.messages && queueAbruf.messages.length > 0) {
+      queueEintraege = queueAbruf.messages.map((m) => ({
+        delivery_id: m.client_uuid,
+        payload_id: String(m.queue_id),
+        ciphertext: m.encrypted_payload,
+        ciphertext_sha256: '',
+        seq: m.queue_id,
+        angenommen_am: m.created_at || new Date().toISOString(),
+        ablauf_am: '',
+        queue_id: m.queue_id,
+        is_from_queue: true,
+        chat_type: m.chat_type,
+        chat_id: m.chat_id,
+        sender_user_id: m.sender_user_id,
+      }))
+    }
+  }
+
+  if (queueEintraege.length === 0) return { verarbeitet: 0, quittiert: 0 }
+  const alleEintraege = queueEintraege
 
   // Erst zuordnen, dann je Gespraech verarbeiten: ein Lauf je Gespraech haelt
   // die Reihenfolge innerhalb des Gespraechs (Aufbau vor Nachricht).
-  const proGespraech = new Map<PostfachGespraech, typeof abruf.eintraege>()
-  for (const eintrag of abruf.eintraege) {
+  const proGespraech = new Map<PostfachGespraech, typeof alleEintraege>()
+  for (const eintrag of alleEintraege) {
     const ziel = await ordneZu(eintrag, lauf.gespraeche, lauf.decryptionKeys)
     if (!ziel) continue
     const liste = proGespraech.get(ziel) ?? []
@@ -356,11 +411,15 @@ async function verarbeitePostfachInnen(
       // wurde die ganze Gruppe quittiert — der Auftrag war damit weg, obwohl die
       // Nachricht im naechsten Lauf geoeffnet worden waere.
       const offen = new Set(ergebnis.offen ?? [])
-      const ids = eintraege.filter((e) => !offen.has(-e.seq)).map((e) => e.delivery_id)
-      if (ids.length > 0) {
-        const antwort = await quittiereZustellungen(inbox, ids).catch(() => null)
-        if (antwort) quittiert += antwort.quittiert
+      // Neue FIFO-Queue quittieren
+      const queueIds = eintraege
+        .filter((e) => e.is_from_queue && !offen.has(-e.seq))
+        .map((e) => e.queue_id)
+      if (queueIds.length > 0 && geraet?.kennung) {
+        const ackAntwort = await ackQueueMessages(geraet.kennung, queueIds).catch(() => null)
+        if (ackAntwort) quittiert += ackAntwort.acknowledged
       }
+
     } catch {
       // Siehe oben: nichts geschrieben, nichts quittiert.
       continue

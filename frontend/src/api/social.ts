@@ -230,6 +230,7 @@ export async function updatePrivacy(payload: {
 }
 
 export interface E2eeGeraetItem {
+  id?: number
   device_id: string
   public_key: string
   /**
@@ -996,3 +997,72 @@ export async function recordActivityTime(category: string, seconds: number): Pro
     body: JSON.stringify({ category, seconds }),
   })
 }
+
+// ── E2EE Queue (KISS-Zustellung) ──────────────────────────────────────────────
+
+export interface QueueEnvelope {
+  target_device_id?: number
+  device_id?: string
+  encrypted_payload: string
+}
+
+export interface PendingQueueItem {
+  queue_id: number
+  sender_user_id: number
+  sender_device_id: number | null
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  client_uuid: string
+  encrypted_payload: string
+  created_at: string | null
+}
+
+export async function sendMessageQueue(payload: {
+  client_uuid: string
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  envelopes: QueueEnvelope[]
+  device_id?: string
+}): Promise<{ status: string; client_uuid: string; enqueued: number }> {
+  const headers: Record<string, string> = {}
+  if (payload.device_id) headers['X-Device-Id'] = payload.device_id
+  return api('/social/messages/send', {
+    method: 'POST',
+    body: JSON.stringify({
+      client_uuid: payload.client_uuid,
+      chat_type: payload.chat_type,
+      chat_id: payload.chat_id,
+      envelopes: payload.envelopes,
+    }),
+    headers,
+  })
+}
+
+export async function fetchPendingQueue(deviceId: string): Promise<{ messages: PendingQueueItem[] }> {
+  return api('/social/messages/pending', {
+    headers: { 'X-Device-Id': deviceId },
+  })
+}
+
+export async function ackQueueMessages(
+  deviceId: string,
+  queueIds: number[]
+): Promise<{ status: string; acknowledged: number }> {
+  return api('/social/messages/ack', {
+    method: 'POST',
+    body: JSON.stringify({ queue_ids: queueIds }),
+    headers: { 'X-Device-Id': deviceId },
+  })
+}
+
+export async function sendReadReceipt(payload: {
+  chat_type: 'direct' | 'group'
+  chat_id: string
+  client_uuids: string[]
+}): Promise<{ status: string }> {
+  return api('/social/messages/read', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+

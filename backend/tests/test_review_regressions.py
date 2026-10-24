@@ -78,10 +78,10 @@ async def test_cleanup_thread_schliesst_session_auch_bei_fehlern(monkeypatch, ro
     monkeypatch.setattr(scheduler_service, "SessionLocal", session)
     first = MagicMock(side_effect=RuntimeError("synthetic cleanup failure"))
     following = MagicMock()
-    from services.social import zustellung
+    from services.social.queue_service import E2eeQueueService
 
     monkeypatch.setattr(SocialService, "cleanup_expired_envelopes", first)
-    monkeypatch.setattr(zustellung, "abgelaufene_raeumen", following)
+    monkeypatch.setattr(E2eeQueueService, "cleanup_expired_messages", following)
     monkeypatch.setattr(ChatMediaService, "cleanup_expired_media", following)
     monkeypatch.setattr(SocialService, "cleanup_expired_stories", following)
     if rollback_fails:

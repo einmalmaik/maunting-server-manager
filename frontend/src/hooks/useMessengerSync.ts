@@ -18,6 +18,8 @@ import { useEffect } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 
 import type { ChatGroupItem } from '@/api/social'
+import { merkePartnerKennungen } from '@/services/quittungsstand'
+import { updateMessageInLocalStore } from '@/services/messengerLocalStore'
 import { useCallStore } from '@/stores/useCallStore'
 
 type Aktivitaet = { status: 'typing' | 'recording'; username?: string } | null
@@ -98,6 +100,26 @@ export function useMessengerSync(optionen: MessengerSyncOptionen): void {
         detail?.type === 'call_ended_remotely'
       ) {
         useCallStore.getState().handleCallSyncEvent(detail)
+      } else if (detail?.type === 'new_message') {
+        void loadMessages(false)
+      } else if (detail?.type === 'delivery_receipt' || detail?.type === 'read_receipt') {
+        const uuids = Array.isArray(detail.client_uuids) ? (detail.client_uuids as string[]) : []
+        const isRead = detail.type === 'read_receipt'
+        if (uuids.length > 0 && blindMailboxId) {
+          if (isRead) {
+            merkePartnerKennungen(blindMailboxId, 'gelesen', uuids)
+            merkePartnerKennungen(blindMailboxId, 'zugestellt', uuids)
+            for (const uuid of uuids) {
+              void updateMessageInLocalStore(blindMailboxId, uuid, { status: 'read', isRead: true, isDelivered: true })
+            }
+          } else {
+            merkePartnerKennungen(blindMailboxId, 'zugestellt', uuids)
+            for (const uuid of uuids) {
+              void updateMessageInLocalStore(blindMailboxId, uuid, { status: 'delivered', isDelivered: true })
+            }
+          }
+          void loadMessages(false)
+        }
       } else if (detail?.type === 'e2ee_blind_message') {
         const isCurrentActive =
           detail.blind_mailbox_id === blindMailboxId ||

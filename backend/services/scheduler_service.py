@@ -1270,14 +1270,14 @@ async def _e2ee_envelope_cleanup_task() -> None:
     """
     from services.chat_media_service import ChatMediaService
     from services.social_service import SocialService
-    from services.social import zustellung
+    from services.social.queue_service import E2eeQueueService
     from services import ai_memory_service, vault_blob_service
     def _worker() -> None:
         db = SessionLocal()
         try:
             for name, cleanup in (
                 ("E2EE-Umschlag", SocialService.cleanup_expired_envelopes),
-                ("Zustellung", zustellung.abgelaufene_raeumen),
+                ("E2EE-Queue", E2eeQueueService.cleanup_expired_messages),
                 ("Anhang", ChatMediaService.cleanup_expired_media),
                 ("Story", SocialService.cleanup_expired_stories),
                 ("Tresor-Datei", vault_blob_service.aufraeumen),

@@ -21,6 +21,7 @@
 import type { Dispatch, SetStateAction } from 'react'
 
 import type { ChatGroupItem } from '@/api/social'
+import { sendReadReceipt } from '@/api/social'
 import type { ChatMessage } from '@/components/social/ChatMessageBubble'
 import type { ChatContact } from '@/components/social/sidebar/ConversationListItem'
 import type { Konversation } from '@/hooks/useKonversation'
@@ -219,10 +220,10 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         return [...processedList, ...lokalerVerlauf].find((m) => m.clientUuid === gemerkt) || null
       })
 
-      // Ungelesenes, das dieser Stand nicht mehr öffnen kann: **eine**
-      // Systemzeile je Gespräch, nicht je Umschlag. Die Kennung ist stabil,
-      // damit der nächste Durchlauf sie nicht noch einmal anhängt.
-      if (unlesbar > 0) {
+      // Ungelesenes, das dieser Stand nicht mehr öffnen kann: Nur wenn wirklich
+      // keine Nachrichten im lokalen Verlauf sind, zeigen wir einen Hinweis.
+      // Wenn der Verlauf bereits intakt geladen ist, darf niemals eine falsche Warnung erscheinen.
+      if (unlesbar > 0 && lokalerVerlauf.length === 0 && processedList.length === 0) {
         zeigeSystemzeile(
           t('messenger.unreadableOlderMessages'),
           `unlesbar-${currentMid}`,
@@ -330,6 +331,20 @@ export function useNachrichtenLaden(optionen: NachrichtenLadenOptionen) {
         merkeQuittungKennungen(currentMid, 'gelesen', gelesenIds)
         // Gelesen schließt zugestellt ein; die Zustellliste zieht mit.
         merkeQuittungKennungen(currentMid, 'zugestellt', gelesenIds)
+
+        // Lesequittung über den neuen FIFO-Queue-Dienst an den Absender melden
+        if (gelesenIds.length > 0) {
+          const chat_type = istGruppe ? 'group' : 'direct'
+          const chat_id = istGruppe ? String(activeGroup?.id) : String(activeContact?.userId)
+          if (chat_id) {
+            void sendReadReceipt({
+              chat_type,
+              chat_id,
+              client_uuids: gelesenIds,
+            }).catch(() => {})
+          }
+        }
+
         const dispatchReadReceipt = () => {
           sendE2eeControlMessage({
             type: 'read_receipt',

@@ -73,6 +73,7 @@ from .user_achievement import UserAchievement
 from .user_activity_time import UserActivityTime
 from .user_friend import UserFriend
 from .user_presence import UserPresence
+from .e2ee_queue import E2eeDeviceQueue
 from .e2ee_blind_envelope import E2eeBlindEnvelope
 from .e2ee_blind_mailbox import E2eeBlindMailbox
 from .e2ee_delivery import (
@@ -129,7 +130,7 @@ __all__ = [
     "UserMailbox", "UserCalendar", "CalendarEvent", "Note",
     "PanelPopup", "UserPopupState",
     "VaultEntry", "VaultHint", "VaultUserSetting", "VaultBlindBucket", "VaultBlob", "VaultBucketFormat", "VaultBucketTombstone", "VaultEingang", "VaultSicherungszugang",
-    "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope",
+    "UserAchievement", "UserActivityTime", "UserFriend", "UserPresence", "E2eeBlindEnvelope", "E2eeDeviceQueue",
     "E2eeBlindMailbox", "E2eeMailboxPush",
     "E2eeDeviceInbox", "E2eeDeliveryPayload", "E2eeDelivery", "E2eeDeliveryReceipt",
     "UserE2eeDevice", "PushSubscription",

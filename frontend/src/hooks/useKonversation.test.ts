@@ -148,14 +148,6 @@ vi.mock('@/services/gruppenSchluessel', () => ({
   // Wohin gesendet und woraus gelesen wird. Ohne gesetzten Umzug bleibt es bei
   // der alten Kennung — so verhalten sich alle Fälle wie vor Stufe 3d.
   gruppenZiele: vi.fn(async (_g: number, alt: string) => zieleFuer(alt)),
-  // Die Fähigkeitsprüfung selbst prüft `gruppenTransport.test.ts`. Hier wird
-  // nur ihre Entscheidung gesetzt: ein Umschlag, oder je Zielgeraet einer.
-  gruppenTransportZiele: vi.fn(async () => {
-    transport.aufrufe += 1
-    return transport.art === 'inbox'
-      ? { art: 'inbox' as const, inboxen: [...transport.inboxen] }
-      : { art: 'mailbox' as const, grund: 'unbekannt' as const }
-  }),
   // Dasselbe für den Direktchat. Der Hook fragt hier mit **beiden** Konten,
   // die Ziele hängen aber — wie beim echten Dienst — allein an der Kennung.
   dmZiele: vi.fn(async (eigeneId: number, peerId: number, alt: string) => {
@@ -1012,16 +1004,17 @@ describe('useKonversation', () => {
     it('schickt eine Gruppennachricht je Zielgeraet, wenn alle den neuen Weg kennen', async () => {
       // Ein Chiffrat fuer alle, ein Zustellauftrag je Geraet. Das eigene
       // sendende Geraet fehlt in der Liste — es hat die Nachricht lokal.
-      const inboxen = ['b'.repeat(64), 'c'.repeat(64), 'd'.repeat(64)]
-      transport.art = 'inbox'
-      transport.inboxen = inboxen
+      geraete.length = 0
+      geraete.push({ device_id: 'g-du-1', public_key: 'pk1' }, { device_id: 'g-du-2', public_key: 'pk2' })
+      eigeneGeraete.length = 0
+      eigeneGeraete.push({ device_id: 'eigen-a', public_key: 'pka' }, { device_id: 'eigen-b', public_key: 'pkb' })
 
       const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
       const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-6')
 
-      expect(transport.aufrufe).toBe(1)
+      // 2 für DU, 1 für Zweitgerät eigen-b (eigen-a ist der Sender und wird übersprungen)
       expect(auftraege).toHaveLength(3)
-      expect(auftraege.map((a) => a.ziel_inbox)).toEqual(inboxen)
+      expect(auftraege.map((a) => a.target_device_id)).toEqual(['eigen-b', 'g-du-1', 'g-du-2'])
       // Ein Chiffrat, eine logische Kennung: nur der Ort unterscheidet sich.
       expect(new Set(auftraege.map((a) => a.ciphertext_envelope)).size).toBe(1)
       expect(new Set(auftraege.map((a) => a.client_uuid))).toEqual(new Set(['uuid-6']))
@@ -1029,15 +1022,16 @@ describe('useKonversation', () => {
     })
 
     it('bleibt bei einem Umschlag, wenn die Faehigkeitspruefung den Altweg waehlt', async () => {
-      // Ein einziges Geraet ohne `inbox_hash` (oder ein Verzeichnisfehler)
-      // entscheidet fuer die ganze Gruppe: ein Umschlag in die geteilte
-      // Mailbox, keine halbe Zustellung.
+      // Wenn Geräte nicht aufgelöst werden können (z.B. Offline-Fallback),
+      // bleibt es bei einem Umschlag für die Gruppe.
+      geraete.length = 0
+      eigeneGeraete.length = 0
+
       const { result } = await baueHook({ art: 'gruppe', groupId: 7, mitglieder: [ICH, DU] })
       const auftraege = await result.current.baueVersand('Hallo Gruppe', 'uuid-7')
 
-      expect(transport.aufrufe).toBe(1)
       expect(auftraege).toHaveLength(1)
-      expect(auftraege[0].ziel_inbox).toBeUndefined()
+      expect(auftraege[0].target_device_id).toBeUndefined()
       expect(auftraege[0].blind_mailbox_id).toBe('gruppe-7')
     })
 

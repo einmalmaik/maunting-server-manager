@@ -12,28 +12,19 @@ import type { Versandauftrag } from '@/hooks/useKonversation'
 vi.mock('@/api/social', () => ({
   ladeAnhangHoch: vi.fn(),
   relayE2eeEnvelope: vi.fn(),
+  sendMessageQueue: vi.fn(async () => ({ status: 'ok', client_uuid: 'u-1', enqueued: 1 })),
 }))
 
 vi.mock('@/lib/offlineSync', () => ({
   enqueueMessageMutation: vi.fn(),
 }))
 
-// Der neue Weg: je Zielgeraet eine Inbox. Hier nur die Schnittstelle — was der
-// Server damit tut, prueft `test_e2ee_zustellung.py`.
-const zustellung = vi.hoisted(() => ({
-  sendeZustellungen: vi.fn(),
-  // Dieselbe Grenze wie der Server. Die Bündelung ist der Gegenstand der
-  // Tests unten; ohne den Wert ließe sich `nachrichtVersand` nicht laden.
-  MAX_AUFTRAEGE_JE_ANFRAGE: 50,
-}))
-vi.mock('./e2eeZustellung', () => zustellung)
-
-import { ladeAnhangHoch, relayE2eeEnvelope } from '@/api/social'
+import { ladeAnhangHoch, relayE2eeEnvelope, sendMessageQueue } from '@/api/social'
 import { enqueueMessageMutation } from '@/lib/offlineSync'
 import { chatMediaBlobCache } from './klartextSpeicher'
 import { baueNutzlast, ladeAnhaengeHoch, stelleZu, type Nutzlastangaben } from './nachrichtVersand'
 
-const inboxVersand = zustellung.sendeZustellungen
+const queueVersand = vi.mocked(sendMessageQueue)
 
 const hochladen = vi.mocked(ladeAnhangHoch)
 const relais = vi.mocked(relayE2eeEnvelope)
@@ -331,247 +322,49 @@ describe('stelleZu', () => {
   })
 })
 
-describe('stelleZu über das Gerätepostfach', () => {
+describe('stelleZu über die FIFO-Queue', () => {
   function auftrag(extra: Partial<Versandauftrag> = {}): Versandauftrag {
     return {
       blind_mailbox_id: 'mb',
       ciphertext_envelope: 'inhalt',
-      client_uuid: 'u#A',
+      client_uuid: 'u-1#A',
+      chat_type: 'direct',
+      chat_id: '5',
       ...extra,
     }
   }
 
   beforeEach(() => {
-    zustellung.sendeZustellungen.mockReset()
+    queueVersand.mockReset()
+    queueVersand.mockResolvedValue({ status: 'ok', client_uuid: 'u-1', enqueued: 1 })
   })
 
-  it('schickt an die Inbox und nicht mehr über die Mailbox', async () => {
-    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, payloads: { id: string }[], eintraege: { delivery_id: string; payload_id: string }[]) =>
-      ({
-        angenommen: eintraege.map((e, i) => ({ delivery_id: e.delivery_id, seq: 40 + i, ergebnis: 'angenommen' })),
-        abgelehnt: [],
-      }) as never,
-    )
+  it('sendet alle Umschläge über die neue Queue, wenn chat_type und chat_id vorhanden sind', async () => {
     const ergebnis = await stelleZu([
-      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) }),
-      // Direktchat: je Geraet ein eigener Chiffretext. Nur **gleiche** Inhalte
-      // teilen sich ein Objekt (Gruppe, eigener Test unten).
-      auftrag({
-        ziel_inbox: 'i' + 'b'.repeat(63),
-        client_uuid: 'u#B',
-        ciphertext_envelope: 'inhalt-b',
-      }),
+      auftrag({ client_uuid: 'u-1#A' }),
+      auftrag({ client_uuid: 'u-1#B' }),
     ])
 
     expect(relais).not.toHaveBeenCalled()
-    expect(inboxVersand).toHaveBeenCalledTimes(1)
-    const [, payloads, eintraege] = inboxVersand.mock.calls[0]
-    expect(payloads).toHaveLength(2)
-    expect(eintraege.map((e: { inbox_hash: string }) => e.inbox_hash)).toEqual([
-      'i' + 'a'.repeat(63),
-      'i' + 'b'.repeat(63),
-    ])
-    // Die kleinste Annahmenummer gilt als Kennung der Nachricht.
-    expect(ergebnis).toEqual({ niedrigsteId: 40, verbindungsfehler: false, ueberInbox: true })
-  })
-
-  it('laesst die Nummer eines Sitzungsaufbaus nicht als Nachrichtenkennung gelten', async () => {
-    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, _p: unknown[], eintraege: { delivery_id: string }[]) =>
-      ({
-        angenommen: eintraege.map((e, i) => ({
-          delivery_id: e.delivery_id,
-          seq: 10 + i,
-          ergebnis: 'angenommen',
-        })),
-        abgelehnt: [],
-      }) as never,
-    )
-    const ergebnis = await stelleZu([
-      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63), is_control: true, control_type: 'dr-init', client_uuid: 'u#iA' }),
-      auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) }),
-    ])
-    expect(ergebnis.niedrigsteId).toBe(11)
-  })
-
-  it('faellt fuer ein abgelehntes Ziel auf den alten Weg zurueck', async () => {
-    zustellung.sendeZustellungen.mockImplementation(async (_mb: string, _p: unknown[], eintraege: { delivery_id: string }[]) => ({
-      angenommen: [],
-      abgelehnt: [{ delivery_id: eintraege[0].delivery_id, grund: 'inbox_voll' }],
-    }) as never)
-    relais.mockResolvedValue({ id: 7 } as never)
-
-    const ergebnis = await stelleZu([auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) })])
-
-    expect(relais).toHaveBeenCalledTimes(1)
-    expect(ergebnis).toEqual({ niedrigsteId: 7, verbindungsfehler: false, ueberInbox: false })
-  })
-
-  it('faellt ganz auf den alten Weg zurueck, wenn der neue nicht antwortet', async () => {
-    zustellung.sendeZustellungen.mockRejectedValue(new Error('kein Netz'))
-    relais.mockResolvedValue({ id: 9 } as never)
-
-    const ergebnis = await stelleZu([auftrag({ ziel_inbox: 'i' + 'a'.repeat(63) })])
-
-    expect(relais).toHaveBeenCalledTimes(1)
-    expect(ergebnis.niedrigsteId).toBe(9)
-    expect(einreihen).not.toHaveBeenCalled()
-  })
-
-  it('laesst Auftraege ohne Inbox auf dem alten Weg', async () => {
-    relais.mockResolvedValue({ id: 3 } as never)
-    const ergebnis = await stelleZu([auftrag()])
-    expect(inboxVersand).not.toHaveBeenCalled()
-    expect(relais).toHaveBeenCalledTimes(1)
-    expect(ergebnis.niedrigsteId).toBe(3)
-  })
-
-  /** Eine Zustelladresse: 64 Hexzeichen, wie der Server sie verlangt. */
-  function inbox(n: number): string {
-    return n.toString(16).padStart(64, '0')
-  }
-
-  it('legt fuer eine Gruppennachricht an mehrere Geraete ein Objekt an', async () => {
-    zustellung.sendeZustellungen.mockResolvedValue({
-      angenommen: [],
-      abgelehnt: [],
-    } as never)
-
-    await stelleZu([
-      auftrag({ ziel_inbox: inbox(1), client_uuid: 'gruppe-1' }),
-      auftrag({ ziel_inbox: inbox(2), client_uuid: 'gruppe-1' }),
-      auftrag({ ziel_inbox: inbox(3), client_uuid: 'gruppe-1' }),
-    ])
-
-    const [, payloads, eintraege] = zustellung.sendeZustellungen.mock.calls[0]
-    expect(payloads).toHaveLength(1)
-    expect(eintraege).toHaveLength(3)
-    expect(new Set(eintraege.map((e: { payload_id: string }) => e.payload_id))).toEqual(
-      new Set([payloads[0].id]),
-    )
-  })
-
-  it('teilt mehr als 50 Auftraege in Stapel und legt den Inhalt nur einmal an', async () => {
-    const aufrufe: {
-      payloads: { id: string }[]
-      eintraege: { delivery_id: string; payload_id: string; inbox_hash: string }[]
-    }[] = []
-    zustellung.sendeZustellungen.mockImplementation(
-      async (
-        _mb: string,
-        payloads: { id: string }[],
-        eintraege: { delivery_id: string; payload_id: string; inbox_hash: string }[],
-      ) => {
-        aufrufe.push({ payloads, eintraege })
-        return {
-          angenommen: eintraege.map((e, i) => ({
-            delivery_id: e.delivery_id,
-            seq: aufrufe.length * 100 + i,
-            ergebnis: 'angenommen',
-          })),
-          abgelehnt: [],
-        }
-      },
-    )
-
-    const auftraege = Array.from({ length: 51 }, (_, i) =>
-      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
-    )
-    const ergebnis = await stelleZu(auftraege)
-
-    // Zwei Anfragen, weil der Server hoechstens 50 je Anfrage annimmt.
-    expect(aufrufe.map((a) => a.eintraege.length)).toEqual([50, 1])
-    // Und derselbe Inhalt bleibt ein Objekt, auch ueber die Stapelgrenze.
-    expect(aufrufe.every((a) => a.payloads.length === 1)).toBe(true)
-    expect(new Set(aufrufe.flatMap((a) => a.payloads.map((p) => p.id))).size).toBe(1)
-    expect(relais).not.toHaveBeenCalled()
-    expect(ergebnis).toEqual({ niedrigsteId: 100, verbindungsfehler: false, ueberInbox: true })
-  })
-
-  it('laesst nur den abgelehnten Auftrag auf die Mailbox fallen', async () => {
-    zustellung.sendeZustellungen.mockImplementation(
-      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => ({
-        angenommen: [{ delivery_id: eintraege[0].delivery_id, seq: 5, ergebnis: 'angenommen' }],
-        abgelehnt: [{ delivery_id: eintraege[1].delivery_id, grund: 'inbox_voll' }],
+    expect(queueVersand).toHaveBeenCalledTimes(1)
+    expect(queueVersand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_uuid: 'u-1',
+        chat_type: 'direct',
+        chat_id: '5',
+        envelopes: expect.arrayContaining([
+          expect.objectContaining({ encrypted_payload: 'inhalt' }),
+        ]),
       }),
     )
-    relais.mockResolvedValue({ id: 7 } as never)
-
-    const ergebnis = await stelleZu([
-      auftrag({ ziel_inbox: inbox(1), client_uuid: 'u#A' }),
-      auftrag({ ziel_inbox: inbox(2), client_uuid: 'u#B' }),
-    ])
-
-    expect(zustellung.sendeZustellungen.mock.calls[0][1]).toHaveLength(1)
-    expect(relais).toHaveBeenCalledTimes(1)
-    expect(relais.mock.calls[0][0].client_uuid).toBe('u#B')
-    expect(ergebnis).toEqual({ niedrigsteId: 5, verbindungsfehler: false, ueberInbox: true })
-  })
-
-  it('faellt nur mit dem Stapel zurueck, der nicht antwortet', async () => {
-    let ruf = 0
-    zustellung.sendeZustellungen.mockImplementation(
-      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => {
-        ruf += 1
-        if (ruf === 2) throw new Error('kein Netz')
-        return {
-          angenommen: eintraege.map((e, i) => ({
-            delivery_id: e.delivery_id,
-            seq: i + 1,
-            ergebnis: 'angenommen',
-          })),
-          abgelehnt: [],
-        }
-      },
-    )
-    relais.mockResolvedValue({ id: 77 } as never)
-
-    const auftraege = Array.from({ length: 51 }, (_, i) =>
-      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
-    )
-    const ergebnis = await stelleZu(auftraege)
-
-    expect(zustellung.sendeZustellungen).toHaveBeenCalledTimes(2)
-    // Nur der zweite Stapel (der 51. Auftrag) geht den alten Weg.
-    expect(relais).toHaveBeenCalledTimes(1)
-    expect(relais.mock.calls[0][0].client_uuid).toBe('u#50')
     expect(ergebnis).toEqual({ niedrigsteId: 1, verbindungsfehler: false, ueberInbox: true })
   })
 
-  it('reisst einen Sitzungsaufbau nicht von seiner Nachricht', async () => {
-    // Der Aufbau und die Nachricht desselben Geraets gehoeren zusammen. Faellt
-    // der Aufbau in einen anderen Stapel und scheitert dort, waehrend die
-    // Nachricht ankommt, hat die Gegenstelle keinen Schluessel fuer sie.
-    const stapelGroessen: number[] = []
-    zustellung.sendeZustellungen.mockImplementation(
-      async (_mb: string, _payloads: unknown[], eintraege: { delivery_id: string }[]) => {
-        stapelGroessen.push(eintraege.length)
-        return {
-          angenommen: eintraege.map((e, i) => ({
-            delivery_id: e.delivery_id,
-            seq: i + 1,
-            ergebnis: 'angenommen',
-          })),
-          abgelehnt: [],
-        }
-      },
-    )
+  it('reiht bei Netzwerkfehlern in die Offline-Queue ein', async () => {
+    queueVersand.mockRejectedValue(new Error('offline'))
+    const ergebnis = await stelleZu([auftrag({ client_uuid: 'u-1#A' })])
 
-    const auftraege = Array.from({ length: 49 }, (_, i) =>
-      auftrag({ ziel_inbox: inbox(i + 1), client_uuid: `u#${i}` }),
-    )
-    auftraege.push(
-      auftrag({
-        ziel_inbox: inbox(50),
-        client_uuid: 'paar#iE',
-        is_control: true,
-        control_type: 'dr-init',
-      }),
-      auftrag({ ziel_inbox: inbox(51), client_uuid: 'paar#E' }),
-    )
-
-    await stelleZu(auftraege)
-
-    // 49 Einzelauftraege, dann das Paar — nicht 50 und ein abgerissener Rest.
-    expect(stapelGroessen).toEqual([49, 2])
+    expect(ergebnis).toEqual({ niedrigsteId: 0, verbindungsfehler: true, ueberInbox: true })
+    expect(einreihen).toHaveBeenCalled()
   })
 })
