@@ -1,6 +1,6 @@
 # R3-Prüfunterlage: E2EE-Messenger
 
-Stand: 23.10.2026. Basis: Branch `fix/messenger`, Commit `7093e5df`.
+Stand: 24.10.2026. Basis: Branch `fix/messenger`, Commit `e4c8aba9`.
 Dieses Dokument ist eine **Prüfunterlage**, kein Audit und keine Freigabe.
 Es beschreibt, was der Code tut, welche Tests es belegen und welche Fragen
 ein menschlicher Krypto-/Privacy-Prüfer beantworten muss. Es ersetzt keine
@@ -42,8 +42,9 @@ und offenen Punkte. Nicht enthalten sind:
    nicht erreicht, geht für **dieses eine Ziel** über die alte geteilte
    Mailbox. Einen stillen Gesamt-Rückfall gibt es nicht.
 
-Gruppen und Steuerpakete laufen weiterhin über die geteilte Mailbox. Der
-gerätebezogene Transport ist derzeit ein Weg für Direktnachrichten.
+Gruppennachrichten gehen je Gerät über das Gerätepostfach, wenn **alle**
+Zielgeräte die Fähigkeit anbieten; sonst als ein Umschlag in die geteilte
+Mailbox. Steuerpakete laufen weiterhin über die geteilte Mailbox.
 
 ### 2.2 Empfangen ohne offenen Chat
 
@@ -185,6 +186,14 @@ Der Server kann die Zustelladresse nicht nachrechnen.
 - **Betrieb:** Zustellpuffer aus dem Panel-Backup ausgeschlossen; Fristen des
   gerätebezogenen Transports an den stündlichen Aufräumlauf gehängt;
   abgelaufene Zustellungen werden schon beim Lesen nicht mehr ausgeliefert.
+- **Gruppen, Hintergrund und Schlüssel:** Gruppen fan-out je Gerät mit einem
+  Chiffretextobjekt; der Hintergrundlauf liest die Rechte des verarbeiteten
+  Gesprächs (nicht des offenen), und die Schlüsselverteilung fragt Geräte
+  frisch ab. Beides am 24.10.2026 in der Laufzeitprobe gefunden und behoben.
+- **Wirkungen und Löschen:** Wirkungs-Outbox mit 10-Sekunden-Nachschlag;
+  Server-Löschauftrag als dauerhafte Wiederholung. Auch der Verfall nutzt
+  diesen Auftrag: lokal wird zuerst getilgt, der Serverteil liegt davor als
+  Auftrag vor und wird ohne Netz nachgeholt (`raeumeVerfalleneZeilen`).
 - **Anhangsfrist und Backup-Lücke (24.10.2026):** neue Uploads liegen 30 Tage
   auf dem Server, der Altbestand behält seinen gespeicherten Ablauf von bis zu
   90 Tagen und läuft ohne Migration aus. `device_pairings` steht jetzt im
@@ -194,10 +203,10 @@ Der Server kann die Zustelladresse nicht nachrechnen.
 
 ## 7. Belege in Tests
 
-Die folgenden Dateien sind vorhanden. **In dieser Runde wurden sie nicht
-ausgeführt**, weil die Backend-Suite eine eigene PostgreSQL-Datenbank anlegt
-und parallel ein anderer Lauf dieselbe Testumgebung nutzt. Ein grüner Lauf
-nach dem Merge bleibt Pflicht.
+Die folgenden Dateien waren Teil der Abnahme vom 24.10.2026. Frontend und
+Backend liefen vollständig; die verbliebenen Fehlschläge stammen aus der
+Umgebung und sind im Plan §0.2 genannt. Ein grüner Lauf nach weiteren
+Änderungen bleibt Pflicht.
 
 | Datei | Was sie prüft |
 | --- | --- |
@@ -341,8 +350,10 @@ nach dem Merge bleibt Pflicht.
    logische Kennung als Zustellkennung vor. Der Client wählt je Versuch eine
    neue UUID; die Idempotenz des Servers greift nur bei Wiederholung derselben
    Kennung, nicht bei einem neuen Sendeversuch.
-5. **Gruppen und Steuerpakete bleiben auf der geteilten Mailbox.** Der
-   gerätebezogene Transport ist noch kein Weg für alle Nachrichtenarten.
+5. **Gruppen laufen je Gerät, wenn alle Geräte die Fähigkeit anbieten; sonst
+   fällt die ganze Gruppe auf die geteilte Mailbox zurück. Steuerpakete
+   bleiben auf dem alten Weg. Der Altweg ist an einer Stelle (`altweg()`)
+   schaltbar, aber noch nicht geschlossen.**
 6. **Der Verlaufs-Umschlag liegt bis zu 30 Tage im Relais**, obwohl die
    Anhangpakete nach 24 Stunden verfallen. Das 24-Stunden-Fenster ist eine
    Client-Regel, keine serverseitige Löschfrist.
