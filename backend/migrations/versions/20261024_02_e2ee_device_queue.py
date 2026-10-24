@@ -20,6 +20,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+    if "e2ee_device_queue" in tables:
+        existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("e2ee_device_queue")}
+        if "ix_e2ee_queue_target_device" not in existing_indexes:
+            op.create_index("ix_e2ee_queue_target_device", "e2ee_device_queue", ["target_device_id"])
+        if "ix_e2ee_queue_client_uuid" not in existing_indexes:
+            op.create_index("ix_e2ee_queue_client_uuid", "e2ee_device_queue", ["client_uuid"])
+        if "ix_e2ee_queue_chat" not in existing_indexes:
+            op.create_index("ix_e2ee_queue_chat", "e2ee_device_queue", ["chat_id"])
+        return
+
     op.create_table(
         "e2ee_device_queue",
         sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
@@ -41,7 +53,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_e2ee_queue_chat", table_name="e2ee_device_queue")
-    op.drop_index("ix_e2ee_queue_client_uuid", table_name="e2ee_device_queue")
-    op.drop_index("ix_e2ee_queue_target_device", table_name="e2ee_device_queue")
-    op.drop_table("e2ee_device_queue")
+    bind = op.get_bind()
+    tables = set(sa.inspect(bind).get_table_names())
+    if "e2ee_device_queue" in tables:
+        existing_indexes = {idx["name"] for idx in sa.inspect(bind).get_indexes("e2ee_device_queue")}
+        if "ix_e2ee_queue_chat" in existing_indexes:
+            op.drop_index("ix_e2ee_queue_chat", table_name="e2ee_device_queue")
+        if "ix_e2ee_queue_client_uuid" in existing_indexes:
+            op.drop_index("ix_e2ee_queue_client_uuid", table_name="e2ee_device_queue")
+        if "ix_e2ee_queue_target_device" in existing_indexes:
+            op.drop_index("ix_e2ee_queue_target_device", table_name="e2ee_device_queue")
+        op.drop_table("e2ee_device_queue")
