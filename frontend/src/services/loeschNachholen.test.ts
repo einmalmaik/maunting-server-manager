@@ -25,7 +25,8 @@ vi.mock('@/api/social', () => api)
 
 // Die echte Datei zieht den halben Messenger herein; für den Auftrag zählt nur,
 // dass eine umgezogene Mailbox nicht doppelt angesprochen wird.
-vi.mock('./gruppenSchluessel', () => ({ umgezogeneMailbox: () => null }))
+const gruppe = vi.hoisted(() => ({ umgezogen: null as string | null }))
+vi.mock('./gruppenSchluessel', () => ({ umgezogeneMailbox: () => gruppe.umgezogen }))
 
 import { setzeAngemeldetesKonto } from '@/lib/angemeldetesKonto'
 import { setzeSiegelAktiv } from './lokaleVersiegelung'
@@ -41,6 +42,7 @@ import { baueLoeschauftrag, tilgeNachrichtLokal } from './nachrichtLoeschen'
 import {
   MAX_VERSUCHE,
   merkeUndRaeumeServerkopie,
+  merkeUndRaeumeServerkopien,
   setzeLoeschMelder,
   stosseLoeschungenAn,
 } from './loeschNachholen'
@@ -55,6 +57,7 @@ let meldungen: { id: string; grund: LoeschGrund; medien: number }[] = []
 beforeEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
+  gruppe.umgezogen = null
   konto += 1
   setzeAngemeldetesKonto(konto)
   setzeSiegelAktiv(false)
@@ -261,6 +264,21 @@ describe('dauerhafter Löschauftrag', () => {
     expect(api.loescheBlindeUmschlaege).toHaveBeenCalledWith(MAILBOX, 'u-alt')
   })
 
+  it('räumt beim Umzug einer Gruppe beide Mailboxen', async () => {
+    // Während des Umzugs liegen Nachrichten unter der alten und der neuen
+    // Kennung. Nur eine zu räumen hieße: „gelöscht" zeigen, während der
+    // Chiffretext in der anderen liegen bleibt.
+    gruppe.umgezogen = 'mb-neu'
+    await legeLoeschauftragAn(auftrag())
+
+    await stosseLoeschungenAn({ jetzt: () => 1000 })
+
+    expect(api.loescheBlindeUmschlaege.mock.calls.map(([mid]) => mid).sort()).toEqual(
+      [MAILBOX, 'mb-neu'].sort(),
+    )
+    expect(await ladeLoeschAuftraege()).toEqual([])
+  })
+
   it('meldet einen fremden Anhang, den der Server nicht herausgibt, und behält keinen Auftrag', async () => {
     api.loescheChatMedium.mockRejectedValue(
       Object.assign(new Error('kein Recht'), { status: 403 }),
@@ -362,5 +380,51 @@ describe('dauerhafter Löschauftrag', () => {
     await clearLocalMessengerStore()
 
     expect(await ladeLoeschAuftraege()).toEqual([])
+  })
+})
+
+/**
+ * Der Verfall räumt mehrere Zeilen in einem Durchgang ab. Sie müssen **alle**
+ * vor dem ersten Serveraufruf liegen, sonst sähe der Lauf die noch nicht
+ * abgelegten nicht und der nächste Durchgang fände sie nicht mehr (die Zeilen
+ * sind lokal schon Grabstein).
+ */
+describe('mehrere Aufträge aus einem Verfallsdurchgang', () => {
+  it('legt alle ab, bevor der erste Serveraufruf läuft, und räumt in einem Lauf', async () => {
+    const erste = auftrag({ clientUuid: 'u-1', id: 41 })
+    const zweite = baueLoeschauftrag(
+      MAILBOX,
+      nachricht({ clientUuid: 'u-2', id: 42 }),
+      false,
+      1000,
+    )!
+    let beimErstenAufruf: string[] = []
+    api.loescheBlindeUmschlaege.mockImplementation(async () => {
+      // Der Lauf arbeitet die Aufträge nacheinander ab; der erste Aufruf muss
+      // beide sehen, sonst wurde der zweite erst nach dem Aufräumen abgelegt.
+      if (beimErstenAufruf.length === 0) {
+        beimErstenAufruf = (await ladeLoeschAuftraege()).map((x) => x.id)
+      }
+      return { ok: true, deleted: 2 }
+    })
+
+    await merkeUndRaeumeServerkopien([erste, zweite], { jetzt: () => 1000 })
+
+    expect(beimErstenAufruf.sort()).toEqual([erste.id, zweite.id].sort())
+    expect(api.loescheBlindeUmschlaege).toHaveBeenCalledTimes(2)
+    expect(await ladeLoeschAuftraege()).toEqual([])
+  })
+
+  it('versucht ohne Ablage jede Zeile einmal und meldet ein Scheitern', async () => {
+    // `id: ''` heißt: die Ablage nimmt den Auftrag nicht an (voll, gesperrt).
+    // Dann gibt es keinen zweiten Anlass; der direkte Versuch muss laufen.
+    const ohneAblage = { ...auftrag(), id: '' }
+    api.loescheBlindeUmschlaege.mockRejectedValueOnce(netzfehler())
+
+    await merkeUndRaeumeServerkopien([ohneAblage], { jetzt: () => 1000 })
+
+    expect(api.loescheBlindeUmschlaege).toHaveBeenCalledTimes(1)
+    expect(await ladeLoeschAuftraege()).toEqual([])
+    expect(meldungen).toEqual([{ id: '', grund: 'aufgegeben', medien: 0 }])
   })
 })

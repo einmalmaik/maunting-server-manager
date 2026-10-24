@@ -213,37 +213,11 @@ export async function tilgeNachrichtLokal(
    * Optimierung ueber der Ablage.
    *
    * Der Serverteil ist eine eigene Angelegenheit: dort darf nur der Absender
-   * löschen, und das steht in `tilgeNachrichtBeimServer`.
+   * löschen, und das läuft als dauerhafter Auftrag (`baueLoeschauftrag`).
    */
   for (const mediaId of medienKennungen(msg)) {
     await loescheMedium(mediaId).catch(() => {})
     chatMediaBlobCache.delete(mediaId)
-  }
-}
-
-/**
- * Nimmt Umschläge und Anhänge vom Server.
- *
- * Nur der Absender kommt hier durch: das Löschen eines Blobs ist dem
- * Hochladenden vorbehalten, und den Knopf „für alle löschen" gibt es ohnehin
- * nur an der eigenen Nachricht.
- *
- * Fehlschläge werden gemeldet, nicht verschluckt. Wer „gelöscht" liest,
- * während der Chiffretext noch in der Mailbox liegt, glaubt etwas Falsches über
- * seine eigenen Daten.
- */
-export async function tilgeNachrichtBeimServer(
-  blindMailboxId: string,
-  msg: TilgbareNachricht
-): Promise<void> {
-  for (const mediaId of medienKennungen(msg)) {
-    await loescheChatMedium(mediaId)
-  }
-
-  if (blindMailboxId && msg.clientUuid) {
-    for (const kennung of loeschZiele(blindMailboxId)) {
-      await loescheBlindeUmschlaege(kennung, msg.clientUuid)
-    }
   }
 }
 

@@ -216,3 +216,52 @@ export async function merkeUndRaeumeServerkopie(
     return { offen: true, medienGeblieben: 0 }
   }
 }
+
+/**
+ * Derselbe dauerhafte Auftrag für mehrere Zeilen, die zusammen fällig werden.
+ *
+ * Der Verfall räumt in einem Durchgang oft viele Nachrichten ab. Jede einzeln
+ * anzustoßen hieße: ein vollständiger Lauf je Zeile, und der erste Lauf sähe
+ * die noch nicht abgelegten gar nicht. Deshalb werden **erst alle** Aufträge
+ * abgelegt, dann läuft genau ein Durchgang.
+ *
+ * Ohne Ablage (gesperrt, voll) wird jede Zeile einmal direkt versucht. Einen
+ * zweiten Anlass gibt es dann nicht — die Zeile ist lokal schon Grabstein und
+ * wird nie wieder fällig. Was scheitert, wird gemeldet statt verschluckt.
+ */
+export async function merkeUndRaeumeServerkopien(
+  auftraege: readonly LoeschAuftrag[],
+  optionen: LoeschLaufOptionen = {},
+): Promise<void> {
+  if (auftraege.length === 0) return
+  const konto = angemeldetesKonto()
+
+  let abgelegt = 0
+  const ohneAblage: LoeschAuftrag[] = []
+  for (const auftrag of auftraege) {
+    // Ein Wechsel während des Ablegens: die weitere Arbeit gehörte in eine
+    // fremde Ablage und würde mit der falschen Sitzung löschen.
+    if (angemeldetesKonto() !== konto) return
+    let gemerkt = false
+    try {
+      gemerkt = await legeLoeschauftragAn(auftrag)
+    } catch {
+      gemerkt = false
+    }
+    if (gemerkt) abgelegt += 1
+    else ohneAblage.push(auftrag)
+  }
+
+  if (angemeldetesKonto() !== konto) return
+  if (abgelegt > 0) await stosseLoeschungenAn(optionen).catch(() => {})
+
+  for (const auftrag of ohneAblage) {
+    if (angemeldetesKonto() !== konto) return
+    try {
+      const { medienGeblieben } = await raeumeServerkopieAuf(auftrag)
+      if (medienGeblieben > 0) melder?.(auftrag, 'medien', medienGeblieben)
+    } catch (fehler) {
+      melder?.(auftrag, istEndgueltigAbgelehnt(fehler) ? 'abgelehnt' : 'aufgegeben', 0)
+    }
+  }
+}

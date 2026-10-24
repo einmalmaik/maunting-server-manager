@@ -112,10 +112,6 @@ import {
   updateMessageInLocalStore,
   sortMessagesChronologically,
 } from '@/services/messengerLocalStore'
-import {
-  tilgeNachrichtBeimServer,
-  tilgeNachrichtLokal,
-} from '@/services/nachrichtLoeschen'
 import { partnerKennungen, quittungsstand } from '@/services/quittungsstand'
 import {
   binIchGemeint,
@@ -133,6 +129,7 @@ import { istAbweisung } from '@/services/steuerOutbox'
 import {
   faelligeZeilen,
   raeumeAlleChats,
+  raeumeVerfalleneZeilen,
   setzeVerfallsfrist,
   stufenDativ,
   stufenLabel,
@@ -1247,15 +1244,7 @@ function MessengerSeite() {
     const raeumeAuf = async () => {
       const faellig = faelligeZeilen(messages)
       if (!faellig.length || !aktiv) return
-      const jetzt = new Date().toISOString()
-      for (const msg of faellig) {
-        try {
-          if (msg.isSelf) await tilgeNachrichtBeimServer(blindMailboxId, msg)
-          await tilgeNachrichtLokal(blindMailboxId, msg, jetzt)
-        } catch {
-          // Was jetzt nicht wegging, geht beim nächsten Durchgang.
-        }
-      }
+      await raeumeVerfalleneZeilen(blindMailboxId, faellig)
       if (!aktiv) return
       const weg = new Set(faellig.map((m) => m.id))
       setMessages((prev) => {
