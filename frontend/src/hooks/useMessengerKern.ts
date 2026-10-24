@@ -450,6 +450,30 @@ export function useMessengerKern({
   }, [t, zeigeSystemzeile])
 
   /**
+   * Der Sicherheitsnachschlag fuer die dauerhaften Auftraege.
+   *
+   * Outbox, Medien-Nachholen und Server-Loeschauftrag haben eigene Anlaesse
+   * (Start, online, Sichtbarkeit, Entsperren). Ein Auftrag, der beim ersten
+   * Versuch in den Rueckzug ging, wird aber erst spaeter faellig — und wenn
+   * `online` vorher feuerte, gab es bis 24.10.2026 keinen weiteren Anlass: er
+   * wartete beliebig lange. Dieser eigene Takt ist der periodische Nachschlag;
+   * die Dienste lesen nur, was faellig ist, und laufen ohnehin nur einmal
+   * zugleich. Er haengt bewusst nicht am Postfachlauf: ein haengender Abruf
+   * dort darf die Wirkungen nicht mit anhalten.
+   */
+  useEffect(() => {
+    if (!currentUserId || messengerGesperrt) return
+    if (identity.state !== 'ready') return
+    const takt = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+      void holeOffeneMedien().catch(() => {})
+      void stosseSteuerOutboxAn().catch(() => {})
+      void stosseLoeschungenAn().catch(() => {})
+    }, 10_000)
+    return () => clearInterval(takt)
+  }, [currentUserId, identity.state, messengerGesperrt])
+
+  /**
    * Das Gerätepostfach im Hintergrund leeren.
    *
    * Der neue Transport stellt je Gerät zu; was hier liegt, gehört zu irgendeinem
