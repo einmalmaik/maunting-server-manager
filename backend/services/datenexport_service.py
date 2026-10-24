@@ -122,6 +122,7 @@ AUSGESCHLOSSEN: dict[str, str] = {
     "hoster_identities.external_subject_hash": "Hash der Kundenkennung beim Hoster",
     "hoster_handoffs.token_hash": "Hash eines Uebergabetokens",
     "hoster_webhook_deliveries.payload_hash": "Interner Hash",
+    "browser_widget_tokens.token_hash": "Hash des Widget-Zugangs",
 }
 
 #: Spalten, deren Name nach Geheimnis klingt, die aber keins sind.

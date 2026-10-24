@@ -221,6 +221,7 @@ jobs:
         run: npx tauri build
 
       - name: Stage app for Velopack
+        shell: bash
         run: |
           mkdir -p velopack-stage-mss
           cp smart-system/src-tauri/target/release/MauntingSmartSystem.exe velopack-stage-mss/
@@ -245,7 +246,10 @@ jobs:
               feed_sig_asset="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '[.[] | select(.draft == false) | .assets[] | select(.name == "releases.mss.json.sig")] | last | .url // empty')"
               [[ -n "$feed_sig_asset" ]] || { echo "Vorhandene MSS-Feed-Signatur fehlt." >&2; exit 1; }
               gh api "$feed_sig_asset" -H 'Accept: application/octet-stream' > smart-system-velopack/releases.mss.json.sig
-              vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss" --release "$feed_version"
+              # vpk 1.2 kennt kein --release; github laedt die neueste
+              # veroeffentlichte Fassung des Kanals. Der Feed oben stammt aus
+              # demselben Release, deshalb passen Delta und Vollpaket zusammen.
+              vpk download github --repoUrl "https://github.com/einmalmaik/maunting-server-manager" --outputDir "smart-system-velopack" --channel "mss"
             else
               echo "Der MSS-Feed im Release ist bereits diese Version; das Paket wird ohne Delta gebaut."
             fi
@@ -254,6 +258,7 @@ jobs:
           fi
 
       - name: Package with Velopack
+        shell: bash
         run: |
           mkdir -p smart-system-velopack
           vpk pack --packId "MauntingSmartSystem" --packVersion "${{ steps.version.outputs.clean_version }}" --packDir "velopack-stage-mss" --mainExe "MauntingSmartSystem.exe" --icon "smart-system/src-tauri/icons/icon.ico" --splashImage "smart-system/src-tauri/installer/sidebar_hidpi_preview.png" --splashProgressColor "None" --channel "mss" --outputDir "smart-system-velopack"
