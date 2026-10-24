@@ -24,6 +24,8 @@ import {
 import { ladeEntwurf, loadLocalMessages, sichereDauerhafteAblage, sortMessagesChronologically } from '@/services/messengerLocalStore'
 import { holeOffeneMedien } from '@/services/medienNachholen'
 import { setzeLoeschMelder, stosseLoeschungenAn } from '@/services/loeschNachholen'
+import { ladeGruppenzustand } from '@/services/gruppenKonfig'
+import { rechteAusGruppe } from '@/services/gruppenRollen'
 import { anheftung } from '@/services/nachrichtAnheftung'
 import { sessionChatCache } from '@/services/klartextSpeicher'
 import { partnerstand, quittungsstand } from '@/services/quittungsstand'
@@ -549,6 +551,36 @@ export function useMessengerKern({
           decryptionKeys: identity.decryptionKeys ?? [],
           gespraeche: liste,
           identitaet: identity,
+          /*
+           * Die Rechte **dieses** Gespraechs, nicht die des sichtbaren.
+           *
+           * `postfachRef.current.gruppenrechteVon` haengt an `activeGroup`;
+           * ohne offenen Gruppenchat lieferte sie eine leere Menge, und
+           * gueltige Gruppennachrichten fremder Mitglieder wurden als
+           * „darf nicht schreiben" verworfen. Der Rollenblock wird je Gruppe
+           * gelesen; fehlt er, entscheidet die Mitgliederzeile.
+           */
+          rechteFuerGruppe: async (group) => {
+            let zustand = null
+            try {
+              const mailbox =
+                getCachedGroupBlindMailboxId(group.id) ?? (await deriveGroupBlindMailboxId(group.id))
+              const mitglieder = (group.members ?? []).map((m) => Number(m.user_id))
+              if (!mitglieder.includes(currentUserId)) mitglieder.push(currentUserId)
+              const lesung = await ladeGruppenzustand({
+                groupId: group.id,
+                blindMailboxId: mailbox,
+                eigeneId: currentUserId,
+                mitglieder,
+                istEigentuemer: Number(group.owner_user_id) === currentUserId,
+              })
+              if (lesung.art === 'zustand') zustand = lesung.zustand
+            } catch {
+              // Ohne Rollenblock gilt die Mitgliederzeile; ohne die bleibt es
+              // bei den Standardrechten.
+            }
+            return (konto: number) => rechteAusGruppe(group, konto, zustand)
+          },
           ...postfachRef.current,
         })
       } catch {

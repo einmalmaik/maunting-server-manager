@@ -11,7 +11,7 @@ import { sha256Hex } from '@msdis/shield/integrity'
 
 import { getGroupMembers, relayE2eeEnvelope } from '@/api/social'
 import { deriveUserDeviceMailboxId, encryptE2eeHybrid } from '../e2eeCrypto'
-import { eigenesGeraet, geraeteVon } from '../e2eeGeraet'
+import { eigenesGeraet, verlangeGeraeteVon } from '../e2eeGeraet'
 import { signiereNutzlast } from '../nutzlastSignatur'
 import { ablage } from './gruppenAblage'
 import { geheimnisFuer, sichereBesitznachweis } from './gruppenMailbox'
@@ -144,7 +144,9 @@ export async function anJedesGeraet(
   const kennungen: string[] = []
   const fehlend: string[] = []
   for (const empfaengerId of empfaengerIds) {
-    const geraete = await geraeteVon(empfaengerId)
+    // Frisch aus dem Verzeichnis: nach einer Freigabe oder einem Entfernen
+    // darf weder ein altes Gerät den Schlüssel bekommen noch ein neues fehlen.
+    const geraete = await verlangeGeraeteVon(empfaengerId, { frisch: true })
     const ziel = await deriveUserDeviceMailboxId(empfaengerId)
     for (const geraet of geraete) {
       // Das eigene Gerät hat den Schlüssel schon.

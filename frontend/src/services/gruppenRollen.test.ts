@@ -18,11 +18,13 @@ import { describe, expect, it } from 'vitest'
 import de from '@/locales/de.json'
 import en from '@/locales/en.json'
 import { KONFIG_FORMAT, type Gruppenzustand } from './gruppenKonfig'
+import type { ChatGroupItem } from '@/api/social'
 import {
   GRUPPEN_RECHTE,
   leseRechte,
   permissionDescKey,
   permissionTitleKey,
+  rechteAusGruppe,
   wirksameGruppenrechte,
 } from './gruppenRollen'
 
@@ -273,5 +275,31 @@ describe('Beschriftung der Rechte', () => {
       }
     }
     expect(fehlend).toEqual([])
+  })
+})
+
+describe('rechteAusGruppe', () => {
+  const gruppe = {
+    id: 9,
+    owner_user_id: ANNA,
+    default_permissions: '',
+    members: [
+      { user_id: ANNA, username: 'Anna', role: 'owner' },
+      { user_id: BERT, username: 'Bert', role: 'member' },
+    ],
+  } as unknown as ChatGroupItem
+
+  it('gibt dem Eigentuemer alles und dem Mitglied die Standardrechte', () => {
+    expect(rechteAusGruppe(gruppe, ANNA).has('send_messages')).toBe(true)
+    expect(rechteAusGruppe(gruppe, BERT).has('send_messages')).toBe(false)
+    expect(rechteAusGruppe(gruppe, BERT).has('delete_messages')).toBe(false)
+  })
+
+  it('nimmt den entschluesselten Rollenblock mit', () => {
+    const mitRolle = zustand(
+      [{ id: 'custom', name: 'Schreiber', beschreibung: '', rechte: ['send_messages'] }],
+      { custom: [BERT] },
+    )
+    expect(rechteAusGruppe(gruppe, BERT, mitRolle).has('send_messages')).toBe(true)
   })
 })

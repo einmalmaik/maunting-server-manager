@@ -61,6 +61,12 @@ export interface PostfachLauf {
   decryptionKeys: string[]
   gespraeche: readonly PostfachGespraech[]
   gruppenrechteVon: (konto: number) => Set<string>
+  /**
+   * Die Rechte **dieses** Gespraechs. Der sichtbare Chat liefert seine eigene
+   * Gruppe; der Hintergrundlauf braucht sie fuer jedes Gespraech, auch ohne
+   * offenen Chat. Fehlt der Rueckruf, gilt `gruppenrechteVon`.
+   */
+  rechteFuerGruppe?: (group: ChatGroupItem) => Promise<(konto: number) => Set<string>>
   t: (schluessel: string, werte?: Record<string, unknown>) => string
   markAsRead: (mailbox: string) => void
   setVerfallSekunden: (sekunden: number) => void
@@ -179,6 +185,10 @@ export async function verarbeitePostfach(
         annahme_seq: e.seq,
       }))
 
+      const rechte =
+        gespraech.group && lauf.rechteFuerGruppe
+          ? await lauf.rechteFuerGruppe(gespraech.group)
+          : lauf.gruppenrechteVon
       const stand = partnerstand(gespraech.mailbox)
       const ergebnis = await verarbeiteGespraech(
         {
@@ -207,7 +217,7 @@ export async function verarbeitePostfach(
           eigeneId: lauf.eigeneId,
           contact: gespraech.contact,
           group: gespraech.group,
-          gruppenrechteVon: lauf.gruppenrechteVon,
+          gruppenrechteVon: rechte,
           t: lauf.t,
           maxPartnerReadId: stand.gelesen,
           maxPartnerDeliveredId: stand.zugestellt,

@@ -105,7 +105,7 @@ import {
   versteckeGespraech,
 } from '@/services/gespraechsListe'
 import { ladeGruppenzustand, type Gruppenzustand } from '@/services/gruppenKonfig'
-import { wirksameGruppenrechte } from '@/services/gruppenRollen'
+import { rechteAusGruppe } from '@/services/gruppenRollen'
 import {
   entferneLokaleNachricht,
   leereMailboxLokal,
@@ -776,15 +776,7 @@ function MessengerSeite() {
   const gruppenrechteVon = useCallback(
     (konto: number) => {
       if (!activeGroup) return new Set<string>()
-      const mitglied = activeGroup.members?.find((m) => Number(m.user_id) === Number(konto))
-      return wirksameGruppenrechte({
-        konto,
-        systemRolle: mitglied?.role,
-        istEigentuemer: Number(activeGroup.owner_user_id) === Number(konto),
-        eigeneRechte: mitglied?.permissions,
-        standardrechte: activeGroup.default_permissions,
-        zustand: gruppenRollenZustand,
-      })
+      return rechteAusGruppe(activeGroup, konto, gruppenRollenZustand)
     },
     [activeGroup, gruppenRollenZustand],
   )

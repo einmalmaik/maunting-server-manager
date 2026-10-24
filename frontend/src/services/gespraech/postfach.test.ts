@@ -390,4 +390,22 @@ describe('verarbeitePostfach', () => {
     expect(zustellung.quittiereZustellungen).toHaveBeenCalledWith('a'.repeat(64), ['d-2'])
   })
 
+  it('nutzt fuer den Hintergrund die Rechte der verarbeiteten Gruppe', async () => {
+    zustellung.holeZustellungen.mockResolvedValue({
+      eintraege: [eintrag(1, 'sv-e2ee-group-v1:k7:rumpf')],
+      naechste_seq: 1,
+    })
+    const rechteFuerGruppe = vi.fn(
+      async () => (konto: number) => new Set(konto === 2 ? ['send_messages'] : []),
+    )
+
+    await verarbeitePostfach({ ...lauf, rechteFuerGruppe })
+
+    expect(rechteFuerGruppe).toHaveBeenCalled()
+    const options = uebernahme.uebernimmLesungen.mock.calls[0][0] as {
+      gruppenrechteVon: (konto: number) => Set<string>
+    }
+    expect(options.gruppenrechteVon(2).has('send_messages')).toBe(true)
+  })
+
 })

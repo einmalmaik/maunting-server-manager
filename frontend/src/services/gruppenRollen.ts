@@ -28,6 +28,7 @@
  * einen Beleg gibt.
  */
 
+import type { ChatGroupItem } from '@/api/social'
 import type { Gruppenzustand } from './gruppenKonfig'
 
 /**
@@ -239,6 +240,31 @@ export function wirksameGruppenrechte(frage: RechteFrage): Set<string> {
 }
 
 /** Kurzform für die eine Frage, die der Verlauf stellt. */
+
+/**
+ * Die Rechte eines Kontos in **dieser** Gruppe — aus der Mitgliederzeile und
+ * dem entschluesselten Rollenblock.
+ *
+ * Der Messenger rechnet fuer die offene Gruppe schon so; der Hintergrundlauf
+ * braucht dieselbe Antwort fuer **jedes** Gespraech, nicht nur fuer das
+ * sichtbare. Eine Funktion fuer beide, damit die Rechte nicht auseinander
+ * laufen.
+ */
+export function rechteAusGruppe(
+  group: ChatGroupItem,
+  konto: number,
+  zustand: Gruppenzustand | null = null,
+): Set<string> {
+  const mitglied = group.members?.find((m) => Number(m.user_id) === Number(konto))
+  return wirksameGruppenrechte({
+    konto,
+    systemRolle: mitglied?.role,
+    istEigentuemer: Number(group.owner_user_id) === Number(konto),
+    eigeneRechte: mitglied?.permissions,
+    standardrechte: group.default_permissions,
+    zustand,
+  })
+}
 export function hatGruppenrecht(frage: RechteFrage, recht: GruppenRechtKennung): boolean {
   return wirksameGruppenrechte(frage).has(recht)
 }
