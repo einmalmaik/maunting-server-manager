@@ -49,6 +49,8 @@ import { kuerzelAusfuehren, useKuerzel, type KuerzelZiele } from './services/kue
 import { tabEreignisse } from './services/nativ'
 import { erweiterungenStarten } from './erweiterungen/erweiterungen'
 import { useLeistung } from './services/leistung'
+import { useDarstellung } from './services/darstellung'
+import { useWetterWidget } from './services/wetterWidget'
 import { istAndroid } from './services/plattform'
 import { istGekoppelt, useSitzung, useSitzungsLauf } from './services/sitzung'
 import { useTabsStore } from './services/tabsStore'
@@ -131,6 +133,8 @@ function Wurzel() {
   useUeberdeckungBeobachten()
   useVerlaufFrist()
   useLeistung()
+  useDarstellung()
+  useWetterWidget()
   // Dieselben Schlösser wie in MSS: Tresor und Messenger sperren sich selbst.
   useAutoSperre(tresorAutoSperrQuelle, tresorOffen)
   useMessengerSperreBereitschaft()

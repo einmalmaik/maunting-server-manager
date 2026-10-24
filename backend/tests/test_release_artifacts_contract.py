@@ -38,6 +38,20 @@ def test_updater_selects_only_the_panel_asset() -> None:
     assert "sha256sum --check panel.sha256" in updater
 
 
+def test_wetter_sidecar_wird_installiert_und_beim_update_nachgezogen() -> None:
+    """Der Wetter-Sidecar darf beim Kopieren und beim fruehen Update-Ausstieg
+    nicht durchs Raster fallen: 5.7.0 kopierte ihn auf Neuinstallationen nicht,
+    und ein zweiter Update-Lauf stieg vor der fehlenden systemd-Unit aus.
+    """
+    installer = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert '"$SCRIPT_DIR/wetter-sidecar/" "$MSM_DIR/wetter-sidecar/"' in installer
+    assert "--exclude 'daten/'" in installer
+
+    updater = (ROOT / "update.sh").read_text(encoding="utf-8")
+    assert updater.count("Wetter-Sidecar ist vorhanden, aber nicht als Dienst eingerichtet") == 2
+    assert "systemctl is-enabled --quiet msm-wetter.service" in updater
+
+
 def test_bootstrap_prefers_release_and_keeps_safe_fallback() -> None:
     bootstrap = (ROOT / "scripts" / "bootstrap.sh").read_text(encoding="utf-8")
     assert "releases/latest" in bootstrap

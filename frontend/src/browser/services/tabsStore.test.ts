@@ -40,7 +40,7 @@ describe('Seiten des Browsers im Tab', () => {
   it('öffnet die Einstellungen in der leeren Startseite, ohne Webview', () => {
     useTabsStore.getState().einstellungen()
     expect(useTabsStore.getState().tabs).toHaveLength(1)
-    expect(aktiv().url).toBe('msb://einstellungen')
+    expect(aktiv().url).toBe('pontis://einstellungen')
     expect(befehle()).not.toContain('tab_laden')
   })
 
@@ -51,7 +51,7 @@ describe('Seiten des Browsers im Tab', () => {
     useTabsStore.getState().einstellungen('suche')
     expect(useTabsStore.getState().tabs).toHaveLength(2)
     expect(aktiv().id).toBe(id)
-    expect(aktiv().url).toBe('msb://einstellungen/suche')
+    expect(aktiv().url).toBe('pontis://einstellungen/suche')
   })
 
   it('schließt die Webview, wenn ein Tab mit Seite zu den Einstellungen wechselt', async () => {
@@ -59,9 +59,9 @@ describe('Seiten des Browsers im Tab', () => {
     expect(aktiv().nativDa).toBe(true)
     await warten()
     gerufen.length = 0
-    useTabsStore.getState().eingeben('msb://einstellungen/schutz')
+    useTabsStore.getState().eingeben('pontis://einstellungen/schutz')
     await warten()
-    expect(aktiv()).toMatchObject({ url: 'msb://einstellungen/schutz', nativDa: false, laedt: false })
+    expect(aktiv()).toMatchObject({ url: 'pontis://einstellungen/schutz', nativDa: false, laedt: false })
     expect(befehle()).toContain('tab_schliessen')
     expect(befehle()).not.toContain('tab_laden')
   })
@@ -78,7 +78,7 @@ describe('Seiten des Browsers im Tab', () => {
   })
 
   it('lässt eine Webseite keine eigene Seite öffnen', () => {
-    useTabsStore.getState().ereignis({ art: 'neuer_tab', id: aktiv().id, url: 'msb://einstellungen' })
+    useTabsStore.getState().ereignis({ art: 'neuer_tab', id: aktiv().id, url: 'pontis://einstellungen' })
     expect(useTabsStore.getState().tabs).toHaveLength(1)
     expect(aktiv().url).toBe('')
   })
@@ -111,7 +111,7 @@ describe('MSM-Suche im Tab', () => {
   it('sucht gekoppelt auf der eigenen Seite, ohne Webview', () => {
     useSitzung.setState({ stand: 'an' })
     useTabsStore.getState().eingeben('  Wetter Köln ')
-    expect(aktiv()).toMatchObject({ url: 'msb://suche?q=Wetter%20K%C3%B6ln', nativDa: false })
+    expect(aktiv()).toMatchObject({ url: 'pontis://suche?q=Wetter%20K%C3%B6ln', nativDa: false })
     expect(befehle()).not.toContain('tab_laden')
   })
 
@@ -305,7 +305,7 @@ describe('zurueckGehen und Verlauf', () => {
   it('schließt den Einstellungs-Tab beim Zurückgehen und aktiviert den vorherigen Tab', () => {
     useTabsStore.getState().einstellungen()
     expect(useTabsStore.getState().tabs).toHaveLength(2)
-    const einstellungenTab = useTabsStore.getState().tabs.find((t) => t.url.startsWith('msb://einstellungen'))!
+    const einstellungenTab = useTabsStore.getState().tabs.find((t) => t.url.startsWith('pontis://einstellungen'))!
     expect(useTabsStore.getState().aktivId).toBe(einstellungenTab.id)
 
     const gehandelt = useTabsStore.getState().zurueckGehen()
@@ -317,7 +317,7 @@ describe('zurueckGehen und Verlauf', () => {
 
   it('setzt die Startseite wenn Einstellungen im einzigen Tab offen war', () => {
     useTabsStore.setState({
-      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'msb://einstellungen', nativDa: false }],
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'tab-1', url: 'pontis://einstellungen', nativDa: false }],
       aktivId: 'tab-1',
       verlaufIds: [],
     })
@@ -376,6 +376,67 @@ describe('zurueckGehen und Verlauf', () => {
     // tab_laden wurde für die URL aufgerufen
     const ladeAufruf = gerufen.find((g) => g.befehl === 'tab_laden' && (g.args as { url: string }).url === 'https://youtube.com/watch?v=standalone')
     expect(ladeAufruf).toBeDefined()
+
+    delete antworten.fenster_start_info
+  })
+
+  it('hochfahren im Hauptfenster öffnet einen Link aus einem anderen Programm', async () => {
+    useTabsStore.setState({
+      tabs: [
+        { ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite.example/' },
+        { ...useTabsStore.getState().tabs[0], id: 'alt-2', url: 'https://alte-seite-2.example/' },
+      ],
+      aktivId: 'alt-1',
+    })
+
+    // Windows startet den Browser mit der Adresse als Argument, wenn ein
+    // anderes Programm einen Link öffnet. Der Link gehört in einen neuen Tab,
+    // die wiederhergestellten Tabs bleiben stehen.
+    antworten.fenster_start_info = {
+      ist_neues_fenster: false,
+      start_url: 'https://anmeldung.example/einloggen?code=abc',
+      privat: false,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    expect(zustand.tabs).toHaveLength(3)
+    expect(zustand.tabs.find((t) => t.id === zustand.aktivId)?.url).toBe('https://anmeldung.example/einloggen?code=abc')
+    expect(zustand.tabs.some((t) => t.url === 'https://alte-seite.example/')).toBe(true)
+
+    delete antworten.fenster_start_info
+  })
+
+  it('öffnet beim Kaltstart keine gefährliche Adresse aus einem fremden Programm', async () => {
+    useTabsStore.setState({
+      tabs: [{ ...useTabsStore.getState().tabs[0], id: 'alt-1', url: 'https://alte-seite.example/' }],
+      aktivId: 'alt-1',
+    })
+
+    for (const start_url of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'data:text/html,<b>x</b>', 'ftp://example.org/']) {
+      antworten.fenster_start_info = { ist_neues_fenster: false, start_url, privat: false }
+      await useTabsStore.getState().hochfahren()
+      expect(useTabsStore.getState().tabs.map((t) => t.url)).toEqual(['https://alte-seite.example/'])
+    }
+
+    delete antworten.fenster_start_info
+  })
+
+  it('hochfahren im Hauptfenster öffnet einen privaten Link in einem privaten Tab', async () => {
+    antworten.fenster_start_info = {
+      ist_neues_fenster: false,
+      start_url: 'https://privat.example/',
+      privat: true,
+    }
+
+    await useTabsStore.getState().hochfahren()
+
+    const zustand = useTabsStore.getState()
+    const aktiv = zustand.tabs.find((t) => t.id === zustand.aktivId)
+    expect(aktiv?.url).toBe('https://privat.example/')
+    expect(aktiv?.privat).toBe(true)
+    expect(zustand.tabs.filter((t) => t.privat)).toHaveLength(1)
 
     delete antworten.fenster_start_info
   })

@@ -33,6 +33,7 @@ const VerlaufPanel = lazy(() => import('../panels/Verlauf').then((m) => ({ defau
 const DownloadsPanel = lazy(() => import('../panels/Downloads').then((m) => ({ default: m.DownloadsPanel })))
 const KopplungPanel = lazy(() => import('../panels/Kopplung').then((m) => ({ default: m.KopplungPanel })))
 const EntwicklerPanel = lazy(() => import('../entwickler/EntwicklerPanel').then((m) => ({ default: m.EntwicklerPanel })))
+const ExternPanel = lazy(() => import('./ExternPanel').then((m) => ({ default: m.ExternPanel })))
 
 export const PANEL_MIN = 320
 /** So viel bleibt der Seite mindestens, samt Leiste links. */
@@ -61,7 +62,7 @@ function MitKopplung({ id, children }: { id: PanelId; children: ReactNode }) {
   return <>{children}</>
 }
 
-function Inhalt({ id, pfad }: { id: PanelId; pfad: string }) {
+function Inhalt({ id, pfad, voll }: { id: PanelId; pfad: string; voll: boolean }) {
   switch (id) {
     case 'ai':
       return <MitKopplung id={id}><Ai /></MitKopplung>
@@ -91,6 +92,11 @@ function Inhalt({ id, pfad }: { id: PanelId; pfad: string }) {
       return <KopplungPanel />
     case 'entwickler':
       return <EntwicklerPanel />
+    case 'whatsapp':
+    case 'discord':
+    case 'telegram':
+    case 'instagram':
+      return <ExternPanel id={id} voll={voll} />
   }
 }
 
@@ -147,18 +153,20 @@ function Vollbild({ id, titel, pfad }: { id: PanelId; titel: string; pfad: strin
   const navigate = useNavigate()
   const [modalContainer, setModalContainer] = useState<HTMLElement | null>(null)
   useZurueckSchliesst(true, () => navigate('/'))
+  const extern = id === 'whatsapp' || id === 'discord' || id === 'telegram' || id === 'instagram'
   return (
     <aside
       role="dialog"
       aria-modal="true"
       aria-label={titel}
+      data-msm-in-panel={extern ? true : undefined}
       className="fixed inset-0 z-40 flex flex-col bg-surface-container-low pb-[var(--msm-unten-sicher)] pl-[var(--msm-links-sicher)] pr-[var(--msm-rechts-sicher)] pt-[var(--msm-oben-sicher)]"
     >
       <Kopf titel={titel} schliessen={() => navigate('/')} />
       <div ref={setModalContainer} className="msb-bereich relative min-h-0 flex-1 overflow-hidden">
         <ModalContainerContext.Provider value={modalContainer}>
           <Suspense fallback={<Laedt />}>
-            <Inhalt id={id} pfad={pfad} />
+            <Inhalt id={id} pfad={pfad} voll />
           </Suspense>
         </ModalContainerContext.Provider>
       </div>
@@ -205,7 +213,7 @@ export function Panel({ seite }: { seite: 'links' | 'rechts' | 'voll' }) {
       <div ref={setModalContainer} className="msb-bereich relative min-h-0 flex-1 overflow-hidden">
         <ModalContainerContext.Provider value={modalContainer}>
           <Suspense fallback={<Laedt />}>
-            <Inhalt id={id} pfad={pathname} />
+            <Inhalt id={id} pfad={pathname} voll={false} />
           </Suspense>
         </ModalContainerContext.Provider>
       </div>

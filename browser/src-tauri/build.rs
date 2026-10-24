@@ -34,6 +34,7 @@ const BEFEHLE: &[&str] = &[
     "tab_aktion",
     "tab_seite_zuruecksetzen",
     "tabs_rahmen",
+    "panel_rahmen",
     "tabs_split_setzen",
     "tabs_split_aufheben",
     "tabs_verdecken",
@@ -61,6 +62,7 @@ const BEFEHLE: &[&str] = &[
     "tabs_zuruecksetzen",
     "oberflaeche_fokussieren",
     "tabs_leistung",
+    "tabs_darstellung",
     "tab_stumm",
     "schild_stand",
     "schild_gesamt",
@@ -84,9 +86,13 @@ const BEFEHLE: &[&str] = &[
     "seitenrechte",
     "seitenrecht_zuruecksetzen",
     "widget_start",
+    "widget_sprache",
     "widget_stand",
     "widget_lage",
     "widget_anheften",
+    "widget_wetter_setzen",
+    "widget_wetter_lage",
+    "widget_wetter_anheften",
     "bildsuche",
     "tastatur_zeigen",
     "standardbrowser",
@@ -95,6 +101,8 @@ const BEFEHLE: &[&str] = &[
     "update_pruefen",
     "update_herunterladen",
     "update_installieren",
+    "detect_installed_browsers",
+    "import_browser_data",
 ];
 
 fn main() {

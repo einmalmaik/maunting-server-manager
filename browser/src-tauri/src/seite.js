@@ -381,6 +381,26 @@
   // Je Ziel: Knoten, Attribut (null: Text), Original, Übersetzung.
   let arbeit = null
 
+  // `lang` am Dokument ist die beste Auskunft; manche Seiten nennen ihre
+  // Sprache nur in einer Meta-Angabe oder an einem Rahmen. Die erste Angabe zählt.
+  function spracheDerSeite() {
+    let roh = document.documentElement.getAttribute('lang') || ''
+    if (!roh) {
+      for (const m of document.querySelectorAll('meta[http-equiv], meta[name], meta[property]')) {
+        const art = (m.getAttribute('http-equiv') || m.getAttribute('name') || m.getAttribute('property') || '').toLowerCase()
+        if (art === 'content-language' || art === 'language' || art === 'og:locale') {
+          const inhalt = (m.getAttribute('content') || '').split(/[;,]/)[0].trim()
+          if (inhalt) {
+            roh = inhalt
+            break
+          }
+        }
+      }
+    }
+    if (!roh && document.body) roh = document.body.querySelector('[lang]')?.getAttribute('lang') || ''
+    return roh.slice(0, 35).replace(/[^A-Za-z0-9_-]/g, '')
+  }
+
   function textSammeln() {
     const ziele = []
     const nehmen = (knoten, attribut, text) => {
@@ -436,7 +456,7 @@
         }
       })
     } else return
-    const sprache = (document.documentElement.getAttribute('lang') || '').slice(0, 35).replace(/[^A-Za-z0-9_-]/g, '')
+    const sprache = spracheDerSeite()
     senden(json({ t: 'texte', nr: d.nr, sprache, texte: naechstesStueck() }))
   }
 

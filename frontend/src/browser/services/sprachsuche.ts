@@ -22,6 +22,8 @@ import {
   transkribiereAudioMitWhisper,
   type AudioAufnahmeHandle,
 } from './lokalesWhisper'
+import { istTauri, nativ } from './nativ'
+import { istAndroid } from './plattform'
 
 export type SprachsucheZustand = 'bereit' | 'laedt_modell' | 'zuhoeren' | 'transkribiert'
 
@@ -89,6 +91,9 @@ function getSpeechRecognitionConstructor(): (new () => ISpeechRecognition) | nul
 }
 
 export function istSprachsucheMoeglich(): boolean {
+  // Android-WebView hat kein Web Speech; die System-Spracherkennung kommt aus
+  // der App selbst und ist dort immer der richtige Weg.
+  if (istAndroid()) return istTauri()
   return istLokalesWhisperMoeglich() || getSpeechRecognitionConstructor() !== null
 }
 
@@ -99,8 +104,19 @@ export function useSprachsuche({ onErgebnis, onZwischenergebnis, sprache }: Spra
   const aufnahmeHandleRef = useRef<AudioAufnahmeHandle | null>(null)
   const recognizerRef = useRef<ISpeechRecognition | null>(null)
   const aktivRef = useRef(false)
+  /** Zählt native Aufrufe; ein spätes Ergebnis nach Abbruch/Unmount wird verworfen. */
+  const nativeLaufRef = useRef(0)
 
   const stoppen = useCallback(async () => {
+    // Android: die System-Activity lässt sich von hier nicht abbrechen. Wir
+    // lösen nur den Zustand und verwerfen ihr späteres Ergebnis.
+    if (istAndroid()) {
+      nativeLaufRef.current++
+      aktivRef.current = false
+      setZustand('bereit')
+      return
+    }
+
     // 1. Lokales Whisper beenden und auswerten
     if (aufnahmeHandleRef.current) {
       const handle = aufnahmeHandleRef.current
@@ -149,6 +165,35 @@ export function useSprachsuche({ onErgebnis, onZwischenergebnis, sprache }: Spra
 
   const starten = useCallback(async () => {
     if (aktivRef.current) return
+
+    // Android: die eingerichtete System-Spracherkennung öffnen, wie beim
+    // Widget. Kein Whisper, kein Web-Speech; der Text wird nur eingesetzt.
+    if (istAndroid()) {
+      const lauf = ++nativeLaufRef.current
+      aktivRef.current = true
+      setZustand('zuhoeren')
+      try {
+        const antwort = await nativ.sprachEingabe()
+        if (nativeLaufRef.current !== lauf) return
+        if (antwort?.text) {
+          onErgebnis(antwort.text)
+        } else if (antwort?.fehler === 'kein_erkenner') {
+          toast.error(t('browser.sprachsuche.keinErkenner'))
+        } else if (antwort?.fehler && antwort.fehler !== 'laeuft') {
+          toast.error(t('browser.sprachsuche.fehler'))
+        }
+      } catch (err) {
+        if (nativeLaufRef.current === lauf) {
+          toast.error(`${t('browser.sprachsuche.fehler')} ${fehlerKurztext(err)}`)
+        }
+      } finally {
+        if (nativeLaufRef.current === lauf) {
+          aktivRef.current = false
+          setZustand('bereit')
+        }
+      }
+      return
+    }
 
     // 1. Primär: Lokales On-Device Whisper via WebGPU/WASM
     if (istLokalesWhisperMoeglich()) {
@@ -255,6 +300,7 @@ export function useSprachsuche({ onErgebnis, onZwischenergebnis, sprache }: Spra
 
   useEffect(() => {
     return () => {
+      nativeLaufRef.current++
       if (aufnahmeHandleRef.current) {
         aufnahmeHandleRef.current.abbrechen()
         aufnahmeHandleRef.current = null

@@ -10,10 +10,11 @@ import { Button, confirm } from '@/Singra/UI'
 import { toast } from '@/stores/toastStore'
 
 import { useEinstellungenStore, type VerlaufFrist } from '../services/einstellungenStore'
-import { nativ } from '../services/nativ'
+import { istTauri, nativ } from '../services/nativ'
 import { istAndroid } from '../services/plattform'
 import { useVerlaufStore } from '../services/verlaufStore'
 import { Abschnitt, Auswahlzeile } from './bausteine'
+import { BrowserImport } from './BrowserImport'
 
 const STUNDE = 60 * 60 * 1000
 
@@ -58,28 +59,31 @@ export function VerlaufDaten() {
   }
 
   return (
-    <Abschnitt titel={t('browser.einstellungen.kategorie.verlauf')}>
-      <Auswahlzeile<VerlaufFrist>
-        name={t('browser.einstellungen.verlaufBehalten')}
-        hinweis={t('browser.einstellungen.verlaufBehaltenHinweis')}
-        wert={frist}
-        optionen={FRISTEN.map((f) => ({ value: f, label: t(`browser.einstellungen.frist.${f}`) }))}
-        aendern={(v) => setzen({ verlaufBehalten: v })}
-      />
-      {android ? (
-        <p className="text-body-sm text-on-surface-variant">{t('browser.einstellungen.datenLoeschenAndroid')}</p>
-      ) : (
-        <Auswahlzeile<Zeitraum>
-          name={t('browser.einstellungen.datenLoeschen')}
-          hinweis={t('browser.einstellungen.datenLoeschenHinweis')}
-          wert={zeitraum}
-          optionen={(Object.keys(ZEITRAEUME) as Zeitraum[]).map((z) => ({ value: z, label: t(`browser.einstellungen.zeitraum.${z}`) }))}
-          aendern={setZeitraum}
+    <>
+      <Abschnitt titel={t('browser.einstellungen.kategorie.verlauf')}>
+        <Auswahlzeile<VerlaufFrist>
+          name={t('browser.einstellungen.verlaufBehalten')}
+          hinweis={t('browser.einstellungen.verlaufBehaltenHinweis')}
+          wert={frist}
+          optionen={FRISTEN.map((f) => ({ value: f, label: t(`browser.einstellungen.frist.${f}`) }))}
+          aendern={(v) => setzen({ verlaufBehalten: v })}
         />
-      )}
-      <Button variant="secondary" size="sm" className="self-end" onClick={() => void loeschen()}>
-        {t('browser.einstellungen.loeschen')}
-      </Button>
-    </Abschnitt>
+        {android ? (
+          <p className="text-body-sm text-on-surface-variant">{t('browser.einstellungen.datenLoeschenAndroid')}</p>
+        ) : (
+          <Auswahlzeile<Zeitraum>
+            name={t('browser.einstellungen.datenLoeschen')}
+            hinweis={t('browser.einstellungen.datenLoeschenHinweis')}
+            wert={zeitraum}
+            optionen={(Object.keys(ZEITRAEUME) as Zeitraum[]).map((z) => ({ value: z, label: t(`browser.einstellungen.zeitraum.${z}`) }))}
+            aendern={setZeitraum}
+          />
+        )}
+        <Button variant="secondary" size="sm" className="self-end" onClick={() => void loeschen()}>
+          {t('browser.einstellungen.loeschen')}
+        </Button>
+      </Abschnitt>
+      {istTauri() && !android && <BrowserImport />}
+    </>
   )
 }

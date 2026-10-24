@@ -134,7 +134,9 @@ pub enum Antwort {
     /// `None`: die Oberfläche hat selbst gehandelt oder nichts gewählt.
     Menue { befehl: Option<i32> },
     Dialog { ok: bool, text: Option<String> },
-    Recht { erlauben: bool },
+    /// `Some`: ausdrücklich erlaubt oder blockiert; `None`: Dialog geschlossen,
+    /// ohne zu entscheiden. Nur `Some` darf dauerhaft gespeichert werden.
+    Recht { erlauben: Option<bool> },
     /// Ohne Benutzer: abgebrochen.
     Anmeldung { benutzer: Option<String>, passwort: Option<String> },
 }
@@ -145,6 +147,7 @@ pub enum DownloadStand {
     Start,
     /// Geladen, der Virenschutz prüft.
     Pruefung,
+
     Fertig,
     /// Der Virenschutz hat die Datei abgelehnt; sie ist gelöscht.
     Blockiert,
@@ -219,5 +222,21 @@ mod tests {
         assert!(von_kotlin(r#"{"art":"gesperrt","id":"tab-a1","url":"https://x.example/","grund":"eigene"}"#).is_none());
         assert!(von_kotlin(r#"{"art":"schild","id":"tab-a1","werbung":1,"tracker":1}"#).is_none());
         assert!(von_kotlin(r#"{"art":"absturz","id":"main"}"#).is_none());
+    }
+
+    #[test]
+    fn recht_antwort_unterscheidet_abbruch_von_blockieren() {
+        assert!(matches!(
+            serde_json::from_str::<Antwort>(r#"{"art":"recht","erlauben":true}"#),
+            Ok(Antwort::Recht { erlauben: Some(true) })
+        ));
+        assert!(matches!(
+            serde_json::from_str::<Antwort>(r#"{"art":"recht","erlauben":false}"#),
+            Ok(Antwort::Recht { erlauben: Some(false) })
+        ));
+        assert!(matches!(
+            serde_json::from_str::<Antwort>(r#"{"art":"recht","erlauben":null}"#),
+            Ok(Antwort::Recht { erlauben: None })
+        ));
     }
 }

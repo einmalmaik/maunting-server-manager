@@ -20,7 +20,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 import models  # noqa: F401
 from config import settings
@@ -191,6 +191,66 @@ def test_downgrade_of_the_newest_revision_is_reversible(tmp_path: Path, pg_wegwe
         command.upgrade(config, "head")
         columns = {c["name"] for c in inspect(engine).get_columns("ai_action_proposals")}
         assert {"autonomous", "reason", "expected_effect"}.issubset(columns)
+    finally:
+        engine.dispose()
+        settings.database_url = previous
+
+
+def test_main_datenbank_erhaelt_die_messenger_brucke(pg_wegwerf) -> None:
+    """Eine normale main-Datenbank läuft über 20261012_01 bis zum Merge-Head."""
+    db_url = pg_wegwerf("messenger-bruecke-main")
+    previous = settings.database_url
+    settings.database_url = db_url
+    config = _config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "20261012_01")
+
+        from services.schema_manager import initialize_or_upgrade_schema
+
+        assert initialize_or_upgrade_schema(engine) == "upgraded"
+        tables = set(inspect(engine).get_table_names())
+        assert {"notification_channels", "e2ee_device_inboxes"} <= tables
+        with engine.connect() as conn:
+            version = conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
+        assert version == "20261024_01"
+    finally:
+        engine.dispose()
+        settings.database_url = previous
+
+
+def test_server_auf_messenger_revision_kommt_wieder_auf_den_head(pg_wegwerf) -> None:
+    """Ein Server, der den Messenger-Branch ausgeführt hat, bleibt updatefähig.
+
+    Die Datenbank steht auf 20261023_02, die Hauptlinie hatte 20261012_01
+    parallel. Der leere Merge 20261024_01 verbindet beide Zweige; die fehlende
+    Tabellenmigration der Hauptlinie ist idempotent und blockiert nicht.
+    """
+    db_url = pg_wegwerf("messenger-bruecke-server")
+    previous = settings.database_url
+    settings.database_url = db_url
+    config = _config(Path(__file__).resolve().parent.parent)
+    engine = create_engine(db_url)
+    try:
+        Base.metadata.create_all(engine)
+        command.stamp(config, "20261011_01")
+        # Genau der Stand des Messenger-Branches: 20261012_01 ist nicht in
+        # seiner Ahnenreihe, die beiden Zustellungstabellen sind es.
+        command.upgrade(config, "20261023_02")
+
+        from services.schema_manager import initialize_or_upgrade_schema
+
+        assert initialize_or_upgrade_schema(engine) == "upgraded"
+        tables = set(inspect(engine).get_table_names())
+        assert {"browser_widget_tokens", "notification_channels", "e2ee_device_inboxes"} <= tables
+        with engine.connect() as conn:
+            version = conn.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
+        assert version == "20261024_01"
     finally:
         engine.dispose()
         settings.database_url = previous

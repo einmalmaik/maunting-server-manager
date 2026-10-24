@@ -57,6 +57,21 @@ describe('Ablauf einer Übersetzung', () => {
     expect(engine.bereitmachen).not.toHaveBeenCalled()
   })
 
+  it('nennt eine erkannte, aber nicht unterstützte Sprache', async () => {
+    seite([['Hallo']], 'xx')
+    await zustand().oeffnen(TAB, 'de')
+    expect(stand()).toEqual({ art: 'wahl', fehlt: null, seitenSprache: 'xx' })
+    expect(engine.bereitmachen).not.toHaveBeenCalled()
+  })
+
+  it('meldet fehlende Sprachdaten, statt ohne Paar still zu bleiben', async () => {
+    seite([['Hallo']], 'xx')
+    await zustand().oeffnen(TAB, 'de')
+    await zustand().starten(TAB.id)
+    expect(stand()).toEqual({ art: 'fehler', grund: 'paar' })
+    expect(engine.bereitmachen).not.toHaveBeenCalled()
+  })
+
   it('schlägt Englisch vor, wenn die Seite schon in der Sprache der App ist', async () => {
     fehlt.wert = 1
     seite([['Hallo']], 'de-DE')
@@ -117,7 +132,7 @@ describe('Ablauf einer Übersetzung', () => {
   })
 
   it('übersetzt keine eigenen Seiten', async () => {
-    await zustand().oeffnen({ id: TAB.id, url: 'msb://einstellungen' }, 'de')
+    await zustand().oeffnen({ id: TAB.id, url: 'pontis://einstellungen' }, 'de')
     expect(nativ.tabUebersetzen).not.toHaveBeenCalled()
     expect(zustand().eintraege[TAB.id]).toBeUndefined()
   })

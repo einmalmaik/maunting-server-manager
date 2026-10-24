@@ -3,18 +3,17 @@
  * sie als eigenes Fenster. Ein Dialog, ein Menü oder eine Vorschlagsliste,
  * die in den Seitenbereich ragt, wäre darunter unsichtbar.
  *
- * Deshalb verschwindet der vordere Tab, solange so etwas offen ist. Erkannt
- * wird es am DOM, nicht an jeder einzelnen Komponente: alles mit
- * `aria-modal="true"` (Dialoge, Blätter, Lichtbox) oder `role="menu"`/
- * `role="listbox"` (Menüs, Auswahllisten, Vorschläge) und jedes
- * `Ankerfenster`. Kurzinfos zählen nicht, sonst verschwände die Seite beim
- * Überfahren jedes Knopfs.
+ * Deshalb verschwinden die Tabs, solange so etwas offen ist. Erkannt wird es
+ * am DOM, nicht an jeder einzelnen Komponente: alles mit `aria-modal="true"`
+ * (Dialoge, Blätter, Lichtbox) oder `role="menu"`/`role="listbox"` (Menüs,
+ * Auswahllisten, Vorschläge) und jedes `Ankerfenster`. Kurzinfos zählen
+ * nicht, sonst verschwände die Seite beim Überfahren jedes Knopfs.
  *
  * Was darüber hinaus verdecken muss, trägt `data-msb-verdeckt`.
  *
- * Damit die Seite dabei nicht verschwindet, nimmt Rust vorher ein Standbild
- * auf, und die Seitenfläche zeigt es an ihrer Stelle, bis der Tab wieder
- * vorne liegt.
+ * Damit die Seite dabei nicht verschwindet, nimmt Rust vorher Standbilder auf,
+ * für geteilte Ansicht von beiden Seiten, und die Seitenfläche zeigt sie an
+ * ihrer Stelle, bis die Tabs wieder vorne liegen.
  */
 import { useEffect } from 'react'
 import { create } from 'zustand'
@@ -30,7 +29,8 @@ export interface Standbild {
   url: string
 }
 
-export const useStandbild = create<{ bild: Standbild | null }>(() => ({ bild: null }))
+/** Ein Standbild je sichtbarem Tab (in der geteilten Ansicht sind es zwei). */
+export const useStandbild = create<{ bilder: Record<string, string> }>(() => ({ bilder: {} }))
 
 export function bytesZuBlob(daten: unknown): Blob | null {
   if (!daten) return null
@@ -61,27 +61,53 @@ export function bytesZuBlob(daten: unknown): Blob | null {
   return new Blob([bytes as unknown as BlobPart], { type: istPng ? 'image/png' : 'image/jpeg' })
 }
 
-export function bildSetzen(neu: Standbild | null): void {
-  const alt = useStandbild.getState().bild
-  if (alt) URL.revokeObjectURL(alt.url)
-  useStandbild.setState({ bild: neu })
+export function bilderSetzen(neu: Record<string, string>): void {
+  const behalten = new Set(Object.values(neu))
+  for (const url of Object.values(useStandbild.getState().bilder)) {
+    if (!behalten.has(url)) URL.revokeObjectURL(url)
+  }
+  useStandbild.setState({ bilder: neu })
+}
+
+/** Nimmt ein einzelnes Standbild zurück, etwa wenn der Browser es nicht zeichnen kann. */
+export function bilderEntfernen(tab: string): void {
+  const alt = useStandbild.getState().bilder
+  const url = alt[tab]
+  if (!url) return
+  URL.revokeObjectURL(url)
+  const { [tab]: _, ...rest } = alt
+  useStandbild.setState({ bilder: rest })
 }
 
 const naechstesBild = () => new Promise<void>((fertig) => requestAnimationFrame(() => requestAnimationFrame(() => fertig())))
 
+/** Externe Web-App in der Seitenleiste, deren Standbild mit aufgenommen wird. */
+let externePanelId: string | null = null
+
+export function panelRegistrieren(id: string | null): void {
+  if (externePanelId && externePanelId !== id) bilderEntfernen(externePanelId)
+  externePanelId = id
+}
+
 async function standbildAufnehmen(): Promise<void> {
-  const tab = useTabsStore.getState().aktivId
-  if (!tab) return
-  try {
-    const daten = await nativ.tabStandbild()
-    const blob = bytesZuBlob(daten)
-    if (!blob) return
-    bildSetzen({ tab, url: URL.createObjectURL(blob) })
-    // Erst wenn das Bild gezeichnet ist, darf der Tab weg.
-    await naechstesBild()
-  } catch {
-    // Startseite, abgestürzter Tab oder zu langsam: der Tab geht ohne Bild weg.
+  const { aktivId, split } = useTabsStore.getState()
+  // In der geteilten Ansicht liegen beide Seiten als eigene Webview vor; nur
+  // ein Bild ließe die andere Hälfte leer zurück.
+  const ids = [aktivId, ...(split ? [split.sekundaerId] : []), ...(externePanelId ? [externePanelId] : [])].filter((id): id is string => Boolean(id))
+  const neu: Record<string, string> = {}
+  for (const id of ids) {
+    try {
+      const daten = await nativ.tabStandbild(id)
+      const blob = bytesZuBlob(daten)
+      if (blob) neu[id] = URL.createObjectURL(blob)
+    } catch {
+      // Startseite, abgestürzter Tab oder zu langsam: dieser Tab geht ohne Bild weg.
+    }
   }
+  if (Object.keys(neu).length === 0) return
+  bilderSetzen(neu)
+  // Erst wenn die Bilder gezeichnet sind, dürfen die Tabs weg.
+  await naechstesBild()
 }
 
 /** Was das DOM verlangt und was Rust zuletzt bestätigt hat. */
@@ -98,7 +124,7 @@ async function nachziehen(): Promise<void> {
       if (ziel) await standbildAufnehmen()
       await nativ.tabsVerdecken(ziel)
       angewandt = ziel
-      if (!ziel) bildSetzen(null)
+      if (!ziel) bilderSetzen({})
     }
   } catch {
     // Der nächste Wechsel im DOM versucht es erneut.

@@ -50,7 +50,7 @@ describe('Sicherheit in den Browsereinstellungen', () => {
     vi.restoreAllMocks()
     usePublicSettingsStore.setState({ social_enabled: true, vault_enabled: true })
     useTabsStore.setState({
-      tabs: [{ id: 'tab-e', url: 'msb://einstellungen/allgemein', titel: 'Einstellungen', privat: false, nativDa: true }],
+      tabs: [{ id: 'tab-e', url: 'pontis://einstellungen/allgemein', titel: 'Einstellungen', privat: false, nativDa: true }],
       aktivId: 'tab-e',
     })
   })
@@ -94,7 +94,7 @@ describe('Sicherheit in den Browsereinstellungen', () => {
     await act(async () => {
       fireEvent.click(tab)
     })
-    expect(useTabsStore.getState().tabs[0].url).toBe('msb://einstellungen/sicherheit')
+    expect(useTabsStore.getState().tabs[0].url).toBe('pontis://einstellungen/sicherheit')
   })
 
   it('Inhalt: gekoppelt-online lädt Sicherheitskarten', async () => {

@@ -51,6 +51,21 @@ describe('tabTransfer Service', () => {
     })
   })
 
+  it('nimmt fremde Text-Drops nur als Webseite oder eigene Seite an', () => {
+    const mitText = (text: string) =>
+      ({
+        getData(type: string) {
+          return type === 'text/plain' ? text : ''
+        },
+      }) as unknown as DataTransfer
+
+    for (const fremd of ['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'data:text/html,x', 'ftp://example.org/', 'mailto:a@b']) {
+      expect(entpackeTabTransfer(mitText(fremd))).toBeNull()
+    }
+    expect(entpackeTabTransfer(mitText('pontis://einstellungen'))?.url).toBe('pontis://einstellungen')
+    expect(entpackeTabTransfer(mitText('msb://einstellungen'))?.url).toBe('msb://einstellungen')
+  })
+
   it('meldet und erkennt übernommene Tabs über localStorage und BroadcastChannel', () => {
     const tabId = 'tab-test-101'
     expect(istTabUebernommen(tabId)).toBe(false)

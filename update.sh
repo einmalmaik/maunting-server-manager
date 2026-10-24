@@ -65,7 +65,7 @@ restore_panel_ownership() {
     # aber manuelle "Sauberkeit" Befehle sind riskant. Immer --dry-run zuerst.
     # Es gibt helper-scripts/recover-docker-storage.sh als Recovery (für den Docker-Store-Corruption-Fall).
     mkdir -p "$MSM_DIR/blueprints/community" 2>/dev/null || true
-    for sub in backend frontend docs dis-sidecar searxng-sidecar livekit-sidecar msm-agent scripts helper-scripts blueprints; do
+    for sub in backend frontend docs dis-sidecar searxng-sidecar livekit-sidecar wetter-sidecar msm-agent scripts helper-scripts blueprints; do
         if [[ -d "$MSM_DIR/$sub" ]]; then
             # Hard fail for code trees used by venv setup — silent || true left
             # root-owned msm-agent after git pull and caused PEP 668 cascades.
@@ -286,13 +286,25 @@ if [[ -z "$LATEST_TAG" ]]; then
             if ! $FORCE; then exit 0; fi
             LATEST_TAG="unknown"
         elif [[ "$LOCAL_SHA" == "$REMOTE_SHA" ]] && ! $FORCE; then
-            ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_BRANCH: ${LOCAL_SHA:0:8})."
-            # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
-            # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
-            # frueh aussteigen, stellen wir Besitz wieder her, damit der
-            # Panel-Service als msm-User schreibend zugreifen kann.
-            restore_panel_ownership
-            exit 0
+            if $SYSTEMD_AVAILABLE && ! $CHECK_ONLY \
+                && [[ -d "$MSM_DIR/wetter-sidecar" ]] \
+                && { [[ ! -f /etc/systemd/system/msm-wetter.service ]] \
+                    || ! systemctl is-enabled --quiet msm-wetter.service 2>/dev/null; }; then
+                # 5.6.0 -> 5.7.0 hat das Verzeichnis kopiert, aber die Unit mit
+                # dem alten Updater nicht angelegt. Ein zweiter Lauf stieg hier
+                # bisher aus und ließ den Sidecar dauerhaft aus.
+                warn "Wetter-Sidecar ist vorhanden, aber nicht als Dienst eingerichtet; der Lauf richtet ihn jetzt ein."
+                FORCE=true
+                LATEST_TAG="$CURRENT_BRANCH-${REMOTE_SHA:0:8}"
+            else
+                ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_BRANCH: ${LOCAL_SHA:0:8})."
+                # Recovery: ein frueherer Run (z.B. mit der alten update.sh ohne
+                # Chown-Fix) kann Dateien als root zurueckgelassen haben. Bevor wir
+                # frueh aussteigen, stellen wir Besitz wieder her, damit der
+                # Panel-Service als msm-User schreibend zugreifen kann.
+                restore_panel_ownership
+                exit 0
+            fi
         else
             LATEST_TAG="$CURRENT_BRANCH-${REMOTE_SHA:0:8}"
             log "Neuer Commit auf $CURRENT_BRANCH: ${REMOTE_SHA:0:8}"
@@ -308,11 +320,21 @@ fi
 
 # ── Vergleich (nur bei Release-Mode) ──
 if [[ "$UPDATE_MODE" == "release" ]] && [[ "$(normalize_version "$CURRENT_VERSION")" == "$(normalize_version "$LATEST_TAG")" ]] && ! $FORCE; then
-    ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
-    # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
-    # Run Dateien als root liegen gelassen hat.
-    restore_panel_ownership
-    exit 0
+    if $SYSTEMD_AVAILABLE && ! $CHECK_ONLY \
+        && [[ -d "$MSM_DIR/wetter-sidecar" ]] \
+        && { [[ ! -f /etc/systemd/system/msm-wetter.service ]] \
+            || ! systemctl is-enabled --quiet msm-wetter.service 2>/dev/null; }; then
+        # Siehe Git-Pfad: eine bestehende 5.7.0-Installation holt die fehlende
+        # Wetter-Unit beim nächsten Lauf nach, statt vorher auszusteigen.
+        warn "Wetter-Sidecar ist vorhanden, aber nicht als Dienst eingerichtet; der Lauf richtet ihn jetzt ein."
+        FORCE=true
+    else
+        ok "Panel ist bereits auf dem neuesten Stand ($CURRENT_VERSION)."
+        # Recovery wie im Git-Pfad: Besitz zurueck auf msm, falls ein frueherer
+        # Run Dateien als root liegen gelassen hat.
+        restore_panel_ownership
+        exit 0
+    fi
 fi
 
 # ── Nur prüfen? ──
@@ -668,6 +690,22 @@ EOF
     fi
 fi
 
+# Wetter-Sidecar Environment (keine Secrets; Daten bleiben lokal)
+if [[ -d "$MSM_DIR/wetter-sidecar" ]]; then
+    WETTER_ENV_FILE="$MSM_DIR/wetter-sidecar/.env"
+    if [[ ! -f "$WETTER_ENV_FILE" ]]; then
+        cat > "$WETTER_ENV_FILE" <<EOF
+# Automatisch generiert für das Wetter-Sidecar
+MSM_WETTER_PORT=8890
+MSM_WETTER_DATEN=/daten
+EOF
+        chmod 600 "$WETTER_ENV_FILE"
+        chown "$MSM_USER:$MSM_USER" "$WETTER_ENV_FILE"
+    fi
+    mkdir -p "$MSM_DIR/wetter-sidecar/daten"
+    chown -R "$MSM_USER:$MSM_USER" "$MSM_DIR/wetter-sidecar/daten" 2>/dev/null || true
+fi
+
 # LiveKit-Sidecar Environment. Wird bei jedem Lauf neu geschrieben, damit
 # Sidecar und Backend garantiert dasselbe Schluesselpaar tragen.
 if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
@@ -800,6 +838,33 @@ WantedBy=multi-user.target
 EOF
     fi
 
+    # Wetter Sidecar Service (Vorhersage über MSM)
+    if [[ -d "$MSM_DIR/wetter-sidecar" ]]; then
+        cat > /etc/systemd/system/msm-wetter.service <<EOF
+[Unit]
+Description=MSM Weather Sidecar
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=$MSM_USER
+Group=$MSM_USER
+WorkingDirectory=$MSM_DIR/wetter-sidecar
+Environment="DOCKER_HOST=$MSM_DOCKER_HOST"
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/usr/bin/docker compose up --force-recreate
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    fi
+
     # LiveKit Media Sidecar Service (Anrufe im Messenger)
     if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
         cat > /etc/systemd/system/msm-livekit.service <<EOF
@@ -899,6 +964,9 @@ EOF
     systemctl enable msm-dis-sidecar.service
     if [[ -d "$MSM_DIR/searxng-sidecar" ]]; then
         systemctl enable msm-searxng.service 2>/dev/null || true
+    fi
+    if [[ -d "$MSM_DIR/wetter-sidecar" ]]; then
+        systemctl enable msm-wetter.service 2>/dev/null || true
     fi
     if [[ -d "$MSM_DIR/livekit-sidecar" ]]; then
         systemctl enable msm-livekit.service 2>/dev/null || true
@@ -1036,6 +1104,25 @@ if $SYSTEMD_AVAILABLE; then
         systemctl restart msm-searxng.service 2>/dev/null \
             || systemctl start msm-searxng.service 2>/dev/null || true
         ok "SearXNG Sidecar bereit."
+    fi
+
+    # Wetter Sidecar starten
+    if [[ -f /etc/systemd/system/msm-wetter.service ]]; then
+        log "Starte Wetter Sidecar..."
+        systemctl restart msm-wetter.service 2>/dev/null             || systemctl start msm-wetter.service 2>/dev/null || true
+        _wetter_ok=false
+        for _ in $(seq 1 20); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8890/health >/dev/null 2>&1; then
+                _wetter_ok=true
+                break
+            fi
+            sleep 2
+        done
+        if [[ "$_wetter_ok" == true ]]; then
+            ok "Wetter Sidecar bereit."
+        else
+            warn "Wetter Sidecar antwortet nicht auf 127.0.0.1:8890. Ursache: journalctl -u msm-wetter -n 30"
+        fi
     fi
 
     if [[ -f /etc/systemd/system/msm-livekit.service ]]; then

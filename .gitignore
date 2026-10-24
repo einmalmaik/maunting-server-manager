@@ -149,3 +149,7 @@ _messenger_audit_export/MESSENGER_DATEIEN.md
 docs/messenger-audit-2026-10-21.md
 /.qoder
 docs/messenger-e2ee-umsetzungsplan.md
+
+# Wetter-Sidecar: Modell- und Ortsdaten bleiben lokal
+wetter-sidecar/daten/*
+!wetter-sidecar/daten/.gitkeep

@@ -45,8 +45,8 @@ pub fn navigation_erlaubt(url: &url::Url) -> bool {
 /// Browser startet keine Programme von außen) sowie bekannte Angriffswege
 /// unter Windows (Follina über `ms-msdt`, Suchfenster-Phishing über `search-ms`).
 const NIE_EXTERN: &[&str] = &[
-    "http", "https", "about", "blob", "data", "chrome-extension", "msb", "tauri", "ipc", "asset", "javascript",
-    "vbscript", "view-source", "file", "intent", "ms-msdt", "search-ms", "ms-search",
+    "http", "https", "about", "blob", "data", "chrome-extension", "msb", "pontis", "tauri", "ipc", "asset",
+    "javascript", "vbscript", "view-source", "file", "intent", "ms-msdt", "search-ms", "ms-search",
 ];
 
 /// Ein Fremdprotokoll (OAuth-Rücksprung an eine Desktop-App wie `vscode://`,
@@ -304,6 +304,7 @@ mod tests {
             "chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/popup.html",
             "tauri://localhost/",
             "msb://einstellungen",
+            "pontis://einstellungen",
             "file:///C:/Windows/win.ini",
             "javascript:alert(1)",
             "vbscript:msgbox(1)",
@@ -321,6 +322,18 @@ mod tests {
         // Was kein Fremdprotokoll ist, entscheidet wie bisher.
         assert_eq!(weg("intent://scan/#Intent;scheme=zxing;end", false), Weg::Verboten);
         assert_eq!(weg("http://127.0.0.1:5173/callback?code=1", false), Weg::Laden);
+    }
+
+    #[test]
+    fn eigene_und_kaputte_adressen_gehen_nie_ans_system() {
+        for ziel in ["pontis://einstellungen", "msb://suche?q=x", "PONTIS://EINSTELLUNGEN"] {
+            assert_eq!(externes_protokoll(ziel), None, "{ziel}");
+            assert_eq!(weg(ziel, false), Weg::Verboten, "{ziel}");
+        }
+        for kaputt in ["", "   ", "https://", "://example.org/", "kaputt"] {
+            assert_eq!(externes_protokoll(kaputt), None, "{kaputt}");
+            assert_eq!(weg(kaputt, false), Weg::Verboten, "{kaputt}");
+        }
     }
 
     #[test]

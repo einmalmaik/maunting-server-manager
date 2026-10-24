@@ -50,6 +50,7 @@ from .notification_channels import router as notification_channels_router
 from .social import router as social_router
 from .social_calls import router as social_calls_router, admin_router as livekit_admin_router
 from .browser_suche import router as browser_suche_router
+from .browser_wetter import router as browser_wetter_router
 
 __all__ = [
     "auth_router",
@@ -107,4 +108,5 @@ __all__ = [
     "social_calls_router",
     "livekit_admin_router",
     "browser_suche_router",
+    "browser_wetter_router",
 ]  # noqa: E501

@@ -710,6 +710,17 @@ export const useTabsStore = create<TabsZustand>()(
           if (zielAktiv) {
             get().aktivieren(zielAktiv)
           }
+          // Ein Link aus einem anderen Programm beim Kaltstart: Windows gibt
+          // ihn als Argument mit. Bisher nutzte ihn nur ein neues Einzelfenster,
+          // im Hauptfenster blieb er liegen.
+          const startUrl = startInfo?.start_url
+          if (startUrl && (istWebseite(startUrl) || istIntern(startUrl))) {
+            const jetzt = get()
+            const einzigerLeer = jetzt.tabs.length === 1 && !jetzt.tabs[0].url && !jetzt.tabs[0].privat
+            const privat = Boolean(startInfo?.privat)
+            if (einzigerLeer && !privat) jetzt.oeffnen(startUrl, jetzt.tabs[0].id)
+            else jetzt.neuerTab(startUrl, { privat })
+          }
         },
       }
     },

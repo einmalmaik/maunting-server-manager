@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { interneAdresse, interneSeite, istWebseite, msmSucheAdresse, msmSucheBegriff } from './intern'
+import { aufPontis, interneAdresse, interneSeite, istIntern, istWebseite, msmSucheAdresse, msmSucheBegriff } from './intern'
 
 describe('intern', () => {
   it('nennt nur http und https Webseite', () => {
@@ -9,28 +9,51 @@ describe('intern', () => {
     // Bis 09.10.2026 hieß es `startsWith('http')`, und `httpx:` galt als Webseite.
     expect(istWebseite('httpx://seite.example/')).toBe(false)
     expect(istWebseite('msb://einstellungen')).toBe(false)
+    expect(istWebseite('pontis://einstellungen')).toBe(false)
     expect(istWebseite('')).toBe(false)
+  })
+
+  it('schreibt pontis und liest das alte msb weiter', () => {
+    expect(istIntern('pontis://einstellungen')).toBe(true)
+    expect(istIntern('msb://einstellungen')).toBe(true)
+    expect(interneAdresse('einstellungen', 'suche')).toBe('pontis://einstellungen/suche')
+    expect(interneSeite('msb://einstellungen/suche')).toEqual({ seite: 'einstellungen', teil: 'suche' })
+    expect(aufPontis('msb://suche?q=wetter')).toBe('pontis://suche?q=wetter')
+    expect(aufPontis('pontis://suche?q=wetter')).toBe('pontis://suche?q=wetter')
+    expect(aufPontis('https://seite.example/')).toBe('https://seite.example/')
   })
 
   it('liest eigene Seiten mit Unterpfad', () => {
     expect(interneSeite(interneAdresse('einstellungen', 'suche'))).toEqual({ seite: 'einstellungen', teil: 'suche' })
+    expect(interneSeite('pontis://unbekannt')).toBeNull()
     expect(interneSeite('msb://unbekannt')).toBeNull()
     expect(interneSeite('https://einstellungen')).toBeNull()
   })
 
+  it('erkennt nur das exakte eigene Schema, nicht eine andere Schreibweise', () => {
+    expect(istIntern('MSB://einstellungen')).toBe(false)
+    expect(aufPontis('MSB://einstellungen')).toBe('MSB://einstellungen')
+    expect(istIntern('pontis://')).toBe(true)
+    expect(interneSeite('pontis://')).toBeNull()
+    expect(interneSeite('pontis://einstellungen/')).toEqual({ seite: 'einstellungen', teil: null })
+  })
+
   it('trägt den Suchbegriff in seiner Schreibweise in der Adresse', () => {
     const adresse = msmSucheAdresse('  C++ & Rust? #1  ')
+    expect(adresse.startsWith('pontis://suche?q=')).toBe(true)
     expect(interneSeite(adresse)).toEqual({ seite: 'suche', teil: null })
     expect(msmSucheBegriff(adresse)).toBe('C++ & Rust? #1')
     expect(msmSucheBegriff(msmSucheAdresse('Köln WETTER'))).toBe('Köln WETTER')
   })
 
   it('liest einen Begriff nur aus der Suche', () => {
+    expect(msmSucheBegriff('pontis://suche')).toBeNull()
     expect(msmSucheBegriff('msb://suche')).toBeNull()
-    expect(msmSucheBegriff('msb://suche?q=%20%20')).toBeNull()
-    expect(msmSucheBegriff('msb://einstellungen?q=x')).toBeNull()
+    expect(msmSucheBegriff('pontis://suche?q=%20%20')).toBeNull()
+    expect(msmSucheBegriff('pontis://einstellungen?q=x')).toBeNull()
     expect(msmSucheBegriff('https://suche.example/?q=x')).toBeNull()
-    expect(msmSucheBegriff('MSB://SUCHE?q=Gro%C3%9F')).toBeNull()
+    expect(msmSucheBegriff('PONTIS://SUCHE?q=Gro%C3%9F')).toBeNull()
+    expect(msmSucheBegriff('pontis://Suche?q=Gro%C3%9F')).toBe('Groß')
     expect(msmSucheBegriff('msb://Suche?q=Gro%C3%9F')).toBe('Groß')
   })
 })

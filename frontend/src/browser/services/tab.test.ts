@@ -9,7 +9,7 @@ describe('webviewZeigen', () => {
     expect(webviewZeigen(seite)).toBe(true)
     expect(webviewZeigen({ ...seite, nativDa: false })).toBe(false)
     expect(webviewZeigen({ ...seite, url: '' })).toBe(false)
-    expect(webviewZeigen({ ...seite, url: 'msb://einstellungen' })).toBe(false)
+    expect(webviewZeigen({ ...seite, url: 'pontis://einstellungen' })).toBe(false)
     expect(webviewZeigen({ ...seite, abgestuerzt: true })).toBe(false)
     expect(webviewZeigen({ ...seite, fehler: 'gesperrt' })).toBe(false)
     expect(webviewZeigen({ ...seite, lesemodus: true })).toBe(false)

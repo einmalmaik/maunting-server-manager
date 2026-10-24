@@ -18,7 +18,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewCompat
 import org.json.JSONObject
@@ -30,9 +29,29 @@ import java.io.ByteArrayOutputStream
  * die App deklariert dieses Recht nicht (Datenschutz).
  */
 class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChromeClient() {
-  private companion object {
+  private class Wartet(val anfrage: PermissionRequest, val ressourcen: Array<String>) {
+    var weg = false
+  }
+
+  companion object {
     /** Länger lebt ein Fenster nie, das keine Adresse nennt. */
-    const val HILFE_HOECHSTENS_MS = 10_000L
+    private const val HILFE_HOECHSTENS_MS = 10_000L
+
+    /** Noch nicht beantwortete Systemabfragen, nach Tab. Alles auf dem UI-Faden. */
+    private val wartend = HashMap<Long, Pair<String, Wartet>>()
+    private var naechste = 0L
+
+    /** Beim Schließen oder Verlassen der Seite gibt es niemanden mehr zu fragen. */
+    fun verwerfen(tabId: String) {
+      // Auch die Browser-Frage selbst (vor der Android-Abfrage) verfällt.
+      Rueckfragen.tabWeg(tabId)
+      val nummern = wartend.filterValues { it.first == tabId }.keys.toList()
+      for (nr in nummern) {
+        val wartet = wartend.remove(nr)?.second ?: continue
+        wartet.weg = true
+        runCatching { wartet.anfrage.deny() }
+      }
+    }
   }
 
   override fun onReceivedTitle(view: WebView, titel: String?) {
@@ -102,41 +121,73 @@ class TabChrome(private val plugin: TabsPlugin, private val tab: Tab) : WebChrom
 
   override fun onPermissionRequest(anfrage: PermissionRequest) {
     val ressourcen = anfrage.resources
-    if (ressourcen == null || ressourcen.isEmpty()) {
+    val herkunft = anfrage.origin?.toString().orEmpty()
+    if (ressourcen == null || ressourcen.isEmpty() || !RechteRegeln.erlaubteHerkunft(herkunft)) {
       anfrage.deny()
       return
     }
-    val herkunft = anfrage.origin?.toString().orEmpty()
-    val recht = when {
-      ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) -> "kamera"
-      ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) -> "mikrofon"
-      ressourcen.contains(PermissionRequest.RESOURCE_MIDI_SYSEX) -> "midi"
-      else -> "sonstiges"
+    val video = ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)
+    val audio = ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
+    if (!video && !audio) {
+      anfrage.deny()
+      return
     }
+    val recht = if (video) "kamera" else "mikrofon"
 
     val nr = Rueckfragen.neu(tab.id) { a ->
-      if (a?.optBoolean("erlauben") == true) {
-        val akt = plugin.aktivitaet()
-        val benoetigt = mutableListOf<String>()
-        if (ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
-          ContextCompat.checkSelfPermission(akt, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
-        ) {
-          benoetigt.add(Manifest.permission.CAMERA)
-        }
-        if (ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
-          ContextCompat.checkSelfPermission(akt, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        ) {
-          benoetigt.add(Manifest.permission.RECORD_AUDIO)
-        }
-        if (benoetigt.isNotEmpty()) {
-          ActivityCompat.requestPermissions(akt, benoetigt.toTypedArray(), 1001)
-        }
-        anfrage.grant(ressourcen)
-      } else {
-        anfrage.deny()
-      }
+      if (a?.optBoolean("erlauben") == true) erlauben(anfrage, ressourcen) else denySicher(anfrage)
     }
     tab.melden("recht", "nr" to nr, "recht" to recht, "herkunft" to herkunft)
+  }
+
+  /**
+   * Erst das System fragen, dann der Seite erlauben. Vorher stand hier
+   * `grant()` direkt nach `requestPermissions()`; beim ersten Zugriff lief
+   * die Aufnahme deshalb an und sofort wieder aus (bis 10/2026).
+   */
+  private fun erlauben(anfrage: PermissionRequest, ressourcen: Array<String>) {
+    val akt = plugin.aktivitaet()
+    val benoetigt = mutableListOf<String>()
+    if (ressourcen.contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE) &&
+      ContextCompat.checkSelfPermission(akt, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED
+    ) {
+      benoetigt.add(Manifest.permission.CAMERA)
+    }
+    if (ressourcen.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) &&
+      ContextCompat.checkSelfPermission(akt, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+    ) {
+      benoetigt.add(Manifest.permission.RECORD_AUDIO)
+    }
+    if (benoetigt.isEmpty()) {
+      grantSicher(anfrage, ressourcen)
+      return
+    }
+    val main = akt as? MainActivity
+    if (main == null) {
+      denySicher(anfrage)
+      return
+    }
+
+    val nr = naechste++
+    wartend[nr] = tab.id to Wartet(anfrage, ressourcen)
+    try {
+      main.seitenrechteErfragen(benoetigt.toTypedArray()) { alle ->
+        val wartet = wartend.remove(nr)?.second ?: return@seitenrechteErfragen
+        if (wartet.weg) return@seitenrechteErfragen
+        if (alle) grantSicher(wartet.anfrage, wartet.ressourcen) else denySicher(wartet.anfrage)
+      }
+    } catch (e: Exception) {
+      wartend.remove(nr)
+      denySicher(anfrage)
+    }
+  }
+
+  private fun grantSicher(anfrage: PermissionRequest, ressourcen: Array<String>) {
+    runCatching { anfrage.grant(ressourcen) }
+  }
+
+  private fun denySicher(anfrage: PermissionRequest) {
+    runCatching { anfrage.deny() }
   }
 
   override fun onGeolocationPermissionsShowPrompt(herkunft: String?, rueckruf: GeolocationPermissions.Callback) {

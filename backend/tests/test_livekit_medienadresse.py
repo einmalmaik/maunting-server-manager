@@ -114,7 +114,8 @@ def test_sidecar_start_wird_geprueft_statt_behauptet(skript: str) -> None:
     # nahm den liegengebliebenen Container ohne Portfreigabe, systemd meldete
     # „Started“, und der Lauf sagte „LiveKit Sidecar bereit.“
     text = (ROOT / skript).read_text(encoding="utf-8")
-    assert text.count("ExecStart=/usr/bin/docker compose up --force-recreate") == 2
+    # LiveKit, SearXNG und der Wetter-Sidecar starten alle mit --force-recreate.
+    assert text.count("ExecStart=/usr/bin/docker compose up --force-recreate") == 3
     assert "ExecStart=/usr/bin/docker compose up\n" not in text
 
     start = text.split('log "Starte LiveKit Media Sidecar..."', 1)[1]
@@ -124,7 +125,7 @@ def test_sidecar_start_wird_geprueft_statt_behauptet(skript: str) -> None:
     assert "ss -Hlntup '( sport = :7880 or sport = :7881 or sport = :7882 )'" in start
 
 
-@pytest.mark.parametrize("ordner", ["livekit-sidecar", "searxng-sidecar"])
+@pytest.mark.parametrize("ordner", ["livekit-sidecar", "searxng-sidecar", "wetter-sidecar"])
 def test_sidecar_liegt_im_panel_release(ordner: str) -> None:
     # install.sh und update.sh richten den Dienst nur ein, wenn der Ordner da
     # ist. Fehlt er im Tarball, laeuft auf 7880 nie etwas.

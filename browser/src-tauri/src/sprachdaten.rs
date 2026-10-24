@@ -32,9 +32,11 @@ fn erlaubt(liste: &str) -> HashMap<String, usize> {
         }
     };
     nehmen(&wert["wasm"]);
-    for paar in wert["paare"].as_object().into_iter().flat_map(|p| p.values()) {
-        for datei in paar.as_object().into_iter().flat_map(|d| d.values()) {
-            nehmen(datei);
+    for gruppe in [wert["paare"].as_object(), wert["android"].as_object()] {
+        for paar in gruppe.into_iter().flat_map(|p| p.values()) {
+            for datei in paar.as_object().into_iter().flat_map(|d| d.values()) {
+                nehmen(datei);
+            }
         }
     }
     orte
@@ -82,11 +84,12 @@ mod tests {
         assert!(ERLAUBT.len() > 100, "Engine und alle Modelle");
         let wasm = ERLAUBT.iter().find(|(o, _)| o.contains("translations-wasm")).expect("Engine");
         assert_eq!(*wasm.1, 4_960_506);
-        let liste = r#"{"wasm":{"ort":"a/w.wasm","groesse":3},"paare":{"de-en":{"model":{"ort":"a/m.bin","groesse":9,"name":"x"}}}}"#;
+        let liste = r#"{"wasm":{"ort":"a/w.wasm","groesse":3},"paare":{"de-en":{"model":{"ort":"a/m.bin","groesse":9,"name":"x"}}},"android":{"ja-en":{"model":{"ort":"a/ja.bin","groesse":7}}}}"#;
         let orte = erlaubt(liste);
         assert_eq!(orte.get("a/w.wasm"), Some(&3));
         assert_eq!(orte.get("a/m.bin"), Some(&9));
-        assert_eq!(orte.len(), 2);
+        assert_eq!(orte.get("a/ja.bin"), Some(&7));
+        assert_eq!(orte.len(), 3);
         assert!(erlaubt("kaputt").is_empty());
     }
 

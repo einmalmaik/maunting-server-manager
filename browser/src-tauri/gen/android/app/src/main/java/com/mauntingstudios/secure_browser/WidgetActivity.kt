@@ -8,7 +8,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.os.Bundle
-import android.speech.RecognizerIntent
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -31,8 +30,8 @@ import java.io.File
  */
 class WidgetActivity : AppCompatActivity() {
   private val sprache = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
-    val text = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.trim()
-    if (!text.isNullOrEmpty()) oeffnen(JSONObject().put("art", "text").put("text", text.take(MAX_TEXT)))
+    val text = SprachText.aus(r.data)
+    if (text != null) oeffnen(JSONObject().put("art", "text").put("text", text))
     else finish()
   }
 
@@ -53,9 +52,7 @@ class WidgetActivity : AppCompatActivity() {
     if (savedInstanceState != null) return
     when (intent.action) {
       SPRACHE -> try {
-        sprache.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(
-          RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH,
-        ))
+        sprache.launch(SprachText.intent())
       } catch (e: ActivityNotFoundException) {
         Toast.makeText(this, R.string.widget_keine_sprache, Toast.LENGTH_LONG).show()
         oeffnen(JSONObject().put("art", "suche"))
@@ -81,9 +78,6 @@ class WidgetActivity : AppCompatActivity() {
     const val SUCHE = "com.mauntingstudios.secure_browser.widget.SUCHE"
     const val SPRACHE = "com.mauntingstudios.secure_browser.widget.SPRACHE"
     const val KAMERA = "com.mauntingstudios.secure_browser.widget.KAMERA"
-
-    /** Mehr spricht niemand in eine Suche; der Rest fällt weg. */
-    const val MAX_TEXT = 2000
 
     /** Längste Kante des Fotos, das an die Suchmaschine geht. */
     private const val KANTE = 1600

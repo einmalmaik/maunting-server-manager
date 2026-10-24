@@ -149,6 +149,10 @@ class Settings(BaseSettings):
     # SearXNG Search Sidecar (lokaler Docker-Prozess, lauscht per Default auf Port 8888)
     searxng_url: str = "http://127.0.0.1:8888"
 
+    # Wetter-Sidecar (lokaler Docker-Prozess, lauscht per Default auf Port 8890).
+    # Das Gerät fragt nur MSM; MSM liest die Vorhersage hier.
+    wetter_url: str = "http://127.0.0.1:8890"
+
     # Verwaltetes PostgreSQL fuer Game-Server-Datenbanken.
     # Der Host-Port ist absichtlich nur an Loopback gebunden. Game-Container
     # erreichen PostgreSQL ueber das interne Docker-Netz und msm-postgres:5432.

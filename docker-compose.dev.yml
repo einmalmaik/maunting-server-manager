@@ -136,6 +136,23 @@ services:
       - SETGID
       - SETUID
 
+  wetter:
+    build: ./wetter-sidecar
+    container_name: msm-wetter-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8890:8080"
+    environment:
+      MSM_WETTER_DATEN: /daten
+      TZ: UTC
+    volumes:
+      - ./wetter-sidecar/daten:/daten
+    mem_limit: 512m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   livekit:
     image: livekit/livekit-server:v1.9
     container_name: msm-livekit-dev

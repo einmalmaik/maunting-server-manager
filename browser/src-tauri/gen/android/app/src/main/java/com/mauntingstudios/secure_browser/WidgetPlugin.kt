@@ -2,6 +2,7 @@ package com.mauntingstudios.secure_browser
 
 import android.app.Activity
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -21,6 +22,17 @@ import org.json.JSONObject
 
 @InvokeArg class WidgetArgs { var bildsuche = false }
 
+@InvokeArg
+class WetterSetzenArgs {
+  lateinit var ort: String
+  lateinit var land: String
+  var lat = 0.0
+  var lon = 0.0
+  lateinit var einheit: String
+  lateinit var basis: String
+  lateinit var token: String
+}
+
 /**
  * Was den Browser von außen startet (`src/widget.rs`): das Such-Widget und
  * Links aus anderen Apps. Dazu, ob das Widget auf dem Startbildschirm liegt
@@ -30,10 +42,14 @@ import org.json.JSONObject
 @TauriPlugin
 class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
   private var oberflaeche: WebView? = null
+  private var spracheLaeuft = false
 
   override fun load(webView: WebView) {
     oberflaeche = webView
-    linkAufnehmen(activity.intent)
+    // Der Kaltstart kann den Link vor der Oberfläche aufnehmen; der Anstoß
+    // sorgt dafür, dass sie ihn auch dann abholt, wenn ihr erster Abruf schon
+    // vorbei ist.
+    if (linkAufnehmen(activity.intent)) TabsBruecke.widget()
   }
 
   /**
@@ -93,6 +109,36 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
     invoke.resolve(JSObject().put("standard", istStandard()))
   }
 
+  /**
+   * Die Mikrofonknöpfe der Oberfläche öffnen dieselbe System-App wie das
+   * Widget. Der Text kommt erst zurück, wenn die App ihn erkannt hat; die
+   * Oberfläche setzt ihn in das Feld ein und sendet ihn nicht selbst ab.
+   */
+  @Command
+  fun sprache(invoke: Invoke) {
+    if (spracheLaeuft) {
+      invoke.resolve(JSObject().put("text", JSONObject.NULL).put("fehler", "laeuft"))
+      return
+    }
+    spracheLaeuft = true
+    try {
+      startActivityForResult(invoke, SprachText.intent(), "nachSprache")
+    } catch (e: ActivityNotFoundException) {
+      spracheLaeuft = false
+      invoke.resolve(JSObject().put("text", JSONObject.NULL).put("fehler", "kein_erkenner"))
+    } catch (e: Exception) {
+      spracheLaeuft = false
+      invoke.reject(e.message ?: e.toString())
+    }
+  }
+
+  @ActivityCallback
+  private fun nachSprache(invoke: Invoke, ergebnis: ActivityResult) {
+    spracheLaeuft = false
+    val text = if (ergebnis.resultCode == Activity.RESULT_OK) SprachText.aus(ergebnis.data) else null
+    invoke.resolve(JSObject().put("text", text ?: JSONObject.NULL).put("fehler", JSONObject.NULL))
+  }
+
   /** Die Standard-Apps in den Android-Einstellungen. */
   @Command
   fun einstellungen(invoke: Invoke) {
@@ -149,6 +195,46 @@ class WidgetPlugin(private val activity: Activity) : Plugin(activity) {
       // Ohne Bildsuche geht ein wartendes Foto nirgends mehr hin.
       if (!a.bildsuche) WidgetActivity.foto(activity).delete()
       null
+    }
+  }
+
+  /**
+   * Einstellungen → Wetter: Ort, Einheit und ein eigenes Widget-Token ablegen.
+   * Das Token kommt aus der App (`POST /browser/wetter/widget-token`), wird
+   * hier sofort verschlüsselt und nie im Klartext gespeichert.
+   */
+  @Command
+  fun wetterSetzen(invoke: Invoke) {
+    val a = invoke.parseArgs(WetterSetzenArgs::class.java)
+    aufUi(activity, invoke) {
+      val basis = a.basis.trim().trimEnd('/')
+      require(wetterBasisErlaubt(basis)) { "Ungültige MSM-Adresse" }
+      val cipher = Schluesselfach.cipherZumAblegen("widget_wetter_token")
+      Schluesselfach.legeAb(activity, "widget_wetter_token", cipher, a.token)
+      val anzeigeOrt = listOf(a.ort, a.land).filter { it.isNotBlank() }.joinToString(", ")
+      activity.getSharedPreferences(WetterWidget.ABLAGE, Activity.MODE_PRIVATE).edit()
+        .putString("ort", anzeigeOrt)
+        .putFloat("lat", a.lat.toFloat())
+        .putFloat("lon", a.lon.toFloat())
+        .putString("einheit", a.einheit)
+        .putString("basis", basis)
+        .apply()
+      WetterWorker.planen(activity)
+      WetterWidget.zeichnenAlle(activity)
+      null
+    }
+  }
+
+  @Command
+  fun wetterLage(invoke: Invoke) {
+    aufUi(activity, invoke) { JSObject().put("lage", WetterWidget.lage(activity)) }
+  }
+
+  @Command
+  fun wetterAnheften(invoke: Invoke) {
+    aufUi(activity, invoke) {
+      WetterWorker.planen(activity)
+      JSObject().put("ok", WetterWidget.anheften(activity))
     }
   }
 }

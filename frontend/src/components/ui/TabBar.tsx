@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LucideIcon } from 'lucide-react'
 
@@ -53,6 +53,14 @@ interface TabBarProps<TId extends string> {
  */
 export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, embedded = false, einzeilig = false, kompakt = false }: TabBarProps<TId>) {
   const { t } = useTranslation()
+  const aktiverReiter = useRef<HTMLButtonElement | null>(null)
+
+  // Beim Öffnen einer Seite kann der aktive Reiter außerhalb der sichtbaren
+  // Leiste liegen; dann sieht man nicht, wo man ist. Nur die wischbare
+  // Handy-Leiste scrollt, die feste Seitenleiste bleibt stehen.
+  useEffect(() => {
+    if (einzeilig) aktiverReiter.current?.scrollIntoView?.({ block: 'nearest', inline: 'center' })
+  }, [active, einzeilig])
 
   return (
     <div
@@ -73,6 +81,7 @@ export function TabBar<TId extends string>({ tabs, active, onChange, ariaLabel, 
             type="button"
             role="tab"
             aria-selected={isActive}
+            ref={isActive ? aktiverReiter : undefined}
             onClick={(e) => {
               onChange(tab.id)
               if (einzeilig) e.currentTarget.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })

@@ -37,7 +37,7 @@ describe('Wo die Einträge stehen', () => {
 
   it('ordnet nach der Wahl des Nutzers, Neues folgt in der Grundordnung', () => {
     const namen = geordnet(ALLE_EINTRAEGE, ['downloads', 'singra']).map(leistenziel)
-    expect(namen).toEqual(['downloads', 'singra', 'messenger', 'notizen', 'kalender', 'tresor', 'lesezeichen', 'verlauf'])
+    expect(namen).toEqual(['downloads', 'singra', 'messenger', 'notizen', 'kalender', 'tresor', 'lesezeichen', 'verlauf', 'whatsapp', 'discord', 'telegram', 'instagram'])
   })
 
   it('öffnet aus dem Menü ein Panel und schließt das Menü', () => {
@@ -76,12 +76,30 @@ describe('Wo die Einträge stehen', () => {
         <Seitenleiste seite="links" />
       </>,
     )
-    expect(leistenNamen().slice(-4, -2)).toEqual(['Verlauf', 'Downloads'])
+    expect(leistenNamen().slice(6, 8)).toEqual(['Verlauf', 'Downloads'])
     fireEvent.click(screen.getByRole('button', { name: 'Downloads nach oben' }))
-    expect(leistenNamen().slice(-4, -2)).toEqual(['Downloads', 'Verlauf'])
+    expect(leistenNamen().slice(6, 8)).toEqual(['Downloads', 'Verlauf'])
     fireEvent.click(screen.getByRole('switch', { name: 'Verlauf' }))
     expect(leistenNamen()).not.toContain('Verlauf')
     expect(useEinstellungenStore.getState().ausgeblendet).toEqual(['verlauf'])
+  })
+
+  it('öffnet externe Messenger in der Seitenleiste und blendet sie aus', () => {
+    useEinstellungenStore.setState({ leiste: 'links' })
+    zeigen(
+      <>
+        <Anordnung />
+        <Seitenleiste seite="links" />
+      </>,
+    )
+    expect(leistenNamen()).toEqual(expect.arrayContaining(['WhatsApp', 'Discord', 'Telegram', 'Instagram']))
+    fireEvent.click(screen.getByRole('button', { name: 'WhatsApp' }))
+    expect(screen.getByTestId('ort')).toHaveTextContent('/whatsapp')
+    fireEvent.click(screen.getByRole('button', { name: 'WhatsApp' }))
+    expect(screen.getByTestId('ort')).toHaveTextContent('/')
+    fireEvent.click(screen.getByRole('switch', { name: 'WhatsApp' }))
+    expect(useEinstellungenStore.getState().ausgeblendet).toEqual(['whatsapp'])
+    expect(leistenNamen()).not.toContain('WhatsApp')
   })
 
   it('zieht das Panel links mit dem Griff auf seiner rechten Seite breiter', () => {

@@ -34,8 +34,9 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 @InvokeArg class TabArgs { lateinit var id: String }
+@InvokeArg class DunkelArgs { var an = false }
 @InvokeArg class LadenArgs { lateinit var id: String; lateinit var url: String; var privat = false }
-@InvokeArg class VorneArgs { var vorne: String? = null; var sekundaer: String? = null }
+@InvokeArg class VorneArgs { var vorne: String? = null; var sekundaer: String? = null; var panel: String? = null }
 @InvokeArg
 class SplitRahmenArgs {
   lateinit var primaerId: String
@@ -50,6 +51,7 @@ class SplitRahmenArgs {
   var sekundaerHoehe = 0.0
 }
 @InvokeArg class RahmenArgs { var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
+@InvokeArg class PanelRahmenArgs { lateinit var id: String; var x = 0.0; var y = 0.0; var breite = 0.0; var hoehe = 0.0 }
 @InvokeArg class AktionArgs { lateinit var id: String; lateinit var aktion: String }
 @InvokeArg class AntwortArgs { var nr = 0L; lateinit var antwort: String }
 @InvokeArg class SuchenArgs { lateinit var id: String; lateinit var richtung: String; var begriff = "" }
@@ -57,6 +59,18 @@ class SplitRahmenArgs {
 @InvokeArg class StandbildArgs { lateinit var id: String; var png = false }
 @InvokeArg class BildSpeichernArgs { lateinit var id: String; lateinit var name: String; var url = ""; lateinit var png: String }
 @InvokeArg class BildsucheArgs { lateinit var id: String; var privat = false; lateinit var url: String; lateinit var feld: String; var base64 = false }
+
+/** Persistente Profile der externen Dienste, getrennt von `seiten` und voneinander.
+ *  Muss zu `tabs::EXTERNE_PROFILE` in Rust passen. */
+internal val PANEL_PROFILE = listOf("aussen_whatsapp", "aussen_discord", "aussen_telegram", "aussen_instagram")
+
+internal fun panelProfil(id: String): String? = when (id) {
+  "tab-panel-whatsapp" -> PANEL_PROFILE[0]
+  "tab-panel-discord" -> PANEL_PROFILE[1]
+  "tab-panel-telegram" -> PANEL_PROFILE[2]
+  "tab-panel-instagram" -> PANEL_PROFILE[3]
+  else -> null
+}
 
 /**
  * Die Tabs unter Android (`src/tabs/android.rs`): je Tab eine WebView über
@@ -80,6 +94,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   private var vorne: String? = null
   private var split: SplitRahmenArgs? = null
   private var rahmen = RahmenArgs()
+  private var panel: PanelRahmenArgs? = null
   private var vollbild: Pair<View, WebChromeClient.CustomViewCallback>? = null
   private var privatProfil = PRIVAT + UUID.randomUUID()
   private val inhalt: ViewGroup get() = activity.findViewById(android.R.id.content)
@@ -160,7 +175,7 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun tabHolen(id: String, privat: Boolean): Tab = tabs.getOrPut(id) {
-    val profil = if (privat) privatProfil else SEITEN
+    val profil = if (privat) privatProfil else panelProfil(id) ?: SEITEN
     ProfileStore.getInstance().getOrCreateProfile(profil)
     Tab(this, activity, id, privat, profil).also {
       if (mitWorkerPruefung.add(profil)) workerPruefen(profil)
@@ -195,13 +210,32 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     val a = invoke.parseArgs(VorneArgs::class.java)
     aufUi(activity, invoke) {
       vorne = a.vorne
+      if (a.panel == null) panel = null
       val sekundaer = a.sekundaer
       for ((id, tab) in tabs) {
-        val istSichtbar = id == vorne || (sekundaer != null && id == sekundaer)
+        val istSichtbar = id == vorne || (sekundaer != null && id == sekundaer) || (a.panel != null && panel?.id == id)
         tab.sichtbar(istSichtbar)
       }
       zurueckPruefen()
       null
+    }
+  }
+
+  @Command
+  fun panelRahmen(invoke: Invoke) {
+    val a = invoke.parseArgs(PanelRahmenArgs::class.java)
+    aufUi(activity, invoke) {
+      panel = a
+      tabs[a.id]?.webView?.layoutParams = panelPlatz(a)
+      null
+    }
+  }
+
+  private fun panelPlatz(a: PanelRahmenArgs): FrameLayout.LayoutParams {
+    val d = activity.resources.displayMetrics.density
+    return FrameLayout.LayoutParams((a.breite * d).toInt(), (a.hoehe * d).toInt()).apply {
+      leftMargin = (a.x * d).toInt()
+      topMargin = (a.y * d).toInt()
     }
   }
 
@@ -227,7 +261,9 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
   fun splitAufheben(invoke: Invoke) {
     aufUi(activity, invoke) {
       split = null
-      for (tab in tabs.values) tab.webView.layoutParams = platz()
+      for ((id, tab) in tabs) {
+        if (panel?.id != id) tab.webView.layoutParams = platz()
+      }
       null
     }
   }
@@ -238,7 +274,9 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     aufUi(activity, invoke) {
       rahmen = a
       if (split == null) {
-        for (tab in tabs.values) tab.webView.layoutParams = platz()
+        for ((id, tab) in tabs) {
+          if (panel?.id != id) tab.webView.layoutParams = platz()
+        }
       }
       null
     }
@@ -259,10 +297,13 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     aufUi(activity, invoke) {
       tabs.remove(a.id)?.let { wegraeumen(it) }
       if (vorne == a.id) vorne = null
+      if (panel?.id == a.id) panel = null
       val splitInfo = split
       if (splitInfo != null && (splitInfo.primaerId == a.id || splitInfo.sekundaerId == a.id)) {
         split = null
-        for (tab in tabs.values) tab.webView.layoutParams = platz()
+        for ((id, tab) in tabs) {
+          if (panel?.id != id) tab.webView.layoutParams = platz()
+        }
       }
       zurueckPruefen()
       null
@@ -278,7 +319,19 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** Einstellungen → Design: Seiten dunkel rendern, auch in neuen Tabs. */
+  @Command
+  fun dunkel(invoke: Invoke) {
+    val args = invoke.parseArgs(DunkelArgs::class.java)
+    aufUi(activity, invoke) {
+      Tab.seitenDunkel = args.an
+      tabs.values.forEach { it.dunkelSetzen(args.an) }
+      null
+    }
+  }
+
   private fun wegraeumen(tab: Tab) {
+    TabChrome.verwerfen(tab.id)
     Rueckfragen.tabWeg(tab.id)
     herunterladen.seiteWeg(tab.id)
     inhalt.removeView(tab.webView)
@@ -391,14 +444,17 @@ class TabsPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Cookies, Speicher und Cache im Profil [SEITEN]; private Profile fallen mit ihrem Tab. */
+  /** Cookies, Speicher und Cache im Profil [SEITEN] und in den getrennten
+   *  Messenger-Profilen; private Profile fallen mit ihrem Tab. */
   @Command
   fun datenLeeren(invoke: Invoke) {
     aufUi(activity, invoke) {
-      val offen = tabs.values.firstOrNull { !it.privat }?.webView
-      val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, SEITEN) }
-      profilLeeren(SEITEN, ansicht)
-      if (offen == null) ansicht.destroy()
+      for (name in listOf(SEITEN) + PANEL_PROFILE) {
+        val offen = tabs.values.firstOrNull { !it.privat && it.profil == name }?.webView
+        val ansicht = offen ?: WebView(activity).also { androidx.webkit.WebViewCompat.setProfile(it, name) }
+        profilLeeren(name, ansicht)
+        if (offen == null) ansicht.destroy()
+      }
       null
     }
   }

@@ -25,10 +25,25 @@ use crate::tabs::{id_pruefen, weg, ziel_pruefen, Tabs, Weg};
 
 pub const EREIGNIS: &str = "msb:widget";
 
+/// Antwort der System-Spracherkennung für die Oberfläche (`WidgetPlugin.kt`).
+/// `fehler` ist ein stabiler Code, kein Satz für die Anzeige.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SprachEingabe {
+    pub text: Option<String>,
+    pub fehler: Option<String>,
+}
+
 /// `{art: "suche" | "text" | "bild", text?}` oder nichts.
 #[tauri::command(async)]
 pub fn widget_start(app: AppHandle) -> Result<Option<Value>, String> {
     plattform::start(&app)
+}
+
+/// Öffnet unter Android die eingerichtete System-Spracherkennung; auf dem
+/// Desktop gibt es diesen Weg nicht.
+#[tauri::command(async)]
+pub fn widget_sprache(app: AppHandle) -> Result<SprachEingabe, String> {
+    plattform::sprache(&app)
 }
 
 /// Die gewählte Suchmaschine sucht Bilder: das Widget zeigt die Kamera.
@@ -48,6 +63,31 @@ pub fn widget_lage(app: AppHandle) -> Result<String, String> {
 #[tauri::command(async)]
 pub fn widget_anheften(app: AppHandle) -> Result<bool, String> {
     plattform::anheften(&app)
+}
+
+/// Konfiguriert das Wetter-Widget: Ort, Einheit und das eng begrenzte
+/// Widget-Token. Die MSM-Adresse kommt aus der Kopplung, nicht aus der Seite.
+#[tauri::command(async)]
+pub fn widget_wetter_setzen(
+    app: AppHandle,
+    ort: String,
+    land: String,
+    lat: f64,
+    lon: f64,
+    einheit: String,
+    token: String,
+) -> Result<(), String> {
+    plattform::wetter_setzen(&app, &ort, &land, lat, lon, &einheit, &token)
+}
+
+#[tauri::command(async)]
+pub fn widget_wetter_lage(app: AppHandle) -> Result<String, String> {
+    plattform::wetter_lage(&app)
+}
+
+#[tauri::command(async)]
+pub fn widget_wetter_anheften(app: AppHandle) -> Result<bool, String> {
+    plattform::wetter_anheften(&app)
 }
 
 /// Nach der Suche aus dem Widget: die Tastatur für die Adresszeile, die

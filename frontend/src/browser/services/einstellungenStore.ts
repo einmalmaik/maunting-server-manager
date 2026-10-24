@@ -7,6 +7,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 import { ablage, passend } from './ablage'
+import { schnellzugriffeZusammenfuehren } from './importDaten'
+import type { ImportTopSite } from './nativ'
 import { wirksameSuche, type SuchmaschinenId } from './searchEngines'
 import { istGekoppelt, useSitzung } from './sitzung'
 
@@ -29,7 +31,7 @@ export const EIGENES_BILD_MAX_BYTES = 3 * 1024 * 1024
 export type Modul = 'singra' | 'messenger' | 'notizen' | 'kalender' | 'tresor'
 
 /** Was in Leiste oder Menü steht und sich ordnen lässt: die Module und die Listen des Browsers. */
-export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads'
+export type Leistenziel = Modul | 'lesezeichen' | 'verlauf' | 'downloads' | 'whatsapp' | 'discord' | 'telegram' | 'instagram'
 
 /** Knöpfe in Kopf- und Navigationsleiste, die man ausblenden kann. */
 export type Knopf = 'neuLaden' | 'schild' | 'stern' | 'screenshot' | 'erweiterungen' | 'privaterTab'
@@ -63,8 +65,34 @@ export const VORGABE_SCHNELLZUGRIFFE: Schnellzugriff[] = [
 ]
 
 /** Kästen unter den Schnellzugriffen; Termine und Notizen nur gekoppelt. */
-export type Widget = 'uhr' | 'termine' | 'notizen' | 'zuletzt' | 'nachrichten'
-export const WIDGETS: Widget[] = ['uhr', 'termine', 'notizen', 'zuletzt', 'nachrichten']
+export type Widget = 'wetter' | 'uhr' | 'termine' | 'notizen' | 'zuletzt' | 'nachrichten'
+export const WIDGETS: Widget[] = ['wetter', 'uhr', 'termine', 'notizen', 'zuletzt', 'nachrichten']
+
+/** Gewählter Wetterort; die Koordinaten gehen nur an die eigene MSM-Instanz. */
+export interface WetterOrt {
+  name: string
+  land: string
+  lat: number
+  lon: number
+}
+
+/** Ein gespeicherter oder gelieferter Ort muss vollständig und endlich sein. */
+export function istWetterOrt(wert: unknown): wert is WetterOrt {
+  if (!wert || typeof wert !== 'object') return false
+  const ort = wert as Record<string, unknown>
+  return (
+    typeof ort.name === 'string' &&
+    typeof ort.land === 'string' &&
+    typeof ort.lat === 'number' &&
+    Number.isFinite(ort.lat) &&
+    ort.lat >= -90 &&
+    ort.lat <= 90 &&
+    typeof ort.lon === 'number' &&
+    Number.isFinite(ort.lon) &&
+    ort.lon >= -180 &&
+    ort.lon <= 180
+  )
+}
 
 /** Themen der Nachrichten; die Suchbegriffe dazu stehen im Backend (`browser_nachrichten_service.THEMEN`). */
 export type NachrichtenThema = 'technik' | 'gaming' | 'politik' | 'wirtschaft' | 'wissenschaft' | 'sport'
@@ -108,6 +136,9 @@ interface EinstellungenZustand {
   widgetOrdnung: Widget[]
   /** „Zuletzt besucht“ ist anfangs aus: die Startseite zeigt sonst den Verlauf jedem, der mitschaut. */
   widgetsAus: Widget[]
+  /** Wetterort und Einheit für Startseite und Homescreen-Widget. */
+  wetterOrt: WetterOrt | null
+  wetterEinheit: 'celsius' | 'fahrenheit'
   /** Welche Themen das Nachrichten-Widget zeigt; gefiltert wird nur hier, der Server liefert allen dasselbe. */
   nachrichtenThemen: NachrichtenThema[]
   /** Schlagworte, durch Komma getrennt; leer heißt alles aus den Themen. */
@@ -127,9 +158,13 @@ interface EinstellungenZustand {
   vertikaleTabsEingeklappt: boolean
   /** Beim Kopieren von URLs Tracking-Parameter automatisch entfernen. */
   cleanCopy: boolean
+  /** Seiten bevorzugt dunkel rendern (Design → Darstellung der Seiten). */
+  seitenDunkel: boolean
 
-  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten'>>) => void
+  setzen: (teil: Partial<Omit<EinstellungenZustand, 'setzen' | 'umschalten' | 'schnellzugriffeImportieren'>>) => void
   umschalten: (was: Ausblendbar) => void
+  /** Top-Sites eines Browserimports; die Standardkacheln weichen nur, wenn sie unverändert sind. */
+  schnellzugriffeImportieren: (neu: ImportTopSite[]) => number
 }
 
 /**
@@ -171,6 +206,8 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       schnellzugriffe: VORGABE_SCHNELLZUGRIFFE,
       widgetOrdnung: [],
       widgetsAus: ['zuletzt'],
+      wetterOrt: null,
+      wetterEinheit: 'celsius',
       nachrichtenThemen: NACHRICHTEN_THEMEN,
       nachrichtenWorte: '',
       statistikZeigen: true,
@@ -182,12 +219,28 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       tabAusrichtung: 'vertikal',
       vertikaleTabsEingeklappt: false,
       cleanCopy: true,
+      seitenDunkel: false,
 
       setzen: (teil) => set(teil),
       umschalten: (was) =>
         set((s) => ({
           ausgeblendet: s.ausgeblendet.includes(was) ? s.ausgeblendet.filter((m) => m !== was) : [...s.ausgeblendet, was],
         })),
+
+      schnellzugriffeImportieren: (neu) => {
+        let uebernommen = 0
+        set((s) => {
+          const ergebnis = schnellzugriffeZusammenfuehren(
+            s.schnellzugriffe,
+            neu,
+            VORGABE_SCHNELLZUGRIFFE,
+            SCHNELLZUGRIFFE_MAX,
+          )
+          uebernommen = ergebnis.uebernommen
+          return { schnellzugriffe: ergebnis.schnellzugriffe }
+        })
+        return uebernommen
+      },
     }),
     // Neue Felder brauchen keine neue Version: was der gespeicherte Stand
     // nicht kennt, kommt aus den Vorgaben oben (flaches Zusammenführen).
@@ -212,6 +265,12 @@ export const useEinstellungenStore = create<EinstellungenZustand>()(
       },
       merge: (gespeichert, aktuell) => {
         const g = passend(aktuell, gespeichert)
+        // `passend` nimmt bei einer Vorgabe `null` keine Objekte an; der Ort
+        // ist aber genau das. Deshalb ausdrücklich prüfen und übernehmen.
+        const ort = (gespeichert as { wetterOrt?: unknown } | null)?.wetterOrt
+        if (istWetterOrt(ort)) g.wetterOrt = ort
+        else delete g.wetterOrt
+        if (g.wetterEinheit !== 'celsius' && g.wetterEinheit !== 'fahrenheit') delete g.wetterEinheit
         return { ...aktuell, ...g, schnellzugriffe: g.schnellzugriffe ?? bisherigeKacheln() ?? aktuell.schnellzugriffe }
       },
     },

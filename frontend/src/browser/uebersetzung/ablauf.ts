@@ -23,8 +23,12 @@ const engine = () => import('./engine')
 
 export type Stand =
   | { art: 'erkennen' }
-  /** Wartet auf die Wahl der Sprachen bzw. die Zustimmung zum Laden. */
-  | { art: 'wahl'; fehlt: number | null }
+  /**
+   * Wartet auf die Wahl der Sprachen bzw. die Zustimmung zum Laden.
+   * `seitenSprache` steht nur da, wenn die Seite eine Sprache nennt, für die es
+   * keine Modelle gibt; die Leiste sagt das dann, statt nur zu schweigen.
+   */
+  | { art: 'wahl'; fehlt: number | null; seitenSprache?: string }
   | { art: 'laden'; geladen: number; gesamt: number }
   | { art: 'uebersetzen'; texte: number }
   | { art: 'fertig' }
@@ -101,12 +105,13 @@ export const useUebersetzung = create<Zustand>()((set, get) => {
     set((s) => ({ eintraege: { ...s.eintraege, [tab]: { ...(s.eintraege[tab] as Eintrag), ...teil, lauf } } }))
     return lauf
   }
-  const fehlt = async (tab: string, lauf: number) => {
+  const fehlt = async (tab: string, lauf: number, seitenSprache?: string) => {
     const e = get().eintraege[tab]
     const { weg, fehlendeGroesse } = await modelle()
     const paare = e && weg(e.von, e.nach)
     const groesse = paare ? await fehlendeGroesse(paare).catch(() => null) : null
-    gilt(tab, lauf, { stand: { art: 'wahl', fehlt: groesse } })
+    const stand: Stand = seitenSprache ? { art: 'wahl', fehlt: groesse, seitenSprache } : { art: 'wahl', fehlt: groesse }
+    gilt(tab, lauf, { stand })
     return groesse
   }
 
@@ -117,15 +122,20 @@ export const useUebersetzung = create<Zustand>()((set, get) => {
       if (!istWebseite(url)) return
       const lauf = neuerLauf(id, { url, von: '', nach: appSprache, stand: { art: 'erkennen' } })
       let von = ''
+      let roh = ''
       try {
         const { sprache } = await anfragen(id, url, 'start')
+        roh = sprache
         von = (await modelle()).spracheVon(sprache)
       } catch {
         // Ohne Antwort wählt der Nutzer selbst.
       }
       const nach = von === appSprache ? (appSprache === 'en' ? 'de' : 'en') : appSprache
       if (!gilt(id, lauf, { von, nach })) return
-      if ((await fehlt(id, lauf)) === 0 && gilt(id, lauf)) await get().starten(id)
+      // Eine erkannte, aber nicht unterstützte Sprache nennen; sonst steht die
+      // Leiste nur vor der Sprachwahl und sagt nicht, warum.
+      const seitenSprache = roh && !von ? roh : ''
+      if ((await fehlt(id, lauf, seitenSprache || undefined)) === 0 && gilt(id, lauf)) await get().starten(id)
     },
 
     waehlen: async (tab, teil) => {
@@ -137,8 +147,12 @@ export const useUebersetzung = create<Zustand>()((set, get) => {
       const { weg, fehlendeGroesse } = await modelle()
       const { bereitmachen, uebersetzen } = await engine()
       const e = get().eintraege[tab]
-      const paare = e && weg(e.von, e.nach)
-      if (!e || !paare) return
+      if (!e) return
+      const paare = weg(e.von, e.nach)
+      if (!paare) {
+        gilt(tab, e.lauf, { stand: { art: 'fehler', grund: 'paar' } })
+        return
+      }
       const lauf = neuerLauf(tab, { stand: { art: 'laden', geladen: 0, gesamt: 0 } })
       const abbruch = new AbortController()
       abbrueche.set(tab, abbruch)

@@ -32,7 +32,7 @@ describe('LesemodusKnopf', () => {
   it('wird nicht auf internen Browserseiten oder ohne Tab angezeigt', () => {
     const tab: Tab = {
       ...leererTab('tab-intern'),
-      url: 'msb://einstellungen/suche',
+      url: 'pontis://einstellungen/suche',
     }
     const { container, rerender } = render(<LesemodusKnopf tab={tab} />)
     expect(container.firstChild).toBeNull()
