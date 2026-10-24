@@ -11,14 +11,15 @@
 #
 # Endpunkte (nur Loopback):
 #   GET /health
-#   GET /orte?q=Berlin
+#   GET /orte?q=10115 (oder Ort / PLZ weltweit: 90210, 75001, Berlin)
 #   GET /wetter?lat=52.52&lon=13.405
 #
 # Quellen und Lizenzen:
 #   NOAA GFS – öffentliche Daten der NOAA/NCEP (public domain).
-#   Ortsliste – GeoNames cities5000, CC BY 4.0 (https://www.geonames.org/).
+#   Ortsliste & Postleitzahlen – GeoNames cities5000 & postalCodes, CC BY 4.0 (https://www.geonames.org/).
 #   DWD-Warnungen – Deutscher Wetterdienst, GeoNutzV; Pflichtzeile
 #   „Quelle: Deutscher Wetterdienst“.
 #
-# Erststart: Der Sidecar lädt die Ortsliste und den aktuellen GFS-Lauf. Bis
+# Erststart: Der Sidecar lädt die Postleitzahlen (postalCodes.zip) in eine lokale
+# SQLite-Datenbank (plz.sqlite), die Ortsliste und den aktuellen GFS-Lauf. Bis
 # dahin antwortet /health mit bereit=false; MSM zeigt dann „wird vorbereitet“.

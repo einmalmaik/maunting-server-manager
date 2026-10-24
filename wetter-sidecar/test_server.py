@@ -27,6 +27,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     # Der Lader und die DWD-Schleife würden sonst Netzzugriffe im Hintergrund
     # starten; die Tests prüfen nur die Antworten auf kaputte Eingaben.
     monkeypatch.setattr(server, "lader_starten", lambda: None)
+    monkeypatch.setattr(server, "plz_lader_starten", lambda: None)
     monkeypatch.setattr(server, "_warn_lader", lambda: None)
     return TestClient(server.app)
 
@@ -153,3 +154,75 @@ def test_wetter_url_enthaelt_lauf_und_stunde() -> None:
     assert "gfs.t06z.pgrb2full.0p50.f003" in url
     assert "gfs.20261022" in url
     assert "subregion=" in url
+
+
+def test_plz_suche_findet_standorte_weltweit_ohne_einwohner_leak(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    db_pfad = tmp_path / "plz.sqlite"
+    monkeypatch.setattr(server, "PLZ_DB", db_pfad)
+
+    import sqlite3
+    conn = sqlite3.connect(db_pfad)
+    server._plz_db_init(conn)
+    test_eintraege = [
+        ("DE", "10115", "Berlin", server._normal("Berlin"), "Berlin", 52.52, 13.405),
+        ("US", "90210", "Beverly Hills", server._normal("Beverly Hills"), "California", 34.0901, -118.4065),
+        ("FR", "75001", "Paris 01", server._normal("Paris 01"), "Île-de-France", 48.86, 2.34),
+    ]
+    conn.executemany(
+        "INSERT INTO plz (land, code, name, ascii_name, bundesland, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        test_eintraege,
+    )
+    conn.commit()
+    conn.close()
+
+    # 1. Deutsche PLZ
+    de_treffer = server.orte_suchen("10115")
+    assert len(de_treffer) >= 1
+    assert de_treffer[0]["land"] == "DE"
+    assert "10115" in de_treffer[0]["name"]
+    assert "Berlin" in de_treffer[0]["name"]
+    assert "einwohner" not in de_treffer[0]
+    assert set(de_treffer[0].keys()) == {"name", "land", "lat", "lon"}
+
+    # 2. US ZIP Code
+    us_treffer = server.orte_suchen("90210")
+    assert len(us_treffer) >= 1
+    assert us_treffer[0]["land"] == "US"
+    assert "Beverly Hills" in us_treffer[0]["name"]
+    assert "einwohner" not in us_treffer[0]
+
+    # 3. Französische PLZ
+    fr_treffer = server.orte_suchen("75001")
+    assert len(fr_treffer) >= 1
+    assert fr_treffer[0]["land"] == "FR"
+    assert "Paris" in fr_treffer[0]["name"]
+
+    # 4. Suche nach Name in der PLZ-Tabelle
+    name_treffer = server.orte_suchen("Berlin")
+    assert len(name_treffer) >= 1
+    assert any("Berlin" in t["name"] for t in name_treffer)
+
+    # 5. Suche kombiniert mit PLZ und Name
+    kombi_treffer = server.orte_suchen("10115 Berlin")
+    assert len(kombi_treffer) >= 1
+    assert "Berlin" in kombi_treffer[0]["name"]
+
+
+def test_kleinorte_ohne_einwohnerfilter_in_cities5000(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # PLZ DB leer / nicht vorhanden -> Fallback auf cities5000
+    monkeypatch.setattr(server, "PLZ_DB", tmp_path / "nicht_vorhanden.sqlite")
+    monkeypatch.setattr(server, "_orte", None)
+
+    staedte_datei = tmp_path / "cities5000.txt"
+    monkeypatch.setattr(server, "ORTE_DATEI", staedte_datei)
+
+    # Ein Ort mit nur 4500 Einwohnern (wurde früher durch < 15000 gefiltert)
+    zeile = "12345\tMusterdorf\tMusterdorf\t\t50.1\t10.2\tP\tPPL\tDE\t\t\t\t\t\t4500\t\t\tEurope/Berlin\t2026-01-01"
+    staedte_datei.write_text(zeile + "\n", encoding="utf-8")
+
+    treffer = server.orte_suchen("Musterdorf")
+    assert len(treffer) == 1
+    assert treffer[0]["name"] == "Musterdorf"
+    assert treffer[0]["land"] == "DE"
+    assert "einwohner" not in treffer[0]
+
