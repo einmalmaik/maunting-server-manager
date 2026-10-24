@@ -18,6 +18,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import sqlite3
 import threading
 import time
 import unicodedata
@@ -32,8 +33,10 @@ from fastapi import FastAPI, HTTPException, Query
 DATEN = Path(os.environ.get("MSM_WETTER_DATEN", "/daten"))
 GFS = DATEN / "gfs"
 ORTE_DATEI = DATEN / "cities5000.txt"
+PLZ_DB = DATEN / "plz.sqlite"
 STATE = DATEN / "state.json"
 CITIES_URL = "https://download.geonames.org/export/dump/cities5000.zip"
+PLZ_ZIP_URL = "https://download.geonames.org/export/zip/postalCodes.zip"
 NOMADS = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p50.pl"
 VARIABLEN = (
     "var_TMP=on&var_RH=on&var_UGRD=on&var_VGRD=on&var_TCDC=on&var_PRATE=on"
@@ -53,16 +56,106 @@ app = FastAPI(title="MSM Wetter-Sidecar", docs_url=None, redoc_url=None)
 _state_lock = threading.Lock()
 _orte: list[dict[str, Any]] | None = None
 _orte_lock = threading.Lock()
+_plz_lock = threading.Lock()
 
 
 def _log(text: str) -> None:
     print(f"[wetter] {text}", flush=True)
 
 
-# ---------------------------------------------------------------- Orte
+# ---------------------------------------------------------------- Orte & PLZ
 def _normal(text: str) -> str:
     text = unicodedata.normalize("NFKD", text.casefold())
     return "".join(c for c in text if not unicodedata.combining(c))
+
+
+def _plz_db_init(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plz (
+            land TEXT NOT NULL,
+            code TEXT NOT NULL,
+            name TEXT NOT NULL,
+            ascii_name TEXT NOT NULL,
+            bundesland TEXT,
+            lat REAL NOT NULL,
+            lon REAL NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plz_code ON plz(code)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plz_ascii ON plz(ascii_name)")
+
+
+def _plz_db_bereit() -> bool:
+    return PLZ_DB.exists() and PLZ_DB.stat().st_size > 1024
+
+
+def _plz_db_laden() -> None:
+    """Lädt die weltweiten Postleitzahlen von GeoNames herunter und indiziert sie lokal in SQLite."""
+    DATEN.mkdir(parents=True, exist_ok=True)
+    if _plz_db_bereit() and (time.time() - PLZ_DB.stat().st_mtime <= 60 * 86400):
+        return
+    with _plz_lock:
+        if _plz_db_bereit() and (time.time() - PLZ_DB.stat().st_mtime <= 60 * 86400):
+            return
+        tmp_db = DATEN / "plz.sqlite.tmp"
+        if tmp_db.exists():
+            tmp_db.unlink()
+        try:
+            _log(f"Lade weltweite Postleitzahlen von {PLZ_ZIP_URL} ...")
+            with httpx.stream("GET", PLZ_ZIP_URL, timeout=120, follow_redirects=True, headers=KOPF) as antwort:
+                antwort.raise_for_status()
+                roh = b"".join(antwort.iter_bytes())
+            with zipfile.ZipFile(io.BytesIO(roh)) as archiv:
+                with archiv.open("postalCodes.txt") as datei:
+                    conn = sqlite3.connect(tmp_db)
+                    conn.execute("PRAGMA synchronous = OFF")
+                    conn.execute("PRAGMA journal_mode = MEMORY")
+                    _plz_db_init(conn)
+                    stapel: list[tuple[str, str, str, str, str, float, float]] = []
+                    for zeile_bytes in datei:
+                        zeile = zeile_bytes.decode("utf-8", errors="replace").strip()
+                        if not zeile:
+                            continue
+                        f = zeile.split("\t")
+                        if len(f) < 11:
+                            continue
+                        land, code, name = f[0].strip(), f[1].strip(), f[2].strip()
+                        bundesland = f[3].strip() if len(f) > 3 else ""
+                        try:
+                            lat = float(f[9])
+                            lon = float(f[10])
+                        except ValueError:
+                            continue
+                        if not code or not name:
+                            continue
+                        ascii_name = _normal(name)
+                        stapel.append((land, code, name, ascii_name, bundesland, lat, lon))
+                        if len(stapel) >= 10000:
+                            conn.executemany(
+                                "INSERT INTO plz (land, code, name, ascii_name, bundesland, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                stapel,
+                            )
+                            stapel.clear()
+                    if stapel:
+                        conn.executemany(
+                            "INSERT INTO plz (land, code, name, ascii_name, bundesland, lat, lon) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            stapel,
+                        )
+                    conn.commit()
+                    conn.close()
+            tmp_db.replace(PLZ_DB)
+            _log(f"Postleitzahlen-Datenbank bereit ({PLZ_DB.stat().st_size} Bytes)")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"Postleitzahlen konnten nicht geladen werden: {exc}")
+            if tmp_db.exists():
+                tmp_db.unlink()
+
+
+def plz_lader_starten() -> None:
+    if not any(t.name == "plz-lader" for t in threading.enumerate()):
+        threading.Thread(target=_plz_db_laden, name="plz-lader", daemon=True).start()
 
 
 def _orte_laden() -> list[dict[str, Any]]:
@@ -92,8 +185,6 @@ def _orte_laden() -> list[dict[str, Any]]:
                     lat, lon = float(felder[4]), float(felder[5])
                 except ValueError:
                     continue
-                if einwohner < 15000:
-                    continue
                 name, ascii_name, land = felder[1], felder[2], felder[8]
                 if not name:
                     continue
@@ -103,23 +194,84 @@ def _orte_laden() -> list[dict[str, Any]]:
 
 
 def orte_suchen(q: str) -> list[dict[str, Any]]:
-    begriff = _normal(q.strip())
+    eingabe = q.strip()
+    begriff = _normal(eingabe)
     if len(begriff) < 2:
         return []
-    treffer = []
+
+    treffer: list[dict[str, Any]] = []
+    gesehen: set[tuple[str, str, float, float]] = set()
+
+    # 1. Lokale SQLite-PLZ-Suche (falls vorhanden)
+    if _plz_db_bereit():
+        try:
+            conn = sqlite3.connect(f"file:{PLZ_DB}?mode=ro", uri=True)
+            teile = eingabe.split()
+            # Wenn mehrere Teile (z. B. "10115 Berlin" oder "Berlin 10115")
+            if len(teile) >= 2 and any(t.isdigit() for t in teile):
+                code_teil = next((t for t in teile if t.isdigit()), "")
+                name_teil = _normal(" ".join(t for t in teile if not t.isdigit()))
+                cur = conn.execute(
+                    "SELECT code, name, land, lat, lon FROM plz WHERE code LIKE ? AND ascii_name LIKE ? LIMIT 20",
+                    (f"{code_teil}%", f"{name_teil}%"),
+                )
+            elif any(c.isdigit() for c in eingabe):
+                # Vorwiegend PLZ (z. B. 10115, 90210, 75001)
+                cur = conn.execute(
+                    "SELECT code, name, land, lat, lon FROM plz WHERE code LIKE ? LIMIT 20",
+                    (f"{eingabe}%",),
+                )
+            else:
+                # Ortsname in der PLZ-Tabelle
+                cur = conn.execute(
+                    "SELECT code, name, land, lat, lon FROM plz WHERE ascii_name LIKE ? ORDER BY length(name) LIMIT 20",
+                    (f"{begriff}%",),
+                )
+            for code, name, land, lat, lon in cur.fetchall():
+                anzeige_name = f"{code} {name}" if code and not name.startswith(code) else name
+                schluessel = (land, anzeige_name, round(lat, 2), round(lon, 2))
+                if schluessel not in gesehen:
+                    gesehen.add(schluessel)
+                    treffer.append({
+                        "name": anzeige_name,
+                        "land": land,
+                        "lat": round(lat, 4),
+                        "lon": round(lon, 4),
+                    })
+            conn.close()
+        except Exception as exc:  # noqa: BLE001
+            _log(f"Fehler bei PLZ-Suche: {exc}")
+
+    # Wenn bereits genügend Treffer (z. B. bei gezielter PLZ-Eingabe), direkt liefern
+    if len(treffer) >= 10:
+        return treffer[:10]
+
+    # 2. Ergänzende Ortssuche über GeoNames cities
+    staedte_treffer = []
     for ort in _orte_laden():
         name = _normal(ort["name"])
         ascii_name = _normal(ort["ascii"])
         if not (name.startswith(begriff) or ascii_name.startswith(begriff)):
             continue
-        treffer.append(ort)
-        if len(treffer) >= 400:
+        staedte_treffer.append(ort)
+        if len(staedte_treffer) >= 200:
             break
-    treffer.sort(key=lambda o: o["einwohner"], reverse=True)
-    return [
-        {k: o[k] for k in ("name", "land", "lat", "lon", "einwohner")}
-        for o in treffer[:10]
-    ]
+    staedte_treffer.sort(key=lambda o: o["einwohner"], reverse=True)
+
+    for o in staedte_treffer:
+        schluessel = (o["land"], o["name"], round(o["lat"], 2), round(o["lon"], 2))
+        if schluessel not in gesehen:
+            gesehen.add(schluessel)
+            treffer.append({
+                "name": o["name"],
+                "land": o["land"],
+                "lat": round(o["lat"], 4),
+                "lon": round(o["lon"], 4),
+            })
+            if len(treffer) >= 10:
+                break
+
+    return treffer[:10]
 
 
 # ---------------------------------------------------------------- DWD-Warnungen
@@ -421,8 +573,11 @@ def vorhersage(lat: float, lon: float) -> dict[str, Any]:
 # ---------------------------------------------------------------- HTTP
 @app.on_event("startup")
 def starten() -> None:
+    if "pytest" in sys.modules or "PYTEST_CURRENT_TEST" in os.environ:
+        return
     DATEN.mkdir(parents=True, exist_ok=True)
     lader_starten()
+    plz_lader_starten()
     if not any(t.name == "dwd-warnungen" for t in threading.enumerate()):
         threading.Thread(target=_warn_lader, name="dwd-warnungen", daemon=True).start()
 
@@ -430,7 +585,7 @@ def starten() -> None:
 @app.get("/health")
 def health() -> dict[str, Any]:
     bereit = STATE.exists()
-    return {"ok": bereit, "bereit": bereit, "orte": len(_orte or [])}
+    return {"ok": bereit, "bereit": bereit, "orte": len(_orte or []), "plz": _plz_db_bereit()}
 
 
 @app.get("/orte")
